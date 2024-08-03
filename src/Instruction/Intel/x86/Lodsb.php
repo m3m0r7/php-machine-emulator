@@ -5,6 +5,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Lodsb implements InstructionInterface
@@ -18,6 +19,29 @@ class Lodsb implements InstructionInterface
 
     public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
     {
+        $previousPos = $runtime->streamReader()->offset();
+
+        $si = $runtime
+            ->memoryAccessor()
+            ->fetch(RegisterType::ESI);
+
+
+        $runtime
+            ->streamReader()
+            ->setOffset($si - $runtime->memoryAccessor()->fetch(RegisterType::ESP));
+
+        $runtime->memoryAccessor()
+            ->write(
+                RegisterType::EAX,
+                $runtime->streamReader()->byte(),
+            );
+
+        $runtime
+            ->memoryAccessor()
+            ->increment(RegisterType::ESI);
+
+        $runtime->streamReader()->setOffset($previousPos);
+
         return ExecutionStatus::SUCCESS;
     }
 }

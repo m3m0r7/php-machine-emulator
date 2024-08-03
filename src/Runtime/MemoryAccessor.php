@@ -14,7 +14,6 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function __construct(protected RuntimeInterface $runtime)
     {
-
     }
 
     public function allocate(int $address): self
@@ -44,6 +43,17 @@ class MemoryAccessor implements MemoryAccessorInterface
         $this->memory[$address] = $value;
 
         $this->zeroFlag = $value === 0;
+
+        return $this;
+    }
+
+    public function increment(int|RegisterType $registerType): self
+    {
+        $this
+            ->write(
+                $registerType,
+                $this->fetch($registerType) + 1
+            );
 
         return $this;
     }
