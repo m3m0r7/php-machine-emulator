@@ -22,7 +22,7 @@ class Runtime implements RuntimeInterface
     {
         $this->register = $this->instructionList->register();
         $this->frame = new Frame($this);
-        $this->memoryAccessor = new MemoryAccessor();
+        $this->memoryAccessor = new MemoryAccessor($this);
     }
 
     public function start(int $entrypoint = 0x0000): void

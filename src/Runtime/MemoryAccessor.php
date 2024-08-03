@@ -5,11 +5,17 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Runtime;
 
 use PHPMachineEmulator\Exception\MemoryAccessorException;
+use PHPMachineEmulator\Instruction\RegisterType;
 
 class MemoryAccessor implements MemoryAccessorInterface
 {
     protected array $memory = [];
     protected bool $zeroFlag = false;
+
+    public function __construct(protected RuntimeInterface $runtime)
+    {
+
+    }
 
     public function allocate(int $address): self
     {
@@ -22,18 +28,20 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this;
     }
 
-    public function fetch(int $registerType): int|null
+    public function fetch(int|RegisterType $registerType): int|null
     {
-        $this->validateMemoryAddressWasAllocated($registerType);
+        $address = $this->asAddress($registerType);
+        $this->validateMemoryAddressWasAllocated($address);
 
-        return $this->memory[$registerType];
+        return $this->memory[$address];
     }
 
-    public function write(int $registerType, int|null $value): self
+    public function write(int|RegisterType $registerType, int|null $value): self
     {
-        $this->validateMemoryAddressWasAllocated($registerType);
+        $address = $this->asAddress($registerType);
+        $this->validateMemoryAddressWasAllocated($address);
 
-        $this->memory[$registerType] = $value;
+        $this->memory[$address] = $value;
 
         $this->zeroFlag = $value === 0;
 
@@ -43,6 +51,14 @@ class MemoryAccessor implements MemoryAccessorInterface
     public function shouldZeroFlag(): bool
     {
         return $this->zeroFlag;
+    }
+
+    public function asAddress(int|RegisterType $address): int
+    {
+        if ($address instanceof RegisterType) {
+            return ($this->runtime->register())::addressBy($address);
+        }
+        return $address;
     }
 
     private function validateMemoryAddressWasAllocated(int $address): void

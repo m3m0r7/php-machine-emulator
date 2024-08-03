@@ -9,6 +9,8 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Jz implements InstructionInterface
 {
+    use Instructable;
+
     public function opcodes(): array
     {
         return [0x74];

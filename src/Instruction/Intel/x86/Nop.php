@@ -9,6 +9,8 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 
 class Nop implements InstructionInterface
 {
+    use Instructable;
+
     public function opcodes(): array
     {
         return [0x00];

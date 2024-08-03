@@ -9,6 +9,8 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Jmp implements InstructionInterface
 {
+    use Instructable;
+
     public function opcodes(): array
     {
         return [0xEB];

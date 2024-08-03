@@ -9,7 +9,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
 interface MemoryAccessorInterface
 {
     public function allocate(int $address): self;
-    public function fetch(int $registerType): int|null;
-    public function write(int $registerType, int|null $value): self;
+    public function fetch(int|RegisterType $registerType): int|null;
+    public function write(int|RegisterType $registerType, int|null $value): self;
     public function shouldZeroFlag(): bool;
 }

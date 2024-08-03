@@ -11,16 +11,33 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 
 class Movsp implements InstructionInterface
 {
+    use Instructable;
+
     public function opcodes(): array
     {
-        return [
-            0xB8 + Register::addressBy(RegisterType::ESP),
-            0xB8 + Register::addressBy(RegisterType::EBP),
-        ];
+        return array_keys($this->stackPointers());
     }
 
     public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
     {
+        $low = $runtime->streamReader()->byte();
+        $high = $runtime->streamReader()->byte();
+
+        $runtime
+            ->memoryAccessor()
+            ->write(
+                $this->stackPointers()[$opcode],
+                ($high << 8) + $low,
+            );
+
         return ExecutionStatus::SUCCESS;
+    }
+
+    private function stackPointers(): array
+    {
+        return [
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::ESP) => RegisterType::ESP,
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::EBP) => RegisterType::EBP,
+        ];
     }
 }

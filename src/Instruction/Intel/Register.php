@@ -10,6 +10,11 @@ use PHPMachineEmulator\Instruction\RegisterType;
 
 class Register implements RegisterInterface
 {
+    public static function getRaisedSegmentRegister(): int
+    {
+        return 0b1000;
+    }
+
     public static function find(int $register): RegisterType
     {
         foreach (self::map() as $name => $value) {
@@ -32,6 +37,13 @@ class Register implements RegisterInterface
             RegisterType::EBP->name => 0b101,
             RegisterType::ESI->name => 0b110,
             RegisterType::EDI->name => 0b111,
+
+            RegisterType::ES->name => 0b0000 + self::getRaisedSegmentRegister(),
+            RegisterType::CS->name => 0b0001 + self::getRaisedSegmentRegister(),
+            RegisterType::SS->name => 0b0010 + self::getRaisedSegmentRegister(),
+            RegisterType::DS->name => 0b0011 + self::getRaisedSegmentRegister(),
+            RegisterType::FS->name => 0b0100 + self::getRaisedSegmentRegister(),
+            RegisterType::GS->name => 0b0101 + self::getRaisedSegmentRegister(),
         ];
     }
 

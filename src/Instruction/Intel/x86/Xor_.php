@@ -10,6 +10,8 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 
 class Xor_ implements InstructionInterface
 {
+    use Instructable;
+
     public function opcodes(): array
     {
         return [0x31];

@@ -9,6 +9,8 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Int_ implements InstructionInterface
 {
+    use Instructable;
+
     public function opcodes(): array
     {
         return [0xCD];

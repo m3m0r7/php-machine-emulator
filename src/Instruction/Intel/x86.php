@@ -68,7 +68,7 @@ class x86 implements InstructionListInterface
         }
 
         foreach ($instructionList as $className) {
-            $instance = new $className();
+            $instance = new $className($this);
             assert($instance instanceof InstructionInterface);
 
             foreach ($instance->opcodes() as $opcode) {
