@@ -1,0 +1,19 @@
+{
+    "name": "m3m0r7/php-machine-emulator",
+    "description": "A machine emulator written in PHP",
+    "type": "project",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "PHPMachineEmulator\\": "src/"
+        }
+    },
+    "autoload-dev": {
+      "psr-4": {
+        "Tests\\": "tests/"
+      }
+    },
+    "require": {
+        "monolog/monolog": "^3.7"
+    }
+}
