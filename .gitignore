@@ -3,3 +3,4 @@ composer.lock
 /vendor/
 test*.php
 HelloWorld.bin
+/HelloWorld.asm
