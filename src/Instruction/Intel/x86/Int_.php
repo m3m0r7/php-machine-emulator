@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -25,10 +26,15 @@ class Int_ implements InstructionInterface
 
         // The BIOS video interrupt
         if ($operand === 0x10) {
-            echo chr($runtime->memoryAccessor()->fetch(RegisterType::EAX));
+            $runtime
+                ->option()
+                ->IO()
+                ->output()
+                ->write((string) chr($runtime->memoryAccessor()->fetch(RegisterType::EAX)));
+
             return ExecutionStatus::SUCCESS;
         }
 
-        throw new RuntimeException('Not implemented interrupt types');
+        throw new ExecutionException('Not implemented interrupt types');
     }
 }
