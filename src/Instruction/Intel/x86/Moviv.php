@@ -14,20 +14,67 @@ class Moviv implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xB4];
+        return array_keys($this->registers());
     }
 
     public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
     {
         $operand = $runtime->streamReader()->byte();
 
+        $register = $this->registers()[$opcode];
+
+        if ($opcode >= 0xB8) {
+            // NOTE: move instruction for Xx registers
+            $runtime
+                ->memoryAccessor()
+                ->write(
+                    $register,
+                    ($operand << 8) + $runtime->memoryAccessor()->fetch($register)->asByte(),
+                );
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($opcode >= 0xB4) {
+            // NOTE: move instruction for high-bit
+            $runtime
+                ->memoryAccessor()
+                ->write(
+                    $register,
+                    (($operand << 8) & 0b11111111_00000000) + ($runtime->memoryAccessor()->fetch($register)->asByte()),
+                );
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        // NOTE: move instruction for low-bit
         $runtime
             ->memoryAccessor()
             ->write(
-                RegisterType::EAX,
-                ($operand << 8) + ($runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte() & 0b11111111),
+                $register,
+                (($operand << 8) & 0b11111111) + ($runtime->memoryAccessor()->fetch($register)->asByte() & 0b11111111),
             );
 
         return ExecutionStatus::SUCCESS;
+    }
+
+    private function registers(): array
+    {
+        return [
+            0xB0 + ($this->instructionList->register())::addressBy(RegisterType::EAX) => RegisterType::EAX,
+            0xB0 + ($this->instructionList->register())::addressBy(RegisterType::ECX) => RegisterType::ECX,
+            0xB0 + ($this->instructionList->register())::addressBy(RegisterType::EDX) => RegisterType::EDX,
+            0xB0 + ($this->instructionList->register())::addressBy(RegisterType::EBX) => RegisterType::EBX,
+
+            0xB4 + ($this->instructionList->register())::addressBy(RegisterType::EAX) => RegisterType::EAX,
+            0xB4 + ($this->instructionList->register())::addressBy(RegisterType::ECX) => RegisterType::ECX,
+            0xB4 + ($this->instructionList->register())::addressBy(RegisterType::EDX) => RegisterType::EDX,
+            0xB4 + ($this->instructionList->register())::addressBy(RegisterType::EBX) => RegisterType::EBX,
+
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::EAX) => RegisterType::EAX,
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::ECX) => RegisterType::ECX,
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::EDX) => RegisterType::EDX,
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::EBX) => RegisterType::EBX,
+        ];
     }
 }

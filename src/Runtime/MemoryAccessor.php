@@ -74,7 +74,12 @@ class MemoryAccessor implements MemoryAccessorInterface
     private function validateMemoryAddressWasAllocated(int $address): void
     {
         if (!array_key_exists($address, $this->memory)) {
-            throw new MemoryAccessorException('Specified memory address was not allocated');
+            throw new MemoryAccessorException(
+                sprintf(
+                    'Specified memory address was not allocated: 0x%04X',
+                    $address,
+                ),
+            );
         }
     }
 }
