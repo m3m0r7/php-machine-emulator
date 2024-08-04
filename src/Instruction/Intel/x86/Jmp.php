@@ -18,6 +18,18 @@ class Jmp implements InstructionInterface
 
     public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
     {
+        $operand = $runtime
+            ->streamReader()
+            ->signedByte();
+
+        $pos = $runtime
+            ->streamReader()
+            ->offset();
+
+        $runtime
+            ->streamReader()
+            ->setOffset($pos + $operand);
+
         return ExecutionStatus::SUCCESS;
     }
 }

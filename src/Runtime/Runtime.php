@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Runtime;
 
+use PHPMachineEmulator\Exception\ExitException;
+use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Frame\Frame;
 use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\MachineInterface;
+use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\StreamReaderInterface;
 
 class Runtime implements RuntimeInterface
@@ -36,10 +39,32 @@ class Runtime implements RuntimeInterface
         }
 
         while (!$this->streamReader->isEOF()) {
-            $this->execute(
+            $result = $this->execute(
                 $this->streamReader->byte(),
             );
+            if ($result === ExecutionStatus::EXIT) {
+                $this->machine->option()->logger()->info('Exited program');
+
+                $frameSet = $this->frame->pop();
+
+                throw new ExitException(
+                    'The executor received exit code',
+
+                    // NOTE: Use value as a status code if appended frame is available.
+                    //       If but not returned, use zero (successfully number) always.
+                    (int) $frameSet?->value() ?? 0,
+                );
+            }
+            if ($result === ExecutionStatus::HALT) {
+                $this->machine->option()->logger()->info('Halted program');
+                throw new HaltException('The executor halted');
+            }
         }
+    }
+
+    public function option(): OptionInterface
+    {
+        return $this->machine->option();
     }
 
     public function streamReader(): StreamReaderInterface

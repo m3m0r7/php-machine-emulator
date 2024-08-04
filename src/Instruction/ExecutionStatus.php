@@ -8,5 +8,6 @@ enum ExecutionStatus
 {
     case SUCCESS;
     case FAILED;
-    case BREAKPOINT;
+    case EXIT;
+    case HALT;
 }

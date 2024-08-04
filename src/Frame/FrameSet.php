@@ -9,9 +9,14 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class FrameSet implements FrameSetInterface
 {
-    public function __construct(protected RuntimeInterface $runtime, protected InstructionInterface $instruction, protected int $pos)
-    {
+    public function __construct(
+        protected RuntimeInterface $runtime,
+        protected InstructionInterface $instruction,
+        protected int $pos,
+        protected mixed $value = null,
+    ) {
         $this->runtime = clone $runtime;
+        $this->instruction = clone $this->instruction;
     }
 
     public function instruction(): InstructionInterface
@@ -27,5 +32,10 @@ class FrameSet implements FrameSetInterface
     public function pos(): int
     {
         return $this->pos;
+    }
+
+    public function value(): mixed
+    {
+        return $this->value;
     }
 }

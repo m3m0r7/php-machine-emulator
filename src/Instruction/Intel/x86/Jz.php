@@ -18,6 +18,20 @@ class Jz implements InstructionInterface
 
     public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
     {
+        $operand = $runtime
+            ->streamReader()
+            ->signedByte();
+
+        $pos = $runtime
+            ->streamReader()
+            ->offset();
+
+        if ($runtime->memoryAccessor()->shouldZeroFlag()) {
+            $runtime
+                ->streamReader()
+                ->setOffset($pos + $operand);
+        }
+
         return ExecutionStatus::SUCCESS;
     }
 }
