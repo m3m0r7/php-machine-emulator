@@ -6,7 +6,7 @@ namespace PHPMachineEmulator\Stream;
 
 use PHPMachineEmulator\Exception\StreamReaderException;
 
-class FileStream implements StreamReaderInterface
+class FileStream implements StreamReaderIsProxyableInterface
 {
     /**
      * @var resource $resource
@@ -66,9 +66,12 @@ class FileStream implements StreamReaderInterface
 
     public function setOffset(int $newOffset): self
     {
+        if ($newOffset > $this->fileSize) {
+            throw new StreamReaderException('Cannot set the offset');
+        }
         $result = fseek($this->resource, $newOffset, \SEEK_SET);
 
-        if ($result > 0) {
+        if ($result > 0 || $this->isEOF()) {
             throw new StreamReaderException('Cannot set the offset');
         }
 
@@ -78,6 +81,14 @@ class FileStream implements StreamReaderInterface
     public function isEOF(): bool
     {
         return $this->offset() === $this->fileSize || feof($this->resource);
+    }
+
+    public function proxy(): StreamReaderProxyInterface
+    {
+        $streamReader = new self($this->path);
+        $streamReader->setOffset($this->offset());
+
+        return new StreamReaderReaderProxy($streamReader);
     }
 }
 

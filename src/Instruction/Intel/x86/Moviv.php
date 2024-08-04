@@ -25,7 +25,7 @@ class Moviv implements InstructionInterface
             ->memoryAccessor()
             ->write(
                 RegisterType::EAX,
-                ($operand << 8) + ($runtime->memoryAccessor()->fetch(RegisterType::EAX) & 0b11111111),
+                ($operand << 8) + ($runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte() & 0b11111111),
             );
 
         return ExecutionStatus::SUCCESS;

@@ -35,7 +35,7 @@ class Or_ implements InstructionInterface
             ->memoryAccessor()
             ->write(
                 $register,
-                ($runtime->memoryAccessor()->fetch($register) & 0b11111111) | (($runtime->memoryAccessor()->fetch($registerOrMemory) & 0b11111111)),
+                ($runtime->memoryAccessor()->fetch($register)->asByte() & 0b11111111) | (($runtime->memoryAccessor()->fetch($registerOrMemory)->asByte() & 0b11111111)),
             );
         return ExecutionStatus::SUCCESS;
     }

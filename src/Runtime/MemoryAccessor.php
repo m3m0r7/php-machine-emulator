@@ -27,12 +27,12 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this;
     }
 
-    public function fetch(int|RegisterType $registerType): int|null
+    public function fetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface
     {
         $address = $this->asAddress($registerType);
         $this->validateMemoryAddressWasAllocated($address);
 
-        return $this->memory[$address];
+        return new MemoryAccessorFetchResult($this->memory[$address]);
     }
 
     public function write(int|RegisterType $registerType, int|null $value): self
@@ -52,7 +52,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $this
             ->write(
                 $registerType,
-                $this->fetch($registerType) + 1
+                $this->fetch($registerType)->asByte() + 1
             );
 
         return $this;

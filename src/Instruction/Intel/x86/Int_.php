@@ -30,7 +30,7 @@ class Int_ implements InstructionInterface
                 ->option()
                 ->IO()
                 ->output()
-                ->write((string) chr($runtime->memoryAccessor()->fetch(RegisterType::EAX)));
+                ->write($runtime->memoryAccessor()->fetch(RegisterType::EAX)->asChar());
 
             return ExecutionStatus::SUCCESS;
         }

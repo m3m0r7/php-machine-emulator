@@ -23,12 +23,13 @@ class Lodsb implements InstructionInterface
 
         $si = $runtime
             ->memoryAccessor()
-            ->fetch(RegisterType::ESI);
+            ->fetch(RegisterType::ESI)
+            ->asByte();
 
 
         $runtime
             ->streamReader()
-            ->setOffset($si - $runtime->memoryAccessor()->fetch(RegisterType::ESP));
+            ->setOffset($si - $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asByte());
 
         $runtime->memoryAccessor()
             ->write(

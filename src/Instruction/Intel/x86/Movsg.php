@@ -37,7 +37,8 @@ class Movsg implements InstructionInterface
                 $to + ($runtime->register())::getRaisedSegmentRegister(),
                 $runtime
                     ->memoryAccessor()
-                    ->fetch($from),
+                    ->fetch($from)
+                    ->asByte(),
             );
 
         return ExecutionStatus::SUCCESS;

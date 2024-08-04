@@ -5,16 +5,17 @@ declare(strict_types=1);
 namespace PHPMachineEmulator;
 
 use PHPMachineEmulator\Exception\PHPMachineEmulatorException;
+use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\Intel;
 use PHPMachineEmulator\Runtime\Runtime;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
-use PHPMachineEmulator\Stream\StreamReaderInterface;
+use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
 
 class Machine implements MachineInterface
 {
     protected array $runtimes = [];
 
-    public function __construct(protected StreamReaderInterface $streamReader, protected OptionInterface $option)
+    public function __construct(protected StreamReaderIsProxyableInterface $streamReader, protected OptionInterface $option)
     {
         $this->runtimes[Intel\x86::class] = MachineType::Intel_x86;
     }
@@ -34,5 +35,10 @@ class Machine implements MachineInterface
         }
 
         throw new PHPMachineEmulatorException('Runtime not found');
+    }
+
+    protected function createRuntime(InstructionListInterface $instructionList): RuntimeInterface
+    {
+        return new Runtime($this, $instructionList, $this->streamReader);
     }
 }
