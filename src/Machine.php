@@ -15,7 +15,7 @@ class Machine implements MachineInterface
 {
     protected array $runtimes = [];
 
-    public function __construct(protected StreamReaderIsProxyableInterface $streamReader, protected OptionInterface $option)
+    public function __construct(protected StreamReaderIsProxyableInterface $streamReader, protected OptionInterface $option = new Option())
     {
         $this->runtimes[Intel\x86::class] = MachineType::Intel_x86;
     }

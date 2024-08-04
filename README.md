@@ -61,10 +61,13 @@ dw 0xAA55
 <?php
 require __DIR__ . '/vendor/autoload.php';
 
-\PHPMachineEmulator\BIOS::start(
-    new \PHPMachineEmulator\Stream\InputPipeReaderStream(),
-);
-
+try {
+    \PHPMachineEmulator\BIOS::start(
+        new \PHPMachineEmulator\Stream\InputPipeReaderStream(),
+    );
+} catch (\PHPMachineEmulator\Exception\ExitException $e) {
+    exit($e->getCode());
+}
 ```
 
 4. Let's emulating CPU as following:
@@ -77,6 +80,12 @@ $ nasm HelloWorld.asm -o /dev/stdout | php HelloWorld.php
 
 ```
 Hello World!
+```
+
+# Tests
+
+```
+./vendor/bin/phpunit --bootstrap ./tests/Bootstrap.php tests/Case
 ```
 
 # LICENSE

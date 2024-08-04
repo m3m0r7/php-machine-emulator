@@ -31,9 +31,9 @@ class BIOS extends Machine
             ))->runtime($useMachineType)
                 ->start(static::BIOS_ENTRYPOINT);
         } catch (HaltException) {
-            exit(0);
+            throw new ExitException('Halted', 0);
         } catch (ExitException $e) {
-            exit($e->getCode());
+            throw $e;
         }
     }
 
