@@ -6,7 +6,7 @@ namespace PHPMachineEmulator\Stream;
 
 use PHPMachineEmulator\Exception\StreamReaderException;
 
-class ResourceStream implements StreamWriterInterface
+class ResourceWriterStream implements StreamWriterInterface
 {
     /**
      * @var resource $resource

@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\IO;
 
-use PHPMachineEmulator\Stream\ResourceStream;
+use PHPMachineEmulator\Stream\ResourceWriterStream;
 use PHPMachineEmulator\Stream\StreamWriterInterface;
 
 class StdErr implements OutputInterface
 {
-    public function __construct(protected StreamWriterInterface $streamWriter = new ResourceStream(STDERR))
+    public function __construct(protected StreamWriterInterface $streamWriter = new ResourceWriterStream(STDERR))
     {
 
     }

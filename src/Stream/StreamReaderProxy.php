@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Stream;
 
-class StreamReaderReaderProxy implements StreamReaderProxyInterface
+class StreamReaderProxy implements StreamReaderProxyInterface
 {
     public function __construct(protected StreamReaderInterface $stream)
     {

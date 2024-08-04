@@ -13,7 +13,7 @@ use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
-use PHPMachineEmulator\Stream\StreamReaderInterface;
+use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
 
 class Runtime implements RuntimeInterface
 {
@@ -21,7 +21,7 @@ class Runtime implements RuntimeInterface
     protected FrameInterface $frame;
     protected MemoryAccessorInterface $memoryAccessor;
 
-    public function __construct(protected MachineInterface $machine, protected InstructionListInterface $instructionList, protected StreamReaderInterface $streamReader)
+    public function __construct(protected MachineInterface $machine, protected InstructionListInterface $instructionList, protected StreamReaderIsProxyableInterface $streamReader)
     {
         $this->register = $this->instructionList->register();
         $this->frame = new Frame($this);
@@ -67,7 +67,7 @@ class Runtime implements RuntimeInterface
         return $this->machine->option();
     }
 
-    public function streamReader(): StreamReaderInterface
+    public function streamReader(): StreamReaderIsProxyableInterface
     {
         return $this->streamReader;
     }

@@ -11,22 +11,72 @@ Since it is written roughly, functionality is not guaranteed.
 
 ## Quick start
 
+1. Install this project via composer
 ```
-$ git clone https://github.com/m3m0r7/php-machine-emulator.git
-$ cd php-machine-emulator
-$ nasm HelloWorld.asm -o HelloWorld.bin
-$ php mini-machine-emu.php HelloWorld.bin
+$ composer require m3m0r7/php-machine-emulator
 ```
 
-It is shown as following:
+2. Make an assembly as `HelloWorld.asm`
+
+```asm
+[bits 16]
+[org 0x7C00]
+
+main:
+  cli
+  xor ax, ax
+  xor bx, bx
+  mov ds, ax
+  mov es, ax
+  mov ss, ax
+  mov sp, 0x7C00
+  sti
+mov si, hello_world
+call print_string
+hlt
+
+print_string:
+  lodsb
+  or al, al
+  jz .done
+  call .char
+  jmp .done
+  .char:
+    mov ah, 0x0E
+    int 0x10
+    jmp print_string
+  .done:
+    ret
+
+hello_world:
+  db "Hello World!", 0x0D, 0x0A, 0
+
+times 510-($-$$) db 0
+dw 0xAA55
+```
+
+3. Make BIOS Starter as a `HelloWorld.php`
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';
+
+\PHPMachineEmulator\BIOS::start(
+    new \PHPMachineEmulator\Stream\InputPipeReaderStream(),
+);
 
 ```
-Start to emulates machine
--------------------------------------
+
+4. Let's emulating CPU as following:
+
+```
+$ nasm HelloWorld.asm -o /dev/stdout | php HelloWorld.php
+```
+
+5. It is shown as following:
+
+```
 Hello World!
-
--------------------------------------
-Finish to emulates machine
 ```
 
 # LICENSE
