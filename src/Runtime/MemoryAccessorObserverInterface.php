@@ -8,6 +8,6 @@ use PHPMachineEmulator\Instruction\RegisterType;
 
 interface MemoryAccessorObserverInterface
 {
-    public function isMatched(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): bool;
+    public function shouldMatch(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): bool;
     public function observe(RuntimeInterface $runtime, int $address, int|null $value): void;
 }

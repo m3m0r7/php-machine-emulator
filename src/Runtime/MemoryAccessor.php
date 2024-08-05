@@ -166,7 +166,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         foreach ($this->memoryAccessorObserverCollection as $memoryAccessorObserverCollection) {
             assert($memoryAccessorObserverCollection instanceof MemoryAccessorObserverInterface);
 
-            if (!$memoryAccessorObserverCollection->isMatched($this->runtime, $address, $previousValue, $nextValue)) {
+            if (!$memoryAccessorObserverCollection->shouldMatch($this->runtime, $address, $previousValue, $nextValue)) {
                 continue;
             }
 
