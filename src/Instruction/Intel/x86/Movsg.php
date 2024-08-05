@@ -19,11 +19,11 @@ class Movsg implements InstructionInterface
 
     public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
     {
-        $operand = $runtime->streamReader()->byte();
+        $modRM = $runtime->streamReader()->byte();
 
-        $mode = ($operand >> 6) & 0b00000111;
-        $to = ($operand >> 3) & 0b00000111;
-        $from = $operand & 0b00000111;
+        $mode = ($modRM >> 6) & 0b00000011;
+        $to = ($modRM >> 3) & 0b00000111;
+        $from = $modRM & 0b00000111;
 
         if ($mode !== 0b011) {
             throw new ExecutionException(

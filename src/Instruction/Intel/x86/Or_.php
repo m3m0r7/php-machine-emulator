@@ -19,11 +19,11 @@ class Or_ implements InstructionInterface
 
     public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
     {
-        $operand = $runtime->streamReader()->byte();
+        $modRM = $runtime->streamReader()->byte();
 
-        $mode = ($operand >> 6) & 0b00000111;
-        $register = ($operand >> 3) & 0b00000111;
-        $registerOrMemory = $operand & 0b00000111;
+        $mode = ($modRM >> 6) & 0b00000011;
+        $register = ($modRM >> 3) & 0b00000111;
+        $registerOrMemory = $modRM & 0b00000111;
 
         if ($mode !== 0b011) {
             throw new ExecutionException(

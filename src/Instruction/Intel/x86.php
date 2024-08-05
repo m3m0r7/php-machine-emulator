@@ -13,17 +13,22 @@ use PHPMachineEmulator\Instruction\Intel\x86\CmpivAX;
 use PHPMachineEmulator\Instruction\Intel\x86\Hlt;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
 use PHPMachineEmulator\Instruction\Intel\x86\Jmp;
+use PHPMachineEmulator\Instruction\Intel\x86\Jnz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jz;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
+use PHPMachineEmulator\Instruction\Intel\x86\LogicIns;
+use PHPMachineEmulator\Instruction\Intel\x86\Loop;
 use PHPMachineEmulator\Instruction\Intel\x86\Moviv;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsp;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsx;
 use PHPMachineEmulator\Instruction\Intel\x86\Nop;
 use PHPMachineEmulator\Instruction\Intel\x86\Or_;
+use PHPMachineEmulator\Instruction\Intel\x86\PopReg;
 use PHPMachineEmulator\Instruction\Intel\x86\PushReg;
 use PHPMachineEmulator\Instruction\Intel\x86\Ret;
 use PHPMachineEmulator\Instruction\Intel\x86\Sti;
+use PHPMachineEmulator\Instruction\Intel\x86\Stosb;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Video\VideoColorType;
@@ -55,17 +60,22 @@ class x86 implements InstructionListInterface
             Hlt::class,
             Int_::class,
             Jmp::class,
+            Jnz::class,
             Jz::class,
             Lodsb::class,
+            LogicIns::class,
+            Loop::class,
             Moviv::class,
             Movsg::class,
             Movsp::class,
             Movsx::class,
             Nop::class,
             Or_::class,
+            PopReg::class,
             PushReg::class,
             Ret::class,
             Sti::class,
+            Stosb::class,
             Xor_::class,
         ];
 

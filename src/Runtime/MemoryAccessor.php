@@ -76,6 +76,17 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this;
     }
 
+    public function decrement(int|RegisterType $registerType): self
+    {
+        $this
+            ->write(
+                $registerType,
+                $this->fetch($registerType)->asByte() - 1
+            );
+
+        return $this;
+    }
+
     public function shouldZeroFlag(): bool
     {
         return $this->zeroFlag;
@@ -101,7 +112,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this->parityFlag;
     }
 
-    public function asAddress(int|RegisterType $address): int
+    protected function asAddress(int|RegisterType $address): int
     {
         if ($address instanceof RegisterType) {
             return ($this->runtime->register())::addressBy($address);
