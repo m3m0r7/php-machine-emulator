@@ -26,9 +26,7 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
                 ($runtime->register())::addressBy(RegisterType::EDI),
             )
             ->asByte();
-
-
-        // NOTE: Express to write ES register only
+        
         return $address === ($di + $es) &&
             ($di + $es) >= VideoMemoryService::VIDEO_MEMORY_ADDRESS_STARTED && ($di + $es) <= VideoMemoryService::VIDEO_MEMORY_ADDRESS_ENDED;
     }
