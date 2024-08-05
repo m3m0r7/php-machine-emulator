@@ -19,7 +19,12 @@ class Machine implements MachineInterface
 
     public function __construct(protected StreamReaderIsProxyableInterface $streamReader, protected OptionInterface $option = new Option())
     {
-        $this->runtimes[MachineType::Intel_x86->name] = [Intel\x86::class, Intel\Video::class, Intel\MemoryAccessorObserverCollection::class];
+        $this->runtimes[MachineType::Intel_x86->name] = [
+            Intel\x86::class,
+            Intel\VideoInterrupt::class,
+            Intel\MemoryAccessorObserverCollection::class,
+            Intel\ServiceCollection::class,
+        ];
     }
 
     public function option(): OptionInterface
@@ -29,7 +34,7 @@ class Machine implements MachineInterface
 
     public function runtime(MachineType $useMachineType = MachineType::Intel_x86): RuntimeInterface
     {
-        foreach ($this->runtimes as $machineType => [$runtimeClassName, $runtimeVideoClassName, $runtimeObserverCollection]) {
+        foreach ($this->runtimes as $machineType => [$runtimeClassName, $runtimeVideoClassName, $runtimeObserverCollection, $runtimeServiceCollection]) {
             if ($machineType === $useMachineType->name) {
                 $this->option()->logger()->info("Selected runtime is {$useMachineType->name}");
                 return $this->createRuntime(
@@ -37,6 +42,7 @@ class Machine implements MachineInterface
                         new $runtimeVideoClassName(),
                         new $runtimeClassName(),
                         new $runtimeObserverCollection(),
+                        new $runtimeServiceCollection(),
                     ),
                 );
             }

@@ -8,13 +8,13 @@ use PHPMachineEmulator\Video\VideoColorType;
 use PHPMachineEmulator\Video\VideoInterface;
 use PHPMachineEmulator\Video\VideoTypeInfo;
 
-class Video implements VideoInterface
+class VideoInterrupt implements VideoInterface
 {
     public function videoTypeFlagAddress(): int
     {
         return 0xFF0000;
     }
-    
+
     public function supportedVideoModes(): array
     {
         return [

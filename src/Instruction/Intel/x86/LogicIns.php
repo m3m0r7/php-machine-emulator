@@ -34,8 +34,7 @@ class LogicIns implements InstructionInterface
 
         $operand1 = $runtime->streamReader()->byte();
         $operand2 = $runtime->streamReader()->byte();
-        $operand = (($operand2 & 0b11111111) << 8) + ($operand1 & 0b11111111);
-
+        $operand = ($operand2 << 8) + $operand1;
 
         match ($extendableOpCode) {
             0x0 => $this->add($runtime, $registerOrMemory, $operand),
@@ -55,12 +54,9 @@ class LogicIns implements InstructionInterface
     {
         $runtime
             ->memoryAccessor()
-            ->write(
+            ->add(
                 $register,
-                $runtime
-                    ->memoryAccessor()
-                    ->fetch($register)
-                    ->asByte() + $value,
+                $value,
             );
     }
 

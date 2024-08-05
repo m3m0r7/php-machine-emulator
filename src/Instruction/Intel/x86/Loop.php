@@ -30,7 +30,6 @@ class Loop implements InstructionInterface
         $counter = $runtime->memoryAccessor()
             ->fetch(RegisterType::ECX)->asByte() - 1;
 
-        var_dump($counter);
         if ($counter < 0) {
             return ExecutionStatus::SUCCESS;
         }

@@ -12,6 +12,7 @@ use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\RegisterInterface;
+use PHPMachineEmulator\Instruction\ServiceInterface;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
@@ -46,6 +47,13 @@ class Runtime implements RuntimeInterface
             $this->memoryAccessor->allocate($address);
 
             $this->machine->option()->logger()->debug(sprintf('Address allocated 0x%03s', decbin($address)));
+        }
+
+        foreach ($this->architectureProvider->services() as $service) {
+            assert($service instanceof ServiceInterface);
+
+            $service->initialize($this);
+            $this->machine->option()->logger()->debug(sprintf('Initialize %s service', get_class($service)));
         }
 
         while (!$this->streamReader->isEOF()) {

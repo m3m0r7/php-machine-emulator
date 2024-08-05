@@ -25,9 +25,17 @@ class Stosb implements InstructionInterface
             ->fetch(RegisterType::EAX)
             ->asByte() & 0b11111111;
 
+        $es = $runtime->memoryAccessor()
+            ->fetch(($runtime->register())::addressBy(RegisterType::ES))
+            ->asByte();
+
+        $di = $runtime->memoryAccessor()
+            ->fetch(($runtime->register())::addressBy(RegisterType::EDI))
+            ->asByte();
+
         $runtime
             ->memoryAccessor()
-            ->write(RegisterType::EDI, $byte);
+            ->write($es + $di, $byte);
 
         // TODO: Here is needed to implement decrementing by DF
         $runtime

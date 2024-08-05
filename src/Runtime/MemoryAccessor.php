@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Runtime;
 
+use PHPMachineEmulator\Collection\MemoryAccessorObserverCollectionInterface;
 use PHPMachineEmulator\Exception\MemoryAccessorException;
 use PHPMachineEmulator\Instruction\RegisterType;
 
@@ -20,13 +21,15 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
     }
 
-    public function allocate(int $address): self
+    public function allocate(int $address, int $size = 1): self
     {
         if (array_key_exists($address, $this->memory)) {
             throw new MemoryAccessorException('Specified memory address was allocated');
         }
 
-        $this->memory[$address] = null;
+        for ($i = 0; $i < $size; $i++) {
+            $this->memory[$address + $i] = null;
+        }
 
         return $this;
     }
@@ -67,24 +70,34 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this;
     }
 
-    public function increment(int|RegisterType $registerType): self
+    public function add(int|RegisterType $registerType, int $value): self
     {
         $this
             ->write(
                 $registerType,
-                $this->fetch($registerType)->asByte() + 1
+                $this->fetch($registerType)->asByte() + $value
             );
+
+        return $this;
+    }
+
+    public function sub(int|RegisterType $registerType, int $value): self
+    {
+        $this->add($registerType, -$value);
+
+        return $this;
+    }
+
+    public function increment(int|RegisterType $registerType): self
+    {
+        $this->add($registerType, 1);
 
         return $this;
     }
 
     public function decrement(int|RegisterType $registerType): self
     {
-        $this
-            ->write(
-                $registerType,
-                $this->fetch($registerType)->asByte() - 1
-            );
+        $this->add($registerType, -1);
 
         return $this;
     }
@@ -122,7 +135,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $address;
     }
 
-    public function pop(int|RegisterType $registerType, int $size = 32): MemoryAccessorFetchResultInterface
+    public function pop(int|RegisterType $registerType, int $size = 16): MemoryAccessorFetchResultInterface
     {
         $address = $this->asAddress($registerType);
         $fetchResult = $this->fetch($address)->asByte();
@@ -132,17 +145,17 @@ class MemoryAccessor implements MemoryAccessorInterface
             $fetchResult >> $size,
         );
 
-        return new MemoryAccessorFetchResult($fetchResult & $size);
+        return new MemoryAccessorFetchResult($fetchResult & ((1 << $size) - 1));
     }
 
-    public function push(int|RegisterType $registerType, int|null $value, int $size = 32): self
+    public function push(int|RegisterType $registerType, int|null $value, int $size = 16): self
     {
         $address = $this->asAddress($registerType);
         $fetchResult = $this->fetch($address)->asByte();
 
         $this->write(
             $address,
-            ($fetchResult << $size) + ($value & $size),
+            ($fetchResult << $size) + ($value & ((1 << $size) - 1)),
         );
 
         return $this;
