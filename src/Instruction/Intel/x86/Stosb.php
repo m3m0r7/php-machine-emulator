@@ -18,7 +18,7 @@ class Stosb implements InstructionInterface
         return [0xAA];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $byte = $runtime
             ->memoryAccessor()

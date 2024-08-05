@@ -14,8 +14,8 @@ interface MemoryAccessorInterface
     public function decrement(int|RegisterType $registerType): self;
     public function write(int|RegisterType $registerType, int|null $value): self;
     public function updateFlags(int|null $value): self;
-    public function pop(int|RegisterType $registerType, int $size = 32): MemoryAccessorFetchResultInterface;
-    public function push(int|RegisterType $registerType, int|null $value, int $size = 32): self;
+    public function pop(int|RegisterType $registerType, int $size = 16): MemoryAccessorFetchResultInterface;
+    public function push(int|RegisterType $registerType, int|null $value, int $size = 16): self;
 
     public function shouldZeroFlag(): bool;
     public function shouldSignFlag(): bool;

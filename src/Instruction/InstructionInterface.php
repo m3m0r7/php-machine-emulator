@@ -9,5 +9,5 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 interface InstructionInterface
 {
     public function opcodes(): array;
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus;
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus;
 }

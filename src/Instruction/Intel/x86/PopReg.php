@@ -18,14 +18,14 @@ class PopReg implements InstructionInterface
         return array_keys($this->registers());
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $stackedValue = $runtime
             ->memoryAccessor()
-            ->pop(RegisterType::ESP, 8 * 4)
+            ->pop(RegisterType::ESP)
             ->asByte();
 
-        $fetchResult = $runtime
+        $runtime
             ->memoryAccessor()
             ->write(
                 $this->registers()[$opcode],

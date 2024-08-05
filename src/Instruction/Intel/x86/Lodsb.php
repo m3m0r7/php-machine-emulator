@@ -17,7 +17,7 @@ class Lodsb implements InstructionInterface
         return [0xAC];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $reader = $runtime->streamReader()->proxy();
 
@@ -27,7 +27,7 @@ class Lodsb implements InstructionInterface
             ->asByte();
 
         $reader
-            ->setOffset($si - $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asByte());
+            ->setOffset($si - $runtime->runtimeOption()->entrypoint());
 
         $runtime->memoryAccessor()
             ->write(

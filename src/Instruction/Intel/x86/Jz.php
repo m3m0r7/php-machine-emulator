@@ -16,7 +16,7 @@ class Jz implements InstructionInterface
         return [0x74];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
             ->streamReader()

@@ -16,7 +16,7 @@ class Nop implements InstructionInterface
         return [0x00];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         return ExecutionStatus::SUCCESS;
     }

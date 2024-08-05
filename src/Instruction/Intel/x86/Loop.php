@@ -17,7 +17,7 @@ class Loop implements InstructionInterface
         return [0xE2];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
             ->streamReader()
@@ -27,14 +27,20 @@ class Loop implements InstructionInterface
             ->streamReader()
             ->offset();
 
-        $fetchResult = $runtime->memoryAccessor()
+        $counter = $runtime->memoryAccessor()
+            ->fetch(RegisterType::ECX)->asByte() - 1;
+
+        var_dump($counter);
+        if ($counter < 0) {
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $runtime->memoryAccessor()
             ->decrement(RegisterType::ECX);
 
-        if (!$runtime->memoryAccessor()->shouldZeroFlag()) {
-            $runtime
-                ->streamReader()
-                ->setOffset($pos + $operand);
-        }
+        $runtime
+            ->streamReader()
+            ->setOffset($pos + $operand);
 
         return ExecutionStatus::SUCCESS;
     }

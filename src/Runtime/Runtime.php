@@ -25,17 +25,22 @@ class Runtime implements RuntimeInterface
 
     public function __construct(
         protected MachineInterface $machine,
+        protected RuntimeOptionInterface $runtimeOption,
         protected ArchitectureProviderInterface $architectureProvider,
-        protected StreamReaderIsProxyableInterface $streamReader
+        protected StreamReaderIsProxyableInterface $streamReader,
     ) {
         $this->register = $this->architectureProvider->instructionList()->register();
         $this->frame = new Frame($this);
-        $this->memoryAccessor = new MemoryAccessor($this);
+        $this->memoryAccessor = new MemoryAccessor(
+            $this,
+            $this->architectureProvider
+                ->observers(),
+        );
     }
 
-    public function start(int $entrypoint = 0x0000): void
+    public function start(): void
     {
-        $this->machine->option()->logger()->info(sprintf('Started machine emulating which entrypoint is 0x%04X', $entrypoint));
+        $this->machine->option()->logger()->info(sprintf('Started machine emulating which entrypoint is 0x%04X', $this->runtimeOption->entrypoint()));
 
         foreach ([...($this->register)::map(), $this->video()->videoTypeFlagAddress()] as $address) {
             $this->memoryAccessor->allocate($address);
@@ -65,6 +70,11 @@ class Runtime implements RuntimeInterface
                 throw new HaltException('The executor halted');
             }
         }
+    }
+
+    public function runtimeOption(): RuntimeOptionInterface
+    {
+        return $this->runtimeOption;
     }
 
     public function option(): OptionInterface
@@ -111,6 +121,6 @@ class Runtime implements RuntimeInterface
         $this->machine->option()->logger()->info(sprintf('Process the instruction %s', get_class($instruction)));
 
         return $instruction
-            ->process($opcode, $this);
+            ->process($this, $opcode);
     }
 }

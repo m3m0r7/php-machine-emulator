@@ -17,7 +17,7 @@ class Movsg implements InstructionInterface
         return [0x8E];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $modRM = $runtime->streamReader()->byte();
 

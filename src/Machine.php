@@ -10,6 +10,7 @@ use PHPMachineEmulator\Exception\PHPMachineEmulatorException;
 use PHPMachineEmulator\Instruction\Intel;
 use PHPMachineEmulator\Runtime\Runtime;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Runtime\RuntimeOption;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
 
 class Machine implements MachineInterface
@@ -18,7 +19,7 @@ class Machine implements MachineInterface
 
     public function __construct(protected StreamReaderIsProxyableInterface $streamReader, protected OptionInterface $option = new Option())
     {
-        $this->runtimes[MachineType::Intel_x86->name] = [Intel\x86::class, Intel\Video::class];
+        $this->runtimes[MachineType::Intel_x86->name] = [Intel\x86::class, Intel\Video::class, Intel\MemoryAccessorObserverCollection::class];
     }
 
     public function option(): OptionInterface
@@ -28,13 +29,14 @@ class Machine implements MachineInterface
 
     public function runtime(MachineType $useMachineType = MachineType::Intel_x86): RuntimeInterface
     {
-        foreach ($this->runtimes as $machineType => [$runtimeClassName, $runtimeVideoClassName]) {
+        foreach ($this->runtimes as $machineType => [$runtimeClassName, $runtimeVideoClassName, $runtimeObserverCollection]) {
             if ($machineType === $useMachineType->name) {
                 $this->option()->logger()->info("Selected runtime is {$useMachineType->name}");
                 return $this->createRuntime(
                     new ArchitectureProvider(
                         new $runtimeVideoClassName(),
                         new $runtimeClassName(),
+                        new $runtimeObserverCollection(),
                     ),
                 );
             }
@@ -45,6 +47,6 @@ class Machine implements MachineInterface
 
     protected function createRuntime(ArchitectureProviderInterface $architectureProvider): RuntimeInterface
     {
-        return new Runtime($this, $architectureProvider, $this->streamReader);
+        return new Runtime($this, new RuntimeOption(), $architectureProvider, $this->streamReader);
     }
 }

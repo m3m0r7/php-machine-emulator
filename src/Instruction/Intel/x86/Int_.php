@@ -22,7 +22,7 @@ class Int_ implements InstructionInterface
         return [0xCD];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
             ->streamReader()

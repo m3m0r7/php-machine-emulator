@@ -17,7 +17,7 @@ class Xor_ implements InstructionInterface
         return [0x31];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $modRM = $runtime->streamReader()->byte();
 

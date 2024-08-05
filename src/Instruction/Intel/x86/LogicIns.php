@@ -18,7 +18,7 @@ class LogicIns implements InstructionInterface
         return [0x81];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $modRM = $runtime->streamReader()->byte();
 
@@ -38,14 +38,14 @@ class LogicIns implements InstructionInterface
 
 
         match ($extendableOpCode) {
-            0x0 => $this->add($runtime, $registerOrMemory, $operand2),
-            0x1 => $this->or($runtime, $registerOrMemory, $operand2),
-            0x2 => $this->adc($runtime, $registerOrMemory, $operand2),
-            0x3 => $this->sbb($runtime, $registerOrMemory, $operand2),
-            0x4 => $this->and($runtime, $registerOrMemory, $operand2),
-            0x5 => $this->sub($runtime, $registerOrMemory, $operand2),
-            0x6 => $this->xor($runtime, $registerOrMemory, $operand2),
-            0x7 => $this->cmp($runtime, $registerOrMemory, $operand2),
+            0x0 => $this->add($runtime, $registerOrMemory, $operand),
+            0x1 => $this->or($runtime, $registerOrMemory, $operand),
+            0x2 => $this->adc($runtime, $registerOrMemory, $operand),
+            0x3 => $this->sbb($runtime, $registerOrMemory, $operand),
+            0x4 => $this->and($runtime, $registerOrMemory, $operand),
+            0x5 => $this->sub($runtime, $registerOrMemory, $operand),
+            0x6 => $this->xor($runtime, $registerOrMemory, $operand),
+            0x7 => $this->cmp($runtime, $registerOrMemory, $operand),
         };
 
         return ExecutionStatus::SUCCESS;

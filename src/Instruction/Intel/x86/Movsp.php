@@ -18,7 +18,7 @@ class Movsp implements InstructionInterface
         return array_keys($this->stackPointers());
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $low = $runtime->streamReader()->byte();
         $high = $runtime->streamReader()->byte();

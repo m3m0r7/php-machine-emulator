@@ -16,7 +16,7 @@ class Hlt implements InstructionInterface
         return [0xF4];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         return ExecutionStatus::HALT;
     }

@@ -18,16 +18,15 @@ class PushReg implements InstructionInterface
         return array_keys($this->registers());
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $fetchResult = $runtime
             ->memoryAccessor()
             ->fetch($this->registers()[$opcode]);
 
-
         $runtime
             ->memoryAccessor()
-            ->push(RegisterType::ESP, $fetchResult->asByte(), 8 * 4);
+            ->push(RegisterType::ESP, $fetchResult->asByte());
 
         return ExecutionStatus::SUCCESS;
     }

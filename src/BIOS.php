@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator;
 
+use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Exception\BIOSInvalidException;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Exception\StreamReaderException;
+use PHPMachineEmulator\Runtime\Runtime;
+use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Runtime\RuntimeOption;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
 
 class BIOS extends Machine
@@ -29,7 +33,7 @@ class BIOS extends Machine
                 $streamReader,
                 $option,
             ))->runtime($useMachineType)
-                ->start(static::BIOS_ENTRYPOINT);
+                ->start();
         } catch (HaltException) {
             throw new ExitException('Halted', 0);
         } catch (ExitException $e) {
@@ -52,5 +56,15 @@ class BIOS extends Machine
         if ($high !== 0xAA || $low !== 0x55 || !$proxy->isEOF()) {
             throw new BIOSInvalidException('The disk is invalid');
         }
+    }
+
+    protected function createRuntime(ArchitectureProviderInterface $architectureProvider): RuntimeInterface
+    {
+        return new Runtime(
+            $this,
+            new RuntimeOption(self::BIOS_ENTRYPOINT),
+            $architectureProvider,
+            $this->streamReader,
+        );
     }
 }

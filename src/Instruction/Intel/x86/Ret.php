@@ -17,7 +17,7 @@ class Ret implements InstructionInterface
         return [0xC3];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $frameSet = $runtime
             ->frame()

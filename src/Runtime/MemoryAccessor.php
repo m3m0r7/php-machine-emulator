@@ -16,7 +16,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     protected bool $carryFlag = false;
     protected bool $parityFlag = false;
 
-    public function __construct(protected RuntimeInterface $runtime)
+    public function __construct(protected RuntimeInterface $runtime, protected MemoryAccessorObserverCollectionInterface $memoryAccessorObserverCollection)
     {
     }
 
@@ -44,9 +44,11 @@ class MemoryAccessor implements MemoryAccessorInterface
         $address = $this->asAddress($registerType);
         $this->validateMemoryAddressWasAllocated($address);
 
-        $this->memory[$address] = $value;
+        $previousValue = $this->memory[$address];
 
+        $this->memory[$address] = $value;
         $this->updateFlags($value);
+        $this->processObservers($address, $previousValue, $value);
 
         return $this;
     }
@@ -144,6 +146,24 @@ class MemoryAccessor implements MemoryAccessorInterface
         );
 
         return $this;
+    }
+
+    private function processObservers(int $address, int|null $previousValue, int|null $nextValue): void
+    {
+        foreach ($this->memoryAccessorObserverCollection as $memoryAccessorObserverCollection) {
+            assert($memoryAccessorObserverCollection instanceof MemoryAccessorObserverInterface);
+
+            if (!$memoryAccessorObserverCollection->isMatched($this->runtime, $address, $previousValue, $nextValue)) {
+                continue;
+            }
+
+            $memoryAccessorObserverCollection
+                ->observe(
+                    $this->runtime,
+                    $address,
+                    $nextValue,
+                );
+        }
     }
 
     private function validateMemoryAddressWasAllocated(int $address): void

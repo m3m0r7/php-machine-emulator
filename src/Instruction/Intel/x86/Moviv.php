@@ -17,7 +17,7 @@ class Moviv implements InstructionInterface
         return array_keys($this->registers());
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime->streamReader()->byte();
 

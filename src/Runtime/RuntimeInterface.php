@@ -13,7 +13,8 @@ use PHPMachineEmulator\Video\VideoInterface;
 
 interface RuntimeInterface
 {
-    public function start(int $entrypoint = 0x0000): void;
+    public function runtimeOption(): RuntimeOptionInterface;
+    public function start(): void;
     public function memoryAccessor(): MemoryAccessorInterface;
     public function execute(int $opcode): ExecutionStatus;
     public function streamReader(): StreamReaderIsProxyableInterface;

@@ -16,7 +16,7 @@ class Jmp implements InstructionInterface
         return [0xEB];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
             ->streamReader()

@@ -17,7 +17,7 @@ class Call implements InstructionInterface
         return [0xE8];
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $byte1 = $runtime->streamReader()->byte();
         $byte2 = $runtime->streamReader()->byte();

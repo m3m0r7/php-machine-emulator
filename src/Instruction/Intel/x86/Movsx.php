@@ -18,7 +18,7 @@ class Movsx implements InstructionInterface
         return array_keys($this->indexPointers());
     }
 
-    public function process(int $opcode, RuntimeInterface $runtime): ExecutionStatus
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand1 = $runtime->streamReader()->byte();
         $operand2 = $runtime->streamReader()->byte();
