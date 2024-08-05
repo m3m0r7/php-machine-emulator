@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Call;
 use PHPMachineEmulator\Instruction\Intel\x86\Cli;
+use PHPMachineEmulator\Instruction\Intel\x86\CmpivAX;
 use PHPMachineEmulator\Instruction\Intel\x86\Hlt;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
 use PHPMachineEmulator\Instruction\Intel\x86\Jmp;
@@ -20,6 +21,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Movsp;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsx;
 use PHPMachineEmulator\Instruction\Intel\x86\Nop;
 use PHPMachineEmulator\Instruction\Intel\x86\Or_;
+use PHPMachineEmulator\Instruction\Intel\x86\PushReg;
 use PHPMachineEmulator\Instruction\Intel\x86\Ret;
 use PHPMachineEmulator\Instruction\Intel\x86\Sti;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
@@ -49,6 +51,7 @@ class x86 implements InstructionListInterface
         static $instructionList = [
             Call::class,
             Cli::class,
+            CmpivAX::class,
             Hlt::class,
             Int_::class,
             Jmp::class,
@@ -60,6 +63,7 @@ class x86 implements InstructionListInterface
             Movsx::class,
             Nop::class,
             Or_::class,
+            PushReg::class,
             Ret::class,
             Sti::class,
             Xor_::class,

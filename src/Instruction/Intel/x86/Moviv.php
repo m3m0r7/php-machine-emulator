@@ -24,12 +24,14 @@ class Moviv implements InstructionInterface
         $register = $this->registers()[$opcode];
 
         if ($opcode >= 0xB8) {
+            $operand2 = $runtime->streamReader()->byte();
+
             // NOTE: move instruction for Xx registers
             $runtime
                 ->memoryAccessor()
                 ->write(
                     $register,
-                    ($operand << 8) + $runtime->memoryAccessor()->fetch($register)->asByte(),
+                    ($operand2 << 8) + $operand,
                 );
 
             return ExecutionStatus::SUCCESS;
