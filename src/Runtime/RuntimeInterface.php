@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
+use PHPMachineEmulator\Video\VideoInterface;
 
 interface RuntimeInterface
 {
@@ -19,4 +20,5 @@ interface RuntimeInterface
     public function register(): RegisterInterface;
     public function frame(): FrameInterface;
     public function option(): OptionInterface;
+    public function video(): VideoInterface;
 }

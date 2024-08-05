@@ -24,6 +24,8 @@ use PHPMachineEmulator\Instruction\Intel\x86\Ret;
 use PHPMachineEmulator\Instruction\Intel\x86\Sti;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
 use PHPMachineEmulator\Instruction\RegisterInterface;
+use PHPMachineEmulator\Video\VideoColorType;
+use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class x86 implements InstructionListInterface
 {

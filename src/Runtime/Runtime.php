@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Runtime;
 
+use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Frame\Frame;
@@ -14,6 +15,7 @@ use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
+use PHPMachineEmulator\Video\VideoInterface;
 
 class Runtime implements RuntimeInterface
 {
@@ -21,9 +23,12 @@ class Runtime implements RuntimeInterface
     protected FrameInterface $frame;
     protected MemoryAccessorInterface $memoryAccessor;
 
-    public function __construct(protected MachineInterface $machine, protected InstructionListInterface $instructionList, protected StreamReaderIsProxyableInterface $streamReader)
-    {
-        $this->register = $this->instructionList->register();
+    public function __construct(
+        protected MachineInterface $machine,
+        protected ArchitectureProviderInterface $architectureProvider,
+        protected StreamReaderIsProxyableInterface $streamReader
+    ) {
+        $this->register = $this->architectureProvider->instructionList()->register();
         $this->frame = new Frame($this);
         $this->memoryAccessor = new MemoryAccessor($this);
     }
@@ -32,7 +37,7 @@ class Runtime implements RuntimeInterface
     {
         $this->machine->option()->logger()->info(sprintf('Started machine emulating which entrypoint is 0x%04X', $entrypoint));
 
-        foreach (($this->register)::map() as $name => $address) {
+        foreach ([...($this->register)::map(), $this->video()->videoTypeFlagAddress()] as $address) {
             $this->memoryAccessor->allocate($address);
 
             $this->machine->option()->logger()->debug(sprintf('Address allocated 0x%03s', decbin($address)));
@@ -87,11 +92,19 @@ class Runtime implements RuntimeInterface
         return $this->frame;
     }
 
+    public function video(): VideoInterface
+    {
+        return $this->architectureProvider
+            ->video();
+    }
+
     public function execute(int $opcode): ExecutionStatus
     {
         $this->machine->option()->logger()->debug(sprintf('Reached the opcode is 0x%04X', $opcode));
 
-        $instruction = $this->instructionList
+        $instruction = $this
+            ->architectureProvider
+            ->instructionList()
             ->getInstructionByOperationCode($opcode);
 
 
