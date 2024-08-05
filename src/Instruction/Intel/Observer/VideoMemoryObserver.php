@@ -20,9 +20,17 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
             )
             ->asByte();
 
+        $di = $runtime
+            ->memoryAccessor()
+            ->fetch(
+                ($runtime->register())::addressBy(RegisterType::EDI),
+            )
+            ->asByte();
+
+
         // NOTE: Express to write ES register only
-        return $address === ($runtime->register())::addressBy(RegisterType::EDI) &&
-            $es >= VideoMemoryService::VIDEO_MEMORY_ADDRESS_STARTED && $es <= VideoMemoryService::VIDEO_MEMORY_ADDRESS_ENDED;
+        return $address === ($di + $es) &&
+            ($di + $es) >= VideoMemoryService::VIDEO_MEMORY_ADDRESS_STARTED && ($di + $es) <= VideoMemoryService::VIDEO_MEMORY_ADDRESS_ENDED;
     }
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $value): void
@@ -32,8 +40,9 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
             ->fetch(RegisterType::EDI)
             ->asByte();
 
+        // TODO: Change renderer and replace stdout instead of echo
         if ($value & 0x0f !== 0) {
-            echo '|';
+            echo '.';
         } else if ($value === 0x00) {
             echo ' ';
         }
