@@ -32,7 +32,9 @@ class Lodsb implements InstructionInterface
         $runtime->memoryAccessor()
             ->write(
                 RegisterType::EAX,
-                $reader->byte(),
+                ($runtime
+                    ->memoryAccessor()
+                    ->fetch(RegisterType::EAX)->asByte() & 0b11111111_00000000) + ($reader->byte() & 0b11111111),
             );
 
         $runtime

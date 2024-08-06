@@ -43,7 +43,7 @@ class Moviv implements InstructionInterface
                 ->memoryAccessor()
                 ->write(
                     $register,
-                    (($operand << 8) & 0b11111111_00000000) + ($runtime->memoryAccessor()->fetch($register)->asByte()),
+                    ($runtime->memoryAccessor()->fetch($register)->asByte() & 0b11111111_00000000) + ($operand & 0b11111111),
                 );
 
             return ExecutionStatus::SUCCESS;
@@ -54,7 +54,7 @@ class Moviv implements InstructionInterface
             ->memoryAccessor()
             ->write(
                 $register,
-                (($operand << 8) & 0b11111111) + ($runtime->memoryAccessor()->fetch($register)->asByte() & 0b11111111),
+                (($operand << 8) & 0b11111111_00000000) + ($runtime->memoryAccessor()->fetch($register)->asByte() & 0b11111111),
             );
 
         return ExecutionStatus::SUCCESS;

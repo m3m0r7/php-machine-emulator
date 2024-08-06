@@ -12,6 +12,7 @@ use PHPMachineEmulator\Instruction\Intel\ServiceFunction\VideoServiceFunction;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\MemoryAccessorFetchResultInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class Int_ implements InstructionInterface
 {
@@ -42,6 +43,7 @@ class Int_ implements InstructionInterface
         $runtime->option()->logger()->debug('Reached to video interruption');
 
         $fetchResult = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
+
         match ($serviceFunction = VideoServiceFunction::find(($fetchResult->asByte() >> 8) & 0b11111111)) {
             VideoServiceFunction::SET_VIDEO_MODE => $this->setVideoMode($runtime, $fetchResult),
             VideoServiceFunction::TELETYPE_OUTPUT => $this->teletypeOutput($runtime, $fetchResult),
@@ -76,6 +78,9 @@ class Int_ implements InstructionInterface
         $videoType = $fetchResult->asByte() & 0b11111111;
 
         // NOTE: validate video type
+        /**
+         * @var VideoTypeInfo|null $video
+         */
         $video = $runtime->video()->supportedVideoModes()[$videoType] ?? null;
         if ($video === null) {
             throw new VideoInterruptException(
@@ -84,8 +89,60 @@ class Int_ implements InstructionInterface
             );
         }
 
+        // NOTE: Calculate terminal (as a video mode) size
+        [$height, $width] = explode(
+            ' ',
+            exec(
+                sprintf(
+                    'stty rows %d cols %d; stty size',
+                    $video->height,
+                    $video->width,
+                ),
+            ),
+        );
+
+        $width = (int) $width;
+        $height = (int) $height;
+
+        if ($video->width > $width) {
+            throw new VideoInterruptException(
+                sprintf(
+                    'The video is not enough rendering spaces of the width: %d cols',
+                    $video->width - $width,
+                )
+            );
+        }
+
+        if ($video->height > $height) {
+            throw new VideoInterruptException(
+                sprintf(
+                    'The video is not enough rendering spaces of the height: %d rows',
+                    $video->height - $height,
+                )
+            );
+        }
+
+        $runtime->option()->logger()->debug(
+            sprintf(
+                'Render video size %dx%d',
+                $width,
+                $height,
+            )
+        );
+
         $runtime->memoryAccessor()
-            ->write($runtime->video()->videoTypeFlagAddress(), $videoType);
+            ->write(
+                $runtime->video()->videoTypeFlagAddress(),
+                // NOTE: Actual width + Actual Height + Video Type
+                (($width & 0b11111111_11111111) << 24) + (($height & 0b11111111_11111111) << 8) + $videoType,
+            );
+
+        $runtime->memoryAccessor()
+            ->write(
+                $runtime->video()->videoTypeFlagAddress(),
+                // NOTE: Actual width + Actual Height + Video Type
+                $videoType,
+            );
     }
 
     protected function teletypeOutput(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void

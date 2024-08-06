@@ -44,11 +44,7 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $value): void
     {
-        $di = $runtime
-            ->memoryAccessor()
-            ->fetch(RegisterType::EDI)
-            ->asByte();
-
+        var_dump($value);
         if ($value & 0x0f !== 0) {
             $runtime
                 ->option()

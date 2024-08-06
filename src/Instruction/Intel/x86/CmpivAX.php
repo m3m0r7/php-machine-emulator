@@ -31,10 +31,10 @@ class CmpivAX implements InstructionInterface
 
         $runtime->memoryAccessor()
             ->updateFlags(match ($opcode) {
-                0x3C => $fetchResult->asByte() === $operand & 0b11111111,
+                0x3C => ($fetchResult->asByte() & 0b11111111) === $operand & 0b11111111,
 
                 // TODO: You should implement 16bit and 32bit
-                0x3D => $fetchResult->asByte() === $operand & 0b11111111_11111111,
+                0x3D => ($fetchResult->asByte()& 0b11111111_11111111) === ($operand & 0b11111111_11111111),
             });
 
         return ExecutionStatus::SUCCESS;
