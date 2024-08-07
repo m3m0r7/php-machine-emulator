@@ -68,7 +68,17 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
         $backgroundColor = ($value & 0b01110000) >> 4;
         $blinkBit = ($value & 0b10000000) >> 7;
 
-        if ($backgroundColor & 0xF !== 0) {
+        for ($i = 0; $i < $diff; $i++) {
+            $this->drawer
+                ->dot(Color::asBlack());
+        }
+
+        if ($di > 0 && ($di % ($videoTypeInfo->width)) === 0) {
+            $this->drawer
+                ->newline();
+        }
+
+        if (($backgroundColor & 0xF) !== 0) {
             $this->drawer
                 ->dot(Color::asWhite());
         }
@@ -76,17 +86,6 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
         if ($backgroundColor === 0) {
             $this->drawer
                 ->dot(Color::asBlack());
-        }
-
-        $havingNewline = $di > 0 && ($di % ($videoTypeInfo->width)) === 0;
-
-        for ($i = 0; $i < $diff; $i++) {
-            $this->drawer
-                ->dot(Color::asBlack());
-        }
-        if ($havingNewline) {
-            $this->drawer
-                ->newline();
         }
     }
 }
