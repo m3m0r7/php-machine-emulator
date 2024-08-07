@@ -173,7 +173,7 @@ dw 0xAA55
 
 2. Write a PHP and save as `Triangle.php`
 
-```
+```php
 <?php
 require __DIR__ . '/vendor/autoload.php';
 
