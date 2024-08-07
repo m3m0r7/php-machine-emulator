@@ -61,7 +61,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $this->write(
             $registerType,
             // Write with Little endian
-            ($this->fetch($registerType)->asByte() & 0b11111111_00000000) + ($value & 0b11111111),
+            (($this->fetch($registerType)->asByte() << 8) & 0b11111111_00000000) + ($value & 0b11111111),
         );
 
         return $this;

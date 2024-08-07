@@ -144,6 +144,6 @@ class Int_ implements InstructionInterface
             ->option()
             ->IO()
             ->output()
-            ->write($fetchResult->asChar());
+            ->write($fetchResult->asLowBitChar());
     }
 }

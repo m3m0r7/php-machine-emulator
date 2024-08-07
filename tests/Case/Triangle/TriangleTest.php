@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-namespace Tests\Case\HelloWorld;
+namespace Tests\Case\Triangle;
 
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
@@ -11,17 +11,19 @@ use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\FileStream;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Spatie\Snapshots\MatchesSnapshots;
 use Tests\CreateApplication;
 
-class HelloWorldTest extends TestCase
+class TriangleTest extends TestCase
 {
     use CreateApplication;
+    use MatchesSnapshots;
 
     #[DataProvider('machineInitialization')]
     public function testPrintHelloWorld(MachineType $machineType, OptionInterface $option)
     {
         $machine = new Machine(
-            new FileStream(__DIR__ . '/Fixture/HelloWorld.o'),
+            new FileStream(__DIR__ . '/Fixture/Triangle.o'),
             $option,
         );
 
@@ -35,6 +37,6 @@ class HelloWorldTest extends TestCase
         $output = $option->IO()->output();
         assert($output instanceof Buffer);
 
-        $this->assertSame("Hello World!\n", $output->getBuffer());
+        $this->assertMatchesTextSnapshot($output->getBuffer());
     }
 }

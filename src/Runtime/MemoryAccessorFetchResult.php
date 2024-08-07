@@ -18,6 +18,22 @@ class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
         return chr($this->value);
     }
 
+    public function asLowBitChar(): string
+    {
+        if ($this->value === null) {
+            return chr(0);
+        }
+        return chr(($this->value >> 8) & 0b11111111);
+    }
+
+    public function asHighBitChar(): string
+    {
+        if ($this->value === null) {
+            return chr(0);
+        }
+        return chr($this->value & 0b11111111);
+    }
+
     public function asByte(): int
     {
         if ($this->value === null) {
