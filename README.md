@@ -88,7 +88,7 @@ For an example; You can render a pixel art from a bootloader as following:
 
 1. Write an assembly and save as `Triangle.asm`
 
-```
+```asm
 [bits 16]
 [org 0x7C00]
 
