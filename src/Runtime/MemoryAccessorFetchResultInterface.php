@@ -11,5 +11,7 @@ interface MemoryAccessorFetchResultInterface
 {
     public function asChar(): string;
     public function asByte(): int;
+    public function asLowBit(): int;
+    public function asHighBit(): int;
     public function valueOf(): int|null;
 }

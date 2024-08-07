@@ -26,6 +26,16 @@ class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
         return $this->value;
     }
 
+    public function asLowBit(): int
+    {
+        return ($this->asByte() >> 8) & 0b11111111;
+    }
+
+    public function asHighBit(): int
+    {
+        return $this->asByte() & 0b11111111;
+    }
+
     public function valueOf(): int|null
     {
         return $this->value;

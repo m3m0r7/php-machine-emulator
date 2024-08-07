@@ -41,9 +41,9 @@ class Moviv implements InstructionInterface
             // NOTE: move instruction for high-bit
             $runtime
                 ->memoryAccessor()
-                ->write(
+                ->writeToHighBit(
                     $register,
-                    ($runtime->memoryAccessor()->fetch($register)->asByte() & 0b11111111_00000000) + ($operand & 0b11111111),
+                    $operand,
                 );
 
             return ExecutionStatus::SUCCESS;
@@ -52,9 +52,9 @@ class Moviv implements InstructionInterface
         // NOTE: move instruction for low-bit
         $runtime
             ->memoryAccessor()
-            ->write(
+            ->writeToLowBit(
                 $register,
-                (($operand << 8) & 0b11111111_00000000) + ($runtime->memoryAccessor()->fetch($register)->asByte() & 0b11111111),
+                $operand,
             );
 
         return ExecutionStatus::SUCCESS;

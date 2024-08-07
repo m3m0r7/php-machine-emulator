@@ -7,6 +7,7 @@ namespace PHPMachineEmulator\Instruction\Intel\Observer;
 use PHPMachineEmulator\Display\Pixel\Color;
 use PHPMachineEmulator\Display\Pixel\Drawer;
 use PHPMachineEmulator\Display\Pixel\DrawerInterface;
+use PHPMachineEmulator\Display\Writer\TerminalScreenWriter;
 use PHPMachineEmulator\Instruction\Intel\Service\VideoMemoryService;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\MemoryAccessorObserverInterface;
@@ -14,12 +15,8 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class VideoMemoryObserver implements MemoryAccessorObserverInterface
 {
-    protected DrawerInterface $drawer;
-
-    public function __construct()
-    {
-        $this->drawer = new Drawer();
-    }
+    protected ?DrawerInterface $drawer = null;
+    protected int $previousEDI = -1;
 
     public function shouldMatch(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): bool
     {
@@ -44,19 +41,52 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $value): void
     {
-        var_dump($value);
-        if ($value & 0x0f !== 0) {
-            $runtime
-                ->option()
-                ->IO()
-                ->output()
-                ->write($this->drawer->dot(Color::asWhite()));
-        } else if ($value === 0x00) {
-            $runtime
-                ->option()
-                ->IO()
-                ->output()
-                ->write($this->drawer->dot(Color::asBlack()));
+        $di = $runtime->memoryAccessor()
+            ->fetch(
+                ($runtime->register())::addressBy(RegisterType::EDI),
+            )
+            ->asByte();
+
+        $diff = $di - $this->previousEDI - 1;
+        $this->previousEDI = $di;
+
+        $videoSettingAddress = $runtime
+            ->memoryAccessor()
+            ->fetch(
+                $runtime->video()
+                    ->videoTypeFlagAddress(),
+            )
+            ->asByte();
+
+        $videoType = $videoSettingAddress & 0b11111111;
+
+        $videoTypeInfo = $runtime->video()->supportedVideoModes()[$videoType];
+
+        $this->drawer ??= new Drawer(new TerminalScreenWriter($runtime, $videoTypeInfo));
+
+        $textColor = $value & 0b00001111;
+        $backgroundColor = ($value & 0b01110000) >> 4;
+        $blinkBit = ($value & 0b10000000) >> 7;
+
+        if ($backgroundColor & 0xF !== 0) {
+            $this->drawer
+                ->dot(Color::asWhite());
+        }
+
+        if ($backgroundColor === 0) {
+            $this->drawer
+                ->dot(Color::asBlack());
+        }
+
+        $havingNewline = $di > 0 && ($di % ($videoTypeInfo->width)) === 0;
+
+        for ($i = 0; $i < $diff; $i++) {
+            $this->drawer
+                ->dot(Color::asBlack());
+        }
+        if ($havingNewline) {
+            $this->drawer
+                ->newline();
         }
     }
 }

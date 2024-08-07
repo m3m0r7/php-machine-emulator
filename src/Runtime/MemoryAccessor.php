@@ -56,6 +56,28 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this;
     }
 
+    public function writeToHighBit(int|RegisterType $registerType, int|null $value): self
+    {
+        $this->write(
+            $registerType,
+            // Write with Little endian
+            ($this->fetch($registerType)->asByte() & 0b11111111_00000000) + ($value & 0b11111111),
+        );
+
+        return $this;
+    }
+
+    public function writeToLowBit(int|RegisterType $registerType, int|null $value): self
+    {
+        $this->write(
+            $registerType,
+            // Write with Little endian
+            (($value << 8) & 0b11111111_00000000) + ($this->fetch($registerType)->asByte() & 0b11111111),
+        );
+
+        return $this;
+    }
+
     public function updateFlags(int|null $value): self
     {
         $this->zeroFlag = $value === 0;

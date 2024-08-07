@@ -30,13 +30,12 @@ class Lodsb implements InstructionInterface
             ->setOffset($si - $runtime->runtimeOption()->entrypoint());
 
         $runtime->memoryAccessor()
-            ->write(
+            ->writeToLowBit(
                 RegisterType::EAX,
-                ($runtime
-                    ->memoryAccessor()
-                    ->fetch(RegisterType::EAX)->asByte() & 0b11111111_00000000) + ($reader->byte() & 0b11111111),
+                $reader->byte(),
             );
 
+        // TODO: apply DF flag
         $runtime
             ->memoryAccessor()
             ->increment(RegisterType::ESI);

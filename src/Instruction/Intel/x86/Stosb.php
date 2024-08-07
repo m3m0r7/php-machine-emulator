@@ -23,7 +23,7 @@ class Stosb implements InstructionInterface
         $byte = $runtime
             ->memoryAccessor()
             ->fetch(RegisterType::EAX)
-            ->asByte() & 0b11111111;
+            ->asLowBit();
 
         $es = $runtime->memoryAccessor()
             ->fetch(($runtime->register())::addressBy(RegisterType::ES))

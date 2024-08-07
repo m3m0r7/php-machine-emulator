@@ -44,7 +44,7 @@ class Int_ implements InstructionInterface
 
         $fetchResult = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
 
-        match ($serviceFunction = VideoServiceFunction::find(($fetchResult->asByte() >> 8) & 0b11111111)) {
+        match ($serviceFunction = VideoServiceFunction::find($fetchResult->asHighBit())) {
             VideoServiceFunction::SET_VIDEO_MODE => $this->setVideoMode($runtime, $fetchResult),
             VideoServiceFunction::TELETYPE_OUTPUT => $this->teletypeOutput($runtime, $fetchResult),
 
@@ -75,7 +75,7 @@ class Int_ implements InstructionInterface
     {
         $runtime->option()->logger()->debug('Set Video Mode');
 
-        $videoType = $fetchResult->asByte() & 0b11111111;
+        $videoType = $fetchResult->asLowBit();
 
         // NOTE: validate video type
         /**
@@ -97,7 +97,7 @@ class Int_ implements InstructionInterface
                     'stty rows %d cols %d; stty size',
                     $video->height,
                     $video->width,
-                ),
+                )
             ),
         );
 
@@ -107,7 +107,7 @@ class Int_ implements InstructionInterface
         if ($video->width > $width) {
             throw new VideoInterruptException(
                 sprintf(
-                    'The video is not enough rendering spaces of the width: %d cols',
+                    'The video is not enough rendering spaces of the width: not enough %d cols',
                     $video->width - $width,
                 )
             );
@@ -116,7 +116,7 @@ class Int_ implements InstructionInterface
         if ($video->height > $height) {
             throw new VideoInterruptException(
                 sprintf(
-                    'The video is not enough rendering spaces of the height: %d rows',
+                    'The video is not enough rendering spaces of the height: not enough %d rows',
                     $video->height - $height,
                 )
             );
@@ -135,13 +135,6 @@ class Int_ implements InstructionInterface
                 $runtime->video()->videoTypeFlagAddress(),
                 // NOTE: Actual width + Actual Height + Video Type
                 (($width & 0b11111111_11111111) << 24) + (($height & 0b11111111_11111111) << 8) + $videoType,
-            );
-
-        $runtime->memoryAccessor()
-            ->write(
-                $runtime->video()->videoTypeFlagAddress(),
-                // NOTE: Actual width + Actual Height + Video Type
-                $videoType,
             );
     }
 
