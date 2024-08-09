@@ -12,7 +12,9 @@ use PHPMachineEmulator\Instruction\Intel\x86\Cli;
 use PHPMachineEmulator\Instruction\Intel\x86\CmpivAX;
 use PHPMachineEmulator\Instruction\Intel\x86\Hlt;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
+use PHPMachineEmulator\Instruction\Intel\x86\Jc;
 use PHPMachineEmulator\Instruction\Intel\x86\Jmp;
+use PHPMachineEmulator\Instruction\Intel\x86\JmpShort;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jz;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
@@ -59,7 +61,9 @@ class x86 implements InstructionListInterface
             CmpivAX::class,
             Hlt::class,
             Int_::class,
+            Jc::class,
             Jmp::class,
+            JmpShort::class,
             Jnz::class,
             Jz::class,
             Lodsb::class,

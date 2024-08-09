@@ -9,9 +9,22 @@ main:
   mov es, ax
   mov ss, ax
   mov sp, 0x7C00
-  sti
 
-  mov si, hello_world
+  mov bx, 0x1000
+  mov ah, 0x02
+  mov al, 0x01
+  mov ch, 0x00
+  mov cl, 0x02
+  mov dh, 0x00
+  mov dl, 0x80
+
+  int 0x13
+  jc error
+
+  jmp 0x1000
+
+error:
+  mov si, error_message
   call print_string
   hlt
 
@@ -28,8 +41,8 @@ print_string:
   .done:
     ret
 
-hello_world:
-  db "Hello World!", 0x0D, 0x0A, 0
+error_message:
+  db "Read Disk Error!", 0x0D, 0x0A, 0
 
 times 510-($-$$) db 0
 dw 0xAA55

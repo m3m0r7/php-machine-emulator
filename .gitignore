@@ -4,3 +4,6 @@ composer.lock
 test*.php
 HelloWorld.bin
 /HelloWorld.asm
+/Test*.asm
+/Test*.bin
+Test.bin

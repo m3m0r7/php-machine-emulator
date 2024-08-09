@@ -92,6 +92,13 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this;
     }
 
+    public function setCarryFlag(bool $which): self
+    {
+        $this->carryFlag = $which;
+
+        return $this;
+    }
+
     public function add(int|RegisterType $registerType, int $value): self
     {
         $this

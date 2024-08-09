@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\Observer;
 
 use PHPMachineEmulator\Display\Pixel\Color;
-use PHPMachineEmulator\Display\Pixel\Drawer;
-use PHPMachineEmulator\Display\Pixel\DrawerInterface;
+use PHPMachineEmulator\Display\Writer\ScreenWriterInterface;
 use PHPMachineEmulator\Display\Writer\TerminalScreenWriter;
 use PHPMachineEmulator\Instruction\Intel\Service\VideoMemoryService;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -15,7 +14,7 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class VideoMemoryObserver implements MemoryAccessorObserverInterface
 {
-    protected ?DrawerInterface $drawer = null;
+    protected ?ScreenWriterInterface $writer = null;
     protected int $previousEDI = -1;
 
     public function shouldMatch(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): bool
@@ -62,29 +61,29 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
 
         $videoTypeInfo = $runtime->video()->supportedVideoModes()[$videoType];
 
-        $this->drawer ??= new Drawer(new TerminalScreenWriter($runtime, $videoTypeInfo));
+        $this->writer ??= new TerminalScreenWriter($runtime, $videoTypeInfo);
 
         $textColor = $value & 0b00001111;
         $backgroundColor = ($value & 0b01110000) >> 4;
         $blinkBit = ($value & 0b10000000) >> 7;
 
         for ($i = 0; $i < $diff; $i++) {
-            $this->drawer
+            $this->writer
                 ->dot(Color::asBlack());
         }
 
         if ($di > 0 && ($di % ($videoTypeInfo->width)) === 0) {
-            $this->drawer
+            $this->writer
                 ->newline();
         }
 
         if (($backgroundColor & 0xF) !== 0) {
-            $this->drawer
+            $this->writer
                 ->dot(Color::asWhite());
         }
 
         if ($backgroundColor === 0) {
-            $this->drawer
+            $this->writer
                 ->dot(Color::asBlack());
         }
     }

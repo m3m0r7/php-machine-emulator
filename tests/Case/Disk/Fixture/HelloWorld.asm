@@ -1,5 +1,5 @@
 [bits 16]
-[org 0x7C00]
+[org 0x1500]
 
 main:
   cli
@@ -8,7 +8,7 @@ main:
   mov ds, ax
   mov es, ax
   mov ss, ax
-  mov sp, 0x7C00
+  mov sp, 0x1500
   sti
 
   mov si, hello_world
@@ -31,5 +31,5 @@ print_string:
 hello_world:
   db "Hello World!", 0x0D, 0x0A, 0
 
-times 510-($-$$) db 0
-dw 0xAA55
+times 512-($-$$) db 0
+

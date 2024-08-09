@@ -15,8 +15,10 @@ interface RuntimeInterface
 {
     public function runtimeOption(): RuntimeOptionInterface;
     public function start(): void;
+    public function addressMap(): AddressMapInterface;
     public function memoryAccessor(): MemoryAccessorInterface;
     public function execute(int $opcode): ExecutionStatus;
+    public function shutdown(callable $callback): self;
     public function streamReader(): StreamReaderIsProxyableInterface;
     public function register(): RegisterInterface;
     public function frame(): FrameInterface;

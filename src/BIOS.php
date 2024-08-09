@@ -18,6 +18,7 @@ class BIOS extends Machine
 {
     public const NAME = 'PHPMachineEmulator';
     public const BIOS_ENTRYPOINT = 0x7C00;
+    public const READ_SIZE_PER_SECTOR = 512;
 
     public function __construct(StreamReaderIsProxyableInterface $streamReader, OptionInterface $option)
     {
@@ -47,14 +48,14 @@ class BIOS extends Machine
         try {
             $proxy->setOffset(510);
         } catch (StreamReaderException) {
-            throw new BIOSInvalidException('The disk is invalid');
+            throw new BIOSInvalidException('The disk is invalid. Failed to change offsets');
         }
 
         $low = $proxy->byte();
         $high = $proxy->byte();
 
-        if ($high !== 0xAA || $low !== 0x55 || !$proxy->isEOF()) {
-            throw new BIOSInvalidException('The disk is invalid');
+        if ($high !== 0xAA || $low !== 0x55) {
+            throw new BIOSInvalidException('The BIOS signature is invalid');
         }
     }
 

@@ -1,0 +1,8 @@
+{
+  "path": "Bundle.o",
+  "files": [
+    "Bootloader.o",
+    "Mediator.o",
+    "HelloWorld.o"
+  ]
+}

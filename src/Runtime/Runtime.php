@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Runtime;
 
 use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
+use PHPMachineEmulator\Disk\Bootloader;
+use PHPMachineEmulator\Disk\HardDisk;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Frame\Frame;
 use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
-use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\ServiceInterface;
 use PHPMachineEmulator\MachineInterface;
@@ -23,6 +24,8 @@ class Runtime implements RuntimeInterface
     protected RegisterInterface $register;
     protected FrameInterface $frame;
     protected MemoryAccessorInterface $memoryAccessor;
+    protected AddressMapInterface $addressMap;
+    protected array $shutdown = [];
 
     public function __construct(
         protected MachineInterface $machine,
@@ -30,8 +33,13 @@ class Runtime implements RuntimeInterface
         protected ArchitectureProviderInterface $architectureProvider,
         protected StreamReaderIsProxyableInterface $streamReader,
     ) {
-        $this->register = $this->architectureProvider->instructionList()->register();
+        $this->register = $this
+            ->architectureProvider
+            ->instructionList()
+            ->register();
+
         $this->frame = new Frame($this);
+        $this->addressMap = new AddressMap($this);
         $this->memoryAccessor = new MemoryAccessor(
             $this,
             $this->architectureProvider
@@ -42,6 +50,13 @@ class Runtime implements RuntimeInterface
     public function start(): void
     {
         $this->machine->option()->logger()->info(sprintf('Started machine emulating which entrypoint is 0x%04X', $this->runtimeOption->entrypoint()));
+
+        $this
+            ->addressMap
+            ->register(
+                $this->runtimeOption->entrypoint(),
+                new Bootloader(),
+            );
 
         foreach ([...($this->register)::map(), $this->video()->videoTypeFlagAddress()] as $address) {
             $this->memoryAccessor->allocate($address);
@@ -78,6 +93,24 @@ class Runtime implements RuntimeInterface
                 throw new HaltException('The executor halted');
             }
         }
+    }
+
+    public function __destruct()
+    {
+        foreach ($this->shutdown as $callback) {
+            $callback($this);
+        }
+    }
+
+    public function shutdown(callable $callback): self
+    {
+        $this->shutdown[] = $callback;
+        return $this;
+    }
+
+    public function addressMap(): AddressMapInterface
+    {
+        return $this->addressMap;
     }
 
     public function runtimeOption(): RuntimeOptionInterface

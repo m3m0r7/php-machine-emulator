@@ -27,7 +27,9 @@ class Lodsb implements InstructionInterface
             ->asByte();
 
         $reader
-            ->setOffset($si - $runtime->runtimeOption()->entrypoint());
+            ->setOffset(
+                $runtime->addressMap()->getDisk()->entrypointOffset() + ($si - $runtime->addressMap()->getOrigin()),
+            );
 
         $runtime->memoryAccessor()
             ->writeToLowBit(
