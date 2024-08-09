@@ -12,6 +12,7 @@ enum RegisterType
     case EBX;
     case ESP;
     case EBP;
+
     case ESI;
     case EDI;
 

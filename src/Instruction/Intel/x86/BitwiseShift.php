@@ -43,15 +43,18 @@ class BitwiseShift implements InstructionInterface
     {
         $operand = $runtime->streamReader()->byte();
 
+        $value = $runtime
+            ->memoryAccessor()
+            ->fetch($modRegRM->source())
+            ->asLowBit();
+
         $runtime
             ->memoryAccessor()
             ->writeToLowBit(
                 $modRegRM->source(),
-                $runtime
-                    ->memoryAccessor()
-                    ->fetch($operand)
-                    ->asByte() >> $operand,
-            );
+                $value >> $operand,
+            )
+            ->setCarryFlag(($value & 0b00000001) !== 0);
 
         return ExecutionStatus::SUCCESS;
     }

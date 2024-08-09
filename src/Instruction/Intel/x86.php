@@ -7,12 +7,15 @@ namespace PHPMachineEmulator\Instruction\Intel;
 use PHPMachineEmulator\Exception\OperationNotFoundException;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
+use PHPMachineEmulator\Instruction\Intel\x86\AddImm8;
+use PHPMachineEmulator\Instruction\Intel\x86\AndImm8;
 use PHPMachineEmulator\Instruction\Intel\x86\BitwiseShift;
 use PHPMachineEmulator\Instruction\Intel\x86\Call;
 use PHPMachineEmulator\Instruction\Intel\x86\Cli;
-use PHPMachineEmulator\Instruction\Intel\x86\CmpivAX;
+use PHPMachineEmulator\Instruction\Intel\x86\CmpImmAX;
 use PHPMachineEmulator\Instruction\Intel\x86\Hlt;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
+use PHPMachineEmulator\Instruction\Intel\x86\Jbe;
 use PHPMachineEmulator\Instruction\Intel\x86\Jc;
 use PHPMachineEmulator\Instruction\Intel\x86\Jmp;
 use PHPMachineEmulator\Instruction\Intel\x86\JmpShort;
@@ -21,8 +24,8 @@ use PHPMachineEmulator\Instruction\Intel\x86\Jz;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\LogicIns;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
-use PHPMachineEmulator\Instruction\Intel\x86\MovMemoryAddress;
-use PHPMachineEmulator\Instruction\Intel\x86\Moviv;
+use PHPMachineEmulator\Instruction\Intel\x86\MovMem;
+use PHPMachineEmulator\Instruction\Intel\x86\MovImm8;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsp;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsx;
@@ -58,12 +61,15 @@ class x86 implements InstructionListInterface
     public function instructionList(): array
     {
         static $instructionList = [
+            AddImm8::class,
+            AndImm8::class,
             BitwiseShift::class,
             Call::class,
             Cli::class,
-            CmpivAX::class,
+            CmpImmAX::class,
             Hlt::class,
             Int_::class,
+            Jbe::class,
             Jc::class,
             Jmp::class,
             JmpShort::class,
@@ -72,8 +78,8 @@ class x86 implements InstructionListInterface
             Lodsb::class,
             LogicIns::class,
             Loop::class,
-            MovMemoryAddress::class,
-            Moviv::class,
+            MovMem::class,
+            MovImm8::class,
             Movsg::class,
             Movsp::class,
             Movsx::class,

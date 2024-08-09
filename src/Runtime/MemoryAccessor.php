@@ -16,6 +16,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     protected bool $overflowFlag = false;
     protected bool $carryFlag = false;
     protected bool $parityFlag = false;
+    protected bool $fireEvents = true;
 
     public function __construct(protected RuntimeInterface $runtime, protected MemoryAccessorObserverCollectionInterface $memoryAccessorObserverCollection)
     {
@@ -44,12 +45,8 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function write(int|RegisterType $registerType, int|null $value): self
     {
-        $address = $this->asAddress($registerType);
-        $this->validateMemoryAddressWasAllocated($address);
+        [$address, $previousValue] = $this->processWrite($registerType, $value);
 
-        $previousValue = $this->memory[$address];
-
-        $this->memory[$address] = $value;
         $this->updateFlags($value);
         $this->processObservers($address, $previousValue, $value);
 
@@ -58,10 +55,18 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function writeToHighBit(int|RegisterType $registerType, int|null $value): self
     {
-        $this->write(
+        $wroteValue = $value & 0b11111111;
+
+        [$address, $previousValue] = $this->processWrite(
             $registerType,
-            // Write with Little endian
-            (($this->fetch($registerType)->asByte() << 8) & 0b11111111_00000000) + ($value & 0b11111111),
+            (($this->fetch($registerType)->asLowBit() << 8) & 0b11111111_00000000) + $wroteValue,
+        );
+
+        $this->updateFlags($wroteValue);
+        $this->processObservers(
+            $address,
+            $previousValue & 0b11111111,
+            $wroteValue,
         );
 
         return $this;
@@ -69,11 +74,20 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function writeToLowBit(int|RegisterType $registerType, int|null $value): self
     {
-        $this->write(
+        $wroteValue = $value & 0b11111111;
+
+        [$address, $previousValue] = $this->processWrite(
             $registerType,
-            // Write with Little endian
-            (($value << 8) & 0b11111111_00000000) + ($this->fetch($registerType)->asByte() & 0b11111111),
+            ($wroteValue << 8) + ($this->fetch($registerType)->asHighBit() & 0b11111111),
         );
+
+        $this->updateFlags($wroteValue);
+        $this->processObservers(
+            $address,
+            $previousValue & 0b11111111,
+            $wroteValue,
+        );
+
 
         return $this;
     }
@@ -83,10 +97,6 @@ class MemoryAccessor implements MemoryAccessorInterface
         $this->zeroFlag = $value === 0;
         $this->signFlag = $value !== null && $value < 0;
         $this->overflowFlag = $value !== null && $value > 0xFFFF;
-
-        // TODO: implement here
-        $this->carryFlag = false;
-
         $this->parityFlag = $value !== null && substr_count(decbin($value & 0b11111111), '1') % 2 === 0;
 
         return $this;
@@ -188,6 +198,18 @@ class MemoryAccessor implements MemoryAccessorInterface
         );
 
         return $this;
+    }
+
+    private function processWrite(int|RegisterType $registerType, int|null $value): array
+    {
+        $address = $this->asAddress($registerType);
+        $this->validateMemoryAddressWasAllocated($address);
+
+        $previousValue = $this->memory[$address];
+
+        $this->memory[$address] = $value;
+
+        return [$address, $previousValue];
     }
 
     private function processObservers(int $address, int|null $previousValue, int|null $nextValue): void

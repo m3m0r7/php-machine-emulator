@@ -25,12 +25,17 @@ class EnhanceStreamReader
 
     public function signedShort(): int
     {
-        $operand1 = $this->streamReader->byte();
-        $operand2 = $this->streamReader->byte();
-
-        $value = ($operand2 << 8) + $operand1;
+        $value = $this->short();
         return $value >= 0x8000
             ? $value - 0x10000
             : $value;
+    }
+
+    public function short(): int
+    {
+        $operand1 = $this->streamReader->byte();
+        $operand2 = $this->streamReader->byte();
+
+        return ($operand2 << 8) + $operand1;
     }
 }

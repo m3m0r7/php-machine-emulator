@@ -9,7 +9,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
-class CmpivAX implements InstructionInterface
+class CmpImmAX implements InstructionInterface
 {
     use Instructable;
 
@@ -29,13 +29,16 @@ class CmpivAX implements InstructionInterface
             ->memoryAccessor()
             ->fetch(RegisterType::EAX);
 
-        $runtime->memoryAccessor()
+        $runtime
+            ->memoryAccessor()
             ->updateFlags(match ($opcode) {
-                0x3C => $fetchResult->asLowBit() === $operand & 0b11111111,
+                0x3C => $fetchResult->asLowBit() - $operand,
 
                 // TODO: You should implement 16bit and 32bit
-                0x3D => ($fetchResult->asByte() & 0b11111111_11111111) === ($operand & 0b11111111_11111111),
-            });
+                0x3D => ($fetchResult->asByte() & 0b11111111_11111111) - ($operand & 0b11111111_11111111),
+            })
+            ->setCarryFlag($fetchResult->asLowBit() < $operand);
+
 
         return ExecutionStatus::SUCCESS;
     }

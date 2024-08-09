@@ -8,7 +8,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
-class Moviv implements InstructionInterface
+class MovImm8 implements InstructionInterface
 {
     use Instructable;
 

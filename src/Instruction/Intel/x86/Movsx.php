@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 
@@ -20,13 +21,12 @@ class Movsx implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $operand1 = $runtime->streamReader()->byte();
-        $operand2 = $runtime->streamReader()->byte();
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
         $runtime->memoryAccessor()
             ->write(
                 $this->indexPointers()[$opcode],
-                ($operand2 << 8) + $operand1,
+                $enhancedStreamReader->short(),
             );
 
         return ExecutionStatus::SUCCESS;

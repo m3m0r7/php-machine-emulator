@@ -11,34 +11,27 @@ use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
-class MovMemoryAddress implements InstructionInterface
+class AndImm8 implements InstructionInterface
 {
     use Instructable;
 
     public function opcodes(): array
     {
-        return [0x8A];
+        return [0x24];
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
-        $modRegRM = $enhancedStreamReader->byteAsModRegRM();
-
-        if ($modRegRM->mode() !== 0b000) {
-            throw new ExecutionException(
-                sprintf('The addressing mode (0b%s) is not supported yet', decbin($modRegRM->mode()))
-            );
-        }
+        $operand = $runtime->streamReader()->byte();
 
         $runtime
             ->memoryAccessor()
-            ->write(
-                $modRegRM->destination(),
+            ->writeToLowBit(
+                RegisterType::EAX,
                 $runtime
                     ->memoryAccessor()
-                    ->fetch($modRegRM->source())
-                    ->asByte(),
+                    ->fetch(RegisterType::EAX)
+                    ->asLowBit() & $operand,
             );
 
         return ExecutionStatus::SUCCESS;
