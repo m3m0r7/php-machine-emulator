@@ -6,16 +6,18 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
+use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
-class Movsg implements InstructionInterface
+class BitwiseShift implements InstructionInterface
 {
     use Instructable;
 
     public function opcodes(): array
     {
-        return [0x8E];
+        return [0xC0];
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
@@ -29,14 +31,26 @@ class Movsg implements InstructionInterface
             );
         }
 
+        return match ($modRegRM->digit()) {
+            0b101 => $this->rotateRight($runtime, $modRegRM),
+            default => throw new ExecutionException(
+                sprintf('The digit (0b%s) is not supported yet', decbin($modRegRM->digit()))
+            ),
+        };
+    }
+
+    protected function rotateRight(RuntimeInterface $runtime, ModRegRMInterface $modRegRM): ExecutionStatus
+    {
+        $operand = $runtime->streamReader()->byte();
+
         $runtime
             ->memoryAccessor()
-            ->write(
-                $modRegRM->destination() + ($runtime->register())::getRaisedSegmentRegister(),
+            ->writeToLowBit(
+                $modRegRM->source(),
                 $runtime
                     ->memoryAccessor()
-                    ->fetch($modRegRM->source())
-                    ->asByte(),
+                    ->fetch($operand)
+                    ->asByte() >> $operand,
             );
 
         return ExecutionStatus::SUCCESS;

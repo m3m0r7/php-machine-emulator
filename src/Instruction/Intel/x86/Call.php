@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 use PHPMachineEmulator\Frame\FrameSet;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Call implements InstructionInterface
@@ -19,14 +20,18 @@ class Call implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $byte1 = $runtime->streamReader()->byte();
-        $byte2 = $runtime->streamReader()->byte();
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
-        $pos = $runtime->streamReader()->offset();
+        $offset = $enhancedStreamReader
+            ->signedShort();
+
+        $pos = $runtime
+            ->streamReader()
+            ->offset();
 
         $runtime
             ->streamReader()
-            ->setOffset($pos + ($byte2 << 8) + $byte1);
+            ->setOffset($pos + $offset);
 
         $runtime->frame()
             ->append(new FrameSet($runtime, $this, $pos));

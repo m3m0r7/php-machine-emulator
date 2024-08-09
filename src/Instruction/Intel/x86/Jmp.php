@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Jmp implements InstructionInterface
@@ -19,19 +20,10 @@ class Jmp implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $operand1 = $runtime
-            ->streamReader()
-            ->byte();
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
-        $operand2 = $runtime
-            ->streamReader()
-            ->byte();
-
-        // NOTE: Calculate included negative offset
-        $offset = ($operand2 << 8) + $operand1;
-        $offset = $offset >= 0x8000
-            ? $offset - 0x10000
-            : $offset;
+        $offset = $enhancedStreamReader
+            ->signedShort();
 
         // NOTE: Add current origin
         $offset += $runtime->addressMap()->getOrigin();

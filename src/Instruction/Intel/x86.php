@@ -7,6 +7,7 @@ namespace PHPMachineEmulator\Instruction\Intel;
 use PHPMachineEmulator\Exception\OperationNotFoundException;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
+use PHPMachineEmulator\Instruction\Intel\x86\BitwiseShift;
 use PHPMachineEmulator\Instruction\Intel\x86\Call;
 use PHPMachineEmulator\Instruction\Intel\x86\Cli;
 use PHPMachineEmulator\Instruction\Intel\x86\CmpivAX;
@@ -20,6 +21,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Jz;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\LogicIns;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
+use PHPMachineEmulator\Instruction\Intel\x86\MovMemoryAddress;
 use PHPMachineEmulator\Instruction\Intel\x86\Moviv;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsp;
@@ -56,6 +58,7 @@ class x86 implements InstructionListInterface
     public function instructionList(): array
     {
         static $instructionList = [
+            BitwiseShift::class,
             Call::class,
             Cli::class,
             CmpivAX::class,
@@ -69,6 +72,7 @@ class x86 implements InstructionListInterface
             Lodsb::class,
             LogicIns::class,
             Loop::class,
+            MovMemoryAddress::class,
             Moviv::class,
             Movsg::class,
             Movsp::class,
