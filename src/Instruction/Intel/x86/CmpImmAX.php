@@ -29,6 +29,9 @@ class CmpImmAX implements InstructionInterface
             ->memoryAccessor()
             ->fetch(RegisterType::EAX);
 
+        if ($fetchResult->asLowBit() === $operand) {
+            var_dump($fetchResult->asLowBit() - $operand);
+        }
         $runtime
             ->memoryAccessor()
             ->updateFlags(match ($opcode) {
