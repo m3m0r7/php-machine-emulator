@@ -20,14 +20,4 @@ enum VideoServiceFunction: int
     case WRITE_PIXEL = 0x0D;
     case TELETYPE_OUTPUT = 0x0E;
     case GET_CURRENT_VIDEO_MODE = 0x0F;
-
-    public static function find(int $serviceNumber): self|null
-    {
-        foreach (static::cases() as $case) {
-            if ($case->value === $serviceNumber) {
-                return $case;
-            }
-        }
-        return null;
-    }
 }

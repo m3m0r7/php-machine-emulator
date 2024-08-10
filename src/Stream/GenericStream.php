@@ -8,7 +8,6 @@ use PHPMachineEmulator\Exception\StreamReaderException;
 
 trait GenericStream
 {
-
     public function char(): string
     {
         $char = fread($this->resource, 1);

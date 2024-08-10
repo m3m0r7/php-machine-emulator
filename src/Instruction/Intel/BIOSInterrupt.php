@@ -12,4 +12,5 @@ enum BIOSInterrupt: int
 {
     case VIDEO_INTERRUPT = 0x10;
     case DISK_INTERRUPT = 0x13;
+    case KEYBOARD_INTERRUPT = 0x16;
 }

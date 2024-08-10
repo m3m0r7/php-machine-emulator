@@ -10,7 +10,11 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Disk implements InterruptInterface
 {
-    public function __construct(RuntimeInterface $runtime)
+    public function __construct(protected RuntimeInterface $runtime)
+    {
+    }
+
+    public function process(RuntimeInterface $runtime): void
     {
         $runtime->option()->logger()->debug('Reached to disk interruption');
 

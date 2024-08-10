@@ -14,6 +14,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Call;
 use PHPMachineEmulator\Instruction\Intel\x86\Cli;
 use PHPMachineEmulator\Instruction\Intel\x86\CmpImmAX;
 use PHPMachineEmulator\Instruction\Intel\x86\Hlt;
+use PHPMachineEmulator\Instruction\Intel\x86\IncSI;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
 use PHPMachineEmulator\Instruction\Intel\x86\Jbe;
 use PHPMachineEmulator\Instruction\Intel\x86\Jc;
@@ -68,6 +69,7 @@ class x86 implements InstructionListInterface
             Cli::class,
             CmpImmAX::class,
             Hlt::class,
+            IncSI::class,
             Int_::class,
             Jbe::class,
             Jc::class,
