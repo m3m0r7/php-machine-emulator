@@ -76,14 +76,11 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
                 ->newline();
         }
 
-        if (($textColor & 0xF) !== 0) {
-            $this->writer
-                ->dot(Color::asWhite());
-        }
-
-        if ($textColor === 0) {
-            $this->writer
-                ->dot(Color::asBlack());
-        }
+        $this->writer
+            ->dot(
+                Color::fromANSI(
+                    $textColor & 0b1111,
+                ),
+            );
     }
 }
