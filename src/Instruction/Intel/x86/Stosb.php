@@ -35,7 +35,7 @@ class Stosb implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->write($es + $di, $byte);
+            ->writeToLowBit($es + $di, $byte);
 
         // TODO: Here is needed to implement decrementing by DF
         $runtime

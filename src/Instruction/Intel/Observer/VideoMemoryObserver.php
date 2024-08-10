@@ -64,8 +64,7 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
         $this->writer ??= new TerminalScreenWriter($runtime, $videoTypeInfo);
 
         $textColor = $value & 0b00001111;
-        $backgroundColor = ($value & 0b01110000) >> 4;
-        $blinkBit = ($value & 0b10000000) >> 7;
+        $backgroundColor = ($value & 0b11110000) >> 4;
 
         for ($i = 0; $i < $diff; $i++) {
             $this->writer
@@ -77,12 +76,12 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
                 ->newline();
         }
 
-        if (($backgroundColor & 0xF) !== 0) {
+        if (($textColor & 0xF) !== 0) {
             $this->writer
                 ->dot(Color::asWhite());
         }
 
-        if ($backgroundColor === 0) {
+        if ($textColor === 0) {
             $this->writer
                 ->dot(Color::asBlack());
         }
