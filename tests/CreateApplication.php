@@ -4,9 +4,11 @@ namespace Tests;
 
 use PHPMachineEmulator\IO\Buffer;
 use PHPMachineEmulator\IO\IO;
+use PHPMachineEmulator\IO\StdIn;
 use PHPMachineEmulator\MachineType;
 use PHPMachineEmulator\Option;
 use PHPMachineEmulator\OptionInterface;
+use Tests\Utils\EmulatedKeyboardStream;
 
 trait CreateApplication
 {
@@ -21,6 +23,7 @@ trait CreateApplication
     {
         return new Option(
             IO: new IO(
+                input: new StdIn(new EmulatedKeyboardStream("Hello World!\r")),
                 output: new Buffer(),
                 errorOutput: new Buffer(),
             ),
