@@ -7,6 +7,7 @@ use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
+use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Or_ implements InstructionInterface
@@ -23,7 +24,7 @@ class Or_ implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
-        if ($modRegRM->mode() !== 0b011) {
+        if (ModType::from($modRegRM->mode()) !== ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException(
                 sprintf('The addressing mode (0b%s) is not supported yet', decbin($modRegRM->mode()))
             );

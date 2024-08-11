@@ -25,23 +25,4 @@ class StdIn implements InputInterface
     {
         return $this->streamReader->byte();
     }
-
-    public function text(): string
-    {
-        $text = '';
-        try {
-            while ($key = $this->key()) {
-                $text .= $key;
-            }
-        } catch (ReadKeyEndedException) {
-        }
-        return $text . "\r\n";
-    }
-
-    public function bytes(): array
-    {
-        return array_values(
-            unpack('C*', $this->text())
-        );
-    }
 }

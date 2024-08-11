@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class BitwiseShift implements InstructionInterface
@@ -25,7 +26,7 @@ class BitwiseShift implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
-        if ($modRegRM->mode() !== 0b011) {
+        if (ModType::from($modRegRM->mode()) !== ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException(
                 sprintf('The addressing mode (0b%s) is not supported yet', decbin($modRegRM->mode()))
             );

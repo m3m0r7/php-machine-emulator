@@ -49,27 +49,7 @@ class Runtime implements RuntimeInterface
 
     public function start(): void
     {
-        $this->machine->option()->logger()->info(sprintf('Started machine emulating which entrypoint is 0x%04X', $this->runtimeOption->entrypoint()));
-
-        $this
-            ->addressMap
-            ->register(
-                $this->runtimeOption->entrypoint(),
-                new Bootloader(),
-            );
-
-        foreach ([...($this->register)::map(), $this->video()->videoTypeFlagAddress()] as $address) {
-            $this->memoryAccessor->allocate($address);
-
-            $this->machine->option()->logger()->debug(sprintf('Address allocated 0x%03s', decbin($address)));
-        }
-
-        foreach ($this->architectureProvider->services() as $service) {
-            assert($service instanceof ServiceInterface);
-
-            $service->initialize($this);
-            $this->machine->option()->logger()->debug(sprintf('Initialize %s service', get_class($service)));
-        }
+        $this->initialize();
 
         while (!$this->streamReader->isEOF()) {
             $result = $this->execute(
@@ -158,10 +138,34 @@ class Runtime implements RuntimeInterface
             ->instructionList()
             ->getInstructionByOperationCode($opcode);
 
-
         $this->machine->option()->logger()->info(sprintf('Process the instruction %s', get_class($instruction)));
 
         return $instruction
             ->process($this, $opcode);
+    }
+
+    protected function initialize(): void
+    {
+        $this
+            ->addressMap
+            ->register(
+                $this->runtimeOption->entrypoint(),
+                new Bootloader(),
+            );
+        $this->machine->option()->logger()->info(sprintf('Started machine emulating which entrypoint is 0x%04X', $this->runtimeOption->entrypoint()));
+
+        foreach ([...($this->register)::map(), $this->video()->videoTypeFlagAddress()] as $address) {
+            $this->memoryAccessor->allocate($address);
+
+            $this->machine->option()->logger()->debug(sprintf('Address allocated 0x%03s', decbin($address)));
+        }
+
+        foreach ($this->architectureProvider->services() as $service) {
+            assert($service instanceof ServiceInterface);
+
+            $service->initialize($this);
+            $this->machine->option()->logger()->debug(sprintf('Initialize %s service', get_class($service)));
+        }
+
     }
 }

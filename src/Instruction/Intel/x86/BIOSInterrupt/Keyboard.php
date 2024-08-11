@@ -10,6 +10,8 @@ class Keyboard implements InterruptInterface
 {
     public function __construct(protected RuntimeInterface $runtime)
     {
+        $runtime->option()->logger()->debug('Reached to keyboard interruption');
+
         // NOTE: Disable canonical mode and echo texts
         system('stty -icanon -echo');
 

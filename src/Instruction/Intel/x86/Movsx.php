@@ -23,9 +23,11 @@ class Movsx implements InstructionInterface
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
-        $runtime->memoryAccessor()
+        $targetOPCode = $this->indexPointers()[$opcode];
+        $runtime
+            ->memoryAccessor()
             ->write(
-                $this->indexPointers()[$opcode],
+                $targetOPCode,
                 $enhancedStreamReader->short(),
             );
 

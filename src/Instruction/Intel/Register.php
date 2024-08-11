@@ -15,6 +15,11 @@ class Register implements RegisterInterface
         return 0b1000;
     }
 
+    public static function getRaisedDestinationRegister(): int
+    {
+        return 0b10000;
+    }
+
     public static function find(int $register): RegisterType
     {
         foreach (self::map() as $name => $value) {
@@ -37,6 +42,11 @@ class Register implements RegisterInterface
             RegisterType::EBP->name => 0b101,
             RegisterType::ESI->name => 0b110,
             RegisterType::EDI->name => 0b111,
+
+            // NOTE: In this project, directly writing to the file stream would overwrite the file itself,
+            //       so we internally maintain registers that can be modified in memory.
+            //       This allows efficient operations on the DI register.
+            RegisterType::EDI_ON_MEMORY->name => 0b111 + self::getRaisedDestinationRegister(),
 
             RegisterType::ES->name => 0b0000 + self::getRaisedSegmentRegister(),
             RegisterType::CS->name => 0b0001 + self::getRaisedSegmentRegister(),

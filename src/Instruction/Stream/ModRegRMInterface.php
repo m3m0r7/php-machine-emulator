@@ -11,6 +11,7 @@ interface ModRegRMInterface
     public function mode(): int;
     public function source(): int;
     public function digit(): int;
+    public function registerOrOPCode(): int;
     public function destination(): int;
     public function registerOrMemoryAddress(): int;
 }

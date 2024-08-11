@@ -58,13 +58,8 @@ class KeyboardReaderStream implements StreamReaderInterface
     {
         $char = fread($this->resource, 1);
 
-        if ($char === false) {
+        if ($char === false || $char === '') {
             throw new KeyboardException('Cannot read from stream or reached EOF');
-        }
-
-        // NOTE: pressed enter key
-        if ($char === chr(0x0A) || $char === chr(0x0D)) {
-            throw new ReadKeyEndedException();
         }
 
         return $char;

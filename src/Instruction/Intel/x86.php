@@ -27,6 +27,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\LogicIns;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
 use PHPMachineEmulator\Instruction\Intel\x86\MovMem;
 use PHPMachineEmulator\Instruction\Intel\x86\MovImm8;
+use PHPMachineEmulator\Instruction\Intel\x86\MovRegToReg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsp;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsx;
@@ -82,6 +83,7 @@ class x86 implements InstructionListInterface
             Loop::class,
             MovMem::class,
             MovImm8::class,
+            MovRegToReg::class,
             Movsg::class,
             Movsp::class,
             Movsx::class,

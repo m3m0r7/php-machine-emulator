@@ -6,26 +6,27 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
-use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
-class MovMem implements InstructionInterface
+class MovRegToReg implements InstructionInterface
 {
     use Instructable;
 
     public function opcodes(): array
     {
-        return [0x8A];
+        return [
+            0x88,
+        ];
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
-        $modRegRM = $enhancedStreamReader
-            ->byteAsModRegRM();
+        $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
         if (ModType::from($modRegRM->mode()) !== ModType::NO_DISPLACEMENT_OR_16BIT_DISPLACEMENT) {
             throw new ExecutionException(
@@ -33,40 +34,23 @@ class MovMem implements InstructionInterface
             );
         }
 
-        $source = $modRegRM->source();
+        $register = $modRegRM->registerOrMemoryAddress();
 
         // TODO: Here is 16 bit addressing mode only. You need to fix/implement for 32 bit protection mode here
-        if ($source === 0b100) {
+        if ($register === 0b101) {
             // NOTE: Here is incorrect implementation.
-            //       Actually here need to use SI (0b100) register but here is replacing ESI (0b110) register
-            $source = RegisterType::ESI;
+            //       Actually here need to use DI (0b101) register but here is replacing EDI (0b111) register
+            $register = ($runtime->register())::getRaisedDestinationRegister() + ($runtime->register())::addressBy(RegisterType::EDI);
         }
 
-        $sourceOffset = $runtime
-            ->memoryAccessor()
-            ->fetch($source)
-            ->asByte();
-
-        $offset = $runtime
-                ->addressMap()
-                ->getDisk()
-                ->entrypointOffset() + ($sourceOffset - $runtime->addressMap()->getOrigin());
-
-        $proxiedStreamReader = $runtime
-            ->streamReader()
-            ->proxy();
-
-        $proxiedStreamReader
-            ->setOffset($offset);
-
-        // TODO: here is to write low bits only
         $runtime
             ->memoryAccessor()
-            ->writeToLowBit(
-                $modRegRM
-                    ->destination(),
-                $proxiedStreamReader
-                    ->byte(),
+            ->write(
+                $register,
+                $runtime
+                    ->memoryAccessor()
+                    ->fetch($modRegRM->registerOrOPCode())
+                    ->asByte(),
             );
 
         return ExecutionStatus::SUCCESS;

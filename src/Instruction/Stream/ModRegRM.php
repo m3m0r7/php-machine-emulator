@@ -38,4 +38,10 @@ class ModRegRM implements ModRegRMInterface
         // NOTE: same at `::destination`
         return $this->destination();
     }
+
+    public function registerOrOPCode(): int
+    {
+        // NOTE: same at `::destination`
+        return $this->destination();
+    }
 }

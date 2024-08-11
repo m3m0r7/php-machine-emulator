@@ -15,6 +15,7 @@ enum RegisterType
 
     case ESI;
     case EDI;
+    case EDI_ON_MEMORY;
 
     case ES;
     case CS;
