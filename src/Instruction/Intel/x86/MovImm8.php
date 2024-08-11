@@ -14,14 +14,14 @@ class MovImm8 implements InstructionInterface
 
     public function opcodes(): array
     {
-        return array_keys($this->registers());
+        return array_keys($this->registersAndOPCodes());
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime->streamReader()->byte();
 
-        $register = $this->registers()[$opcode];
+        $register = $this->registersAndOPCodes()[$opcode];
 
         if ($opcode >= 0xB8) {
             $operand2 = $runtime->streamReader()->byte();
@@ -60,7 +60,7 @@ class MovImm8 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function registers(): array
+    private function registersAndOPCodes(): array
     {
         return [
             0xB0 + ($this->instructionList->register())::addressBy(RegisterType::EAX) => RegisterType::EAX,

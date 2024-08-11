@@ -57,6 +57,7 @@ class Runtime implements RuntimeInterface
             );
             if ($result === ExecutionStatus::EXIT) {
                 $this->machine->option()->logger()->info('Exited program');
+                $this->processShutdownCallbacks();
 
                 $frameSet = $this->frame->pop();
 
@@ -70,14 +71,23 @@ class Runtime implements RuntimeInterface
             }
             if ($result === ExecutionStatus::HALT) {
                 $this->machine->option()->logger()->info('Halted program');
+                $this->processShutdownCallbacks();
                 throw new HaltException('The executor halted');
             }
         }
+
+        $this->processShutdownCallbacks();
     }
 
-    public function __destruct()
+    private function processShutdownCallbacks(): void
     {
-        foreach ($this->shutdown as $callback) {
+        foreach ($this->shutdown as $index => $callback) {
+            $this->machine->option()->logger()->debug(
+                sprintf(
+                    'Call a shutdown callback function#%d',
+                    $index,
+                )
+            );
             $callback($this);
         }
     }

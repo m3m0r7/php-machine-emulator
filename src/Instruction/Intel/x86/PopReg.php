@@ -15,7 +15,7 @@ class PopReg implements InstructionInterface
 
     public function opcodes(): array
     {
-        return array_keys($this->registers());
+        return array_keys($this->registersAndOPCodes());
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
@@ -28,7 +28,7 @@ class PopReg implements InstructionInterface
         $runtime
             ->memoryAccessor()
             ->write(
-                $this->registers()[$opcode],
+                $this->registersAndOPCodes()[$opcode],
                 $stackedValue,
             );
 
@@ -36,7 +36,7 @@ class PopReg implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function registers(): array
+    private function registersAndOPCodes(): array
     {
         return [
             0x58 + ($this->instructionList->register())::addressBy(RegisterType::EAX) => RegisterType::EAX,

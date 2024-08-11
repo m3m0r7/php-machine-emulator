@@ -16,25 +16,26 @@ class Movsx implements InstructionInterface
 
     public function opcodes(): array
     {
-        return array_keys($this->indexPointers());
+        return array_keys($this->registersAndOPCodes());
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
-        $targetOPCode = $this->indexPointers()[$opcode];
+        $targetOffset = $this->registersAndOPCodes()[$opcode];
+
         $runtime
             ->memoryAccessor()
             ->write(
-                $targetOPCode,
+                $targetOffset,
                 $enhancedStreamReader->short(),
             );
 
         return ExecutionStatus::SUCCESS;
     }
 
-    private function indexPointers(): array
+    private function registersAndOPCodes(): array
     {
         return [
             0xB8 + ($this->instructionList->register())::addressBy(RegisterType::ESI) => RegisterType::ESI,

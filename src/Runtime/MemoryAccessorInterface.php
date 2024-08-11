@@ -8,8 +8,9 @@ use PHPMachineEmulator\Instruction\RegisterType;
 
 interface MemoryAccessorInterface
 {
-    public function allocate(int $address, int $size = 1): self;
+    public function allocate(int $address, int $size = 1, bool $safe = true): self;
     public function fetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface;
+    public function tryToFetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface|null;
 
     public function increment(int|RegisterType $registerType): self;
     public function add(int|RegisterType $registerType, int $value): self;

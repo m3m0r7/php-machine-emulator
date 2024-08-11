@@ -29,6 +29,12 @@ class Keyboard implements InterruptInterface
             ->input()
             ->byte();
 
+        // NOTE: Convert the break line (0x0A) to the carriage return (0x0D)
+        //       because it is applying duplication breaking lines in using terminal.
+        if ($byte === 0x0A) {
+            $byte = 0x0D;
+        }
+
         $runtime
             ->memoryAccessor()
             ->writeToLowBit(

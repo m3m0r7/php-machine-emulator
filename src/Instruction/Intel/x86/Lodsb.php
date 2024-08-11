@@ -26,15 +26,25 @@ class Lodsb implements InstructionInterface
             ->fetch(RegisterType::ESI)
             ->asByte();
 
-        $reader
-            ->setOffset(
-                $runtime->addressMap()->getDisk()->entrypointOffset() + ($si - $runtime->addressMap()->getOrigin()),
-            );
+        // NOTE: Try to fetch from allocated memory because the DI register writes to it.
+        $value = $runtime
+            ->memoryAccessor()
+            ->tryToFetch($si)
+            ?->asLowBit();
+
+        // NOTE: Looking for bits from disk
+        if ($value === null) {
+            $reader
+                ->setOffset(
+                    $runtime->addressMap()->getDisk()->entrypointOffset() + ($si - $runtime->addressMap()->getOrigin()),
+                );
+            $value = $reader->byte();
+        }
 
         $runtime->memoryAccessor()
             ->writeToLowBit(
                 RegisterType::EAX,
-                $reader->byte(),
+                $value,
             );
 
         // TODO: apply DF flag

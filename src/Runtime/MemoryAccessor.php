@@ -22,9 +22,9 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
     }
 
-    public function allocate(int $address, int $size = 1): self
+    public function allocate(int $address, int $size = 1, bool $safe = true): self
     {
-        if (array_key_exists($address, $this->memory)) {
+        if ($safe && array_key_exists($address, $this->memory)) {
             throw new MemoryAccessorException('Specified memory address was allocated');
         }
 
@@ -39,6 +39,17 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $address = $this->asAddress($registerType);
         $this->validateMemoryAddressWasAllocated($address);
+
+        return new MemoryAccessorFetchResult($this->memory[$address]);
+    }
+
+    public function tryToFetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface|null
+    {
+        $address = $this->asAddress($registerType);
+
+        if (!array_key_exists($address, $this->memory)) {
+            return null;
+        }
 
         return new MemoryAccessorFetchResult($this->memory[$address]);
     }

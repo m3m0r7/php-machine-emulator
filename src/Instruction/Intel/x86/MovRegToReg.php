@@ -34,23 +34,35 @@ class MovRegToReg implements InstructionInterface
             );
         }
 
+        $proxiedStreamReader = $runtime->streamReader()->proxy();
         $register = $modRegRM->registerOrMemoryAddress();
 
         // TODO: Here is 16 bit addressing mode only. You need to fix/implement for 32 bit protection mode here
         if ($register === 0b101) {
             // NOTE: Here is incorrect implementation.
             //       Actually here need to use DI (0b101) register but here is replacing EDI (0b111) register
-            $register = ($runtime->register())::getRaisedDestinationRegister() + ($runtime->register())::addressBy(RegisterType::EDI);
+            $register = RegisterType::EDI;
         }
+
+        $offset = $runtime->memoryAccessor()
+            ->fetch($register)
+            ->asByte();
 
         $runtime
             ->memoryAccessor()
-            ->write(
-                $register,
+            ->allocate(
+                $offset,
+                safe: false,
+            );
+
+        $runtime
+            ->memoryAccessor()
+            ->writeToLowBit(
+                $offset,
                 $runtime
                     ->memoryAccessor()
                     ->fetch($modRegRM->registerOrOPCode())
-                    ->asByte(),
+                    ->asLowBit(),
             );
 
         return ExecutionStatus::SUCCESS;

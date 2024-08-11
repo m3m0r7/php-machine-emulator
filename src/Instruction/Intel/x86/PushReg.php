@@ -15,14 +15,14 @@ class PushReg implements InstructionInterface
 
     public function opcodes(): array
     {
-        return array_keys($this->registers());
+        return array_keys($this->registersAndOPCodes());
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $fetchResult = $runtime
             ->memoryAccessor()
-            ->fetch($this->registers()[$opcode]);
+            ->fetch($this->registersAndOPCodes()[$opcode]);
 
         $runtime
             ->memoryAccessor()
@@ -31,7 +31,7 @@ class PushReg implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function registers(): array
+    private function registersAndOPCodes(): array
     {
         return [
             0x50 + ($this->instructionList->register())::addressBy(RegisterType::EAX) => RegisterType::EAX,

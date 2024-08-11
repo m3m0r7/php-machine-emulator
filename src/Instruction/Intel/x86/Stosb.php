@@ -35,7 +35,10 @@ class Stosb implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->allocate($es + $di);
+            ->allocate(
+                $es + $di,
+                safe: false,
+            );
 
         $runtime
             ->memoryAccessor()
