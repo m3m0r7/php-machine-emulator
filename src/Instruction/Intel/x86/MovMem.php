@@ -29,7 +29,7 @@ class MovMem implements InstructionInterface
 
         if (ModType::from($modRegRM->mode()) !== ModType::NO_DISPLACEMENT_OR_16BIT_DISPLACEMENT) {
             throw new ExecutionException(
-                sprintf('The addressing mode (0b%s) is not supported yet', decbin($modRegRM->mode()))
+                sprintf('The addressing mode (0b%02s) is not supported yet', decbin($modRegRM->mode()))
             );
         }
 

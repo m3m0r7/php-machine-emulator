@@ -27,7 +27,7 @@ class Group1 implements InstructionInterface
 
         if (ModType::from($modRegRM->mode()) !== ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException(
-                sprintf('The addressing mode (0b%s) is not supported yet', decbin($modRegRM->mode()))
+                sprintf('The addressing mode (0b%02s) is not supported yet', decbin($modRegRM->mode()))
             );
         }
 

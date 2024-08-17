@@ -27,7 +27,7 @@ class Xor_ implements InstructionInterface
 
         if ($mode !== 0b011) {
            throw new ExecutionException(
-               sprintf('The addressing mode (0b%s) is not supported yet', decbin($mode))
+               sprintf('The addressing mode (0b%02s) is not supported yet', decbin($mode))
            );
         }
 
