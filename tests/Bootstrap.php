@@ -8,7 +8,15 @@ $filtered = new RegexIterator($iterator, '/.*?\\/.*\\.asm$/', RegexIterator::GET
 foreach ($filtered as [$file]) {
     $path = dirname($file) . '/' . basename($file, '.asm') . '.o';
 
-    exec(sprintf('\\nasm %s -o %s &>/dev/null', $file, $path));
+    exec(sprintf('\\nasm %s -o %s 1>/dev/null', $file, $path), $_, $status);
+
+    if ($status !== 0) {
+        fwrite(
+            STDERR,
+            "The PHP CPU emulator was failed to build an object from assembly file.\n"
+        );
+        exit(1);
+    }
 }
 
 $bundlers = new RegexIterator($iterator, '/.*?\\/Bundler\\.json$/', RegexIterator::GET_MATCH);

@@ -12,19 +12,20 @@ use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
-class BitwiseShift implements InstructionInterface
+class Mov implements InstructionInterface
 {
     use Instructable;
 
     public function opcodes(): array
     {
-        return [0xC0];
+        return [0x89];
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
-        $modRegRM = $enhancedStreamReader->byteAsModRegRM();
+        $modRegRM = $enhancedStreamReader
+            ->byteAsModRegRM();
 
         if (ModType::from($modRegRM->mode()) !== ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException(
@@ -32,30 +33,15 @@ class BitwiseShift implements InstructionInterface
             );
         }
 
-        return match ($modRegRM->digit()) {
-            0b101 => $this->rotateRight($runtime, $modRegRM),
-            default => throw new ExecutionException(
-                sprintf('The digit (0b%s) is not supported yet', decbin($modRegRM->digit()))
-            ),
-        };
-    }
-
-    protected function rotateRight(RuntimeInterface $runtime, ModRegRMInterface $modRegRM): ExecutionStatus
-    {
-        $operand = $runtime->streamReader()->byte();
-
-        $value = $runtime
-            ->memoryAccessor()
-            ->fetch($modRegRM->source())
-            ->asLowBit();
-
         $runtime
             ->memoryAccessor()
-            ->writeToLowBit(
-                $modRegRM->source(),
-                $value >> $operand,
-            )
-            ->setCarryFlag(($value & 0b00000001) !== 0);
+            ->write(
+                $modRegRM->destination(),
+                $runtime
+                    ->memoryAccessor()
+                    ->fetch($modRegRM->source())
+                    ->asByte(),
+            );
 
         return ExecutionStatus::SUCCESS;
     }

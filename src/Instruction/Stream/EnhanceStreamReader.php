@@ -12,6 +12,12 @@ class EnhanceStreamReader
     {
     }
 
+
+    public function streamReader(): StreamReaderInterface
+    {
+        return $this->streamReader;
+    }
+
     public function byteAsSIB(): SIBInterface
     {
         return new SIB($this->streamReader->byte());

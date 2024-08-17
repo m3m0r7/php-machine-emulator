@@ -9,10 +9,12 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\AddImm8;
 use PHPMachineEmulator\Instruction\Intel\x86\AndImm8;
-use PHPMachineEmulator\Instruction\Intel\x86\BitwiseShift;
 use PHPMachineEmulator\Instruction\Intel\x86\Call;
 use PHPMachineEmulator\Instruction\Intel\x86\Cli;
 use PHPMachineEmulator\Instruction\Intel\x86\CmpImmAX;
+use PHPMachineEmulator\Instruction\Intel\x86\Group1;
+use PHPMachineEmulator\Instruction\Intel\x86\Group2;
+use PHPMachineEmulator\Instruction\Intel\x86\Group3;
 use PHPMachineEmulator\Instruction\Intel\x86\Hlt;
 use PHPMachineEmulator\Instruction\Intel\x86\Inc;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
@@ -23,10 +25,10 @@ use PHPMachineEmulator\Instruction\Intel\x86\JmpShort;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jz;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
-use PHPMachineEmulator\Instruction\Intel\x86\LogicIns;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
-use PHPMachineEmulator\Instruction\Intel\x86\MovMem;
+use PHPMachineEmulator\Instruction\Intel\x86\Mov;
 use PHPMachineEmulator\Instruction\Intel\x86\MovImm8;
+use PHPMachineEmulator\Instruction\Intel\x86\MovMem;
 use PHPMachineEmulator\Instruction\Intel\x86\MovRegToReg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsp;
@@ -40,8 +42,6 @@ use PHPMachineEmulator\Instruction\Intel\x86\Sti;
 use PHPMachineEmulator\Instruction\Intel\x86\Stosb;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
 use PHPMachineEmulator\Instruction\RegisterInterface;
-use PHPMachineEmulator\Video\VideoColorType;
-use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class x86 implements InstructionListInterface
 {
@@ -65,10 +65,12 @@ class x86 implements InstructionListInterface
         static $instructionList = [
             AddImm8::class,
             AndImm8::class,
-            BitwiseShift::class,
             Call::class,
             Cli::class,
             CmpImmAX::class,
+            Group1::class,
+            Group2::class,
+            Group3::class,
             Hlt::class,
             Inc::class,
             Int_::class,
@@ -79,10 +81,10 @@ class x86 implements InstructionListInterface
             Jnz::class,
             Jz::class,
             Lodsb::class,
-            LogicIns::class,
             Loop::class,
-            MovMem::class,
+            Mov::class,
             MovImm8::class,
+            MovMem::class,
             MovRegToReg::class,
             Movsg::class,
             Movsp::class,
