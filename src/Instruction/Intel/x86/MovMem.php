@@ -27,7 +27,7 @@ class MovMem implements InstructionInterface
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
 
-        if (ModType::from($modRegRM->mode()) !== ModType::NO_DISPLACEMENT_OR_16BIT_DISPLACEMENT) {
+        if (ModType::from($modRegRM->mode()) !== ModType::NO_DISPLACEMENT_OR_16BITS_DISPLACEMENT) {
             throw new ExecutionException(
                 sprintf('The addressing mode (0b%02s) is not supported yet', decbin($modRegRM->mode()))
             );

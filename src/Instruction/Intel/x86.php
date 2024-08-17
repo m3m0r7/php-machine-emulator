@@ -12,6 +12,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\AndImm8;
 use PHPMachineEmulator\Instruction\Intel\x86\Call;
 use PHPMachineEmulator\Instruction\Intel\x86\Cli;
 use PHPMachineEmulator\Instruction\Intel\x86\CmpImmAX;
+use PHPMachineEmulator\Instruction\Intel\x86\Dec;
 use PHPMachineEmulator\Instruction\Intel\x86\Group1;
 use PHPMachineEmulator\Instruction\Intel\x86\Group2;
 use PHPMachineEmulator\Instruction\Intel\x86\Group3;
@@ -68,6 +69,7 @@ class x86 implements InstructionListInterface
             Call::class,
             Cli::class,
             CmpImmAX::class,
+            Dec::class,
             Group1::class,
             Group2::class,
             Group3::class,

@@ -28,12 +28,6 @@ class MovRegToReg implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
-        if (ModType::from($modRegRM->mode()) !== ModType::NO_DISPLACEMENT_OR_16BIT_DISPLACEMENT) {
-            throw new ExecutionException(
-                sprintf('The addressing mode (0b%02s) is not supported yet', decbin($modRegRM->mode()))
-            );
-        }
-
         $proxiedStreamReader = $runtime->streamReader()->proxy();
         $register = $modRegRM->registerOrMemoryAddress();
 
@@ -44,9 +38,25 @@ class MovRegToReg implements InstructionInterface
             $register = RegisterType::EDI;
         }
 
+        $displacement = null;
+        if (ModType::from($modRegRM->mode()) === ModType::SIGNED_8BITS_DISPLACEMENT) {
+            $displacement = $runtime
+                ->streamReader()
+                ->signedByte();
+        }
+
+        if (ModType::from($modRegRM->mode()) === ModType::SIGNED_16BITS_DISPLACEMENT) {
+            $displacement = $enhancedStreamReader
+                ->signedShort();
+        }
+
         $offset = $runtime->memoryAccessor()
             ->fetch($register)
             ->asByte();
+
+        if ($displacement !== null) {
+            $offset += $displacement;
+        }
 
         $runtime
             ->memoryAccessor()
