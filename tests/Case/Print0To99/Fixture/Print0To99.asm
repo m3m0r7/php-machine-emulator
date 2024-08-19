@@ -5,18 +5,18 @@
 
 mov cx, 100
 mov dx, 0
-
 loop_for:
 
+  push cx
   push dx
   mov ax, dx
   mov si, buffer
   call itoa
   pop dx
+  pop cx
 
   mov si, buffer
   call print_string
-
   mov si, newline
   call print_string
 
@@ -24,21 +24,6 @@ loop_for:
 loop loop_for
 
 hlt
-
-fizzbuzz_output:
-  push ax
-  xor dx, dx
-  div bx
-
-  cmp dl, 0
-  jnz .fizzbuzz_finished
-
-  call print_string
-
-  .fizzbuzz_finished:
-
-  pop ax
-  ret
 
 
 print_string:
@@ -65,6 +50,7 @@ itoa:
   .fill_by_zero:
     mov bl, 0x00
     mov [si], bl
+    inc si
   loop .fill_by_zero
   pop cx
 
@@ -105,18 +91,5 @@ itoa:
 buffer:
   times length+1 db 0
 
-fizzbuzz:
-  db 'FizzBuzz', 0
-
-buzz:
-  db 'Buzz', 0
-
-fizz:
-  db 'Fizz', 0
-
 newline:
   db 0x0D, 0x0A, 0
-
-times 510-($-$$) db 0
-
-dw 0xAA55

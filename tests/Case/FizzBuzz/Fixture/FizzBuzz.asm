@@ -34,7 +34,6 @@ loop_for_fizzbuzz:
 
 
   .finish:
-    ; 改行の出力
     mov si, newline
     call print_string
 
@@ -63,11 +62,9 @@ print_string:
   lodsb
 
   cmp al, 0
-
   jz .done
 
   call .char
-
   jmp .done
 
   .char:

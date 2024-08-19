@@ -27,8 +27,10 @@ class Loop implements InstructionInterface
             ->streamReader()
             ->offset();
 
-        $counter = $runtime->memoryAccessor()
-            ->fetch(RegisterType::ECX)->asByte() - 1;
+        $counter = $runtime
+            ->memoryAccessor()
+            ->fetch(RegisterType::ECX)
+            ->asByte() - 1;
 
         if ($counter <= 0) {
             return ExecutionStatus::SUCCESS;

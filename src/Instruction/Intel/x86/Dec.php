@@ -21,6 +21,7 @@ class Dec implements InstructionInterface
     {
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->decrement(($this->registersAndOPCodes())[$opcode]);
 
         return ExecutionStatus::SUCCESS;

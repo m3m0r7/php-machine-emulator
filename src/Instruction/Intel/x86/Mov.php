@@ -35,11 +35,12 @@ class Mov implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->write(
-                $modRegRM->destination(),
+                $modRegRM->registerOrMemoryAddress(),
                 $runtime
                     ->memoryAccessor()
-                    ->fetch($modRegRM->source())
+                    ->fetch($modRegRM->registerOrOPCode())
                     ->asByte(),
             );
 

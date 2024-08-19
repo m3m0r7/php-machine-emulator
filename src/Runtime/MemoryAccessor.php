@@ -7,6 +7,7 @@ namespace PHPMachineEmulator\Runtime;
 use PHPMachineEmulator\Collection\MemoryAccessorObserverCollectionInterface;
 use PHPMachineEmulator\Exception\MemoryAccessorException;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\BinaryInteger;
 
 class MemoryAccessor implements MemoryAccessorInterface
 {
@@ -17,6 +18,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     protected bool $carryFlag = false;
     protected bool $parityFlag = false;
     protected bool $fireEvents = true;
+    protected bool $enableUpdateFlags = false;
 
     public function __construct(protected RuntimeInterface $runtime, protected MemoryAccessorObserverCollectionInterface $memoryAccessorObserverCollection)
     {
@@ -56,28 +58,40 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function write(int|RegisterType $registerType, int|null $value): self
     {
-        [$address, $previousValue] = $this->processWrite($registerType, $value);
+        return $this->writeBySize($registerType, $value, 16);
+    }
 
-        $this->updateFlags($value);
-        $this->processObservers($address, $previousValue, $value);
+    public function writeBySize(int|RegisterType $registerType, int|null $value, int $size = 64): self
+    {
+        [$address, $previousValue] = $this
+            ->processWrite(
+                $registerType,
+                BinaryInteger::asLittleEndian(
+                    $value ?? 0,
+                    $size,
+                ),
+            );
+
+        $this->postProcessWhenWrote(
+            $address,
+            $previousValue,
+            $value,
+        );
 
         return $this;
     }
 
     public function writeToHighBit(int|RegisterType $registerType, int|null $value): self
     {
-        $wroteValue = $value & 0b11111111;
-
         [$address, $previousValue] = $this->processWrite(
             $registerType,
-            (($this->fetch($registerType)->asLowBit() << 8) & 0b11111111_00000000) + $wroteValue,
+            (($this->fetch($registerType)->asLowBit() << 8) & 0b11111111_00000000) + ($value & 0b11111111),
         );
 
-        $this->updateFlags($wroteValue);
-        $this->processObservers(
+        $this->postProcessWhenWrote(
             $address,
-            $previousValue & 0b11111111,
-            $wroteValue,
+            $previousValue,
+            $value,
         );
 
         return $this;
@@ -85,23 +99,44 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function writeToLowBit(int|RegisterType $registerType, int|null $value): self
     {
-        $wroteValue = $value & 0b11111111;
-
         [$address, $previousValue] = $this->processWrite(
             $registerType,
-            ($wroteValue << 8) + ($this->fetch($registerType)->asHighBit() & 0b11111111),
+            (($value & 0b11111111) << 8) + ($this->fetch($registerType)->asHighBit() & 0b11111111),
         );
 
-        $this->updateFlags($wroteValue);
-        $this->processObservers(
+        $this->postProcessWhenWrote(
             $address,
-            $previousValue & 0b11111111,
-            $wroteValue,
+            $previousValue,
+            $value,
         );
-
 
         return $this;
     }
+
+    protected function postProcessWhenWrote(int $address, int|null $previousValue, int|null $value): void
+    {
+        $wroteValue = ($value ?? 0) & 0b11111111;
+
+
+        if ($this->enableUpdateFlags) {
+            $this->updateFlags($value);
+        }
+
+        $this->processObservers(
+            $address,
+            $previousValue === null
+                ? $previousValue
+                : ($previousValue & 0b11111111),
+            $wroteValue,
+        );
+    }
+
+    public function enableUpdateFlags(bool $which): self
+    {
+        $this->enableUpdateFlags = $which;
+        return $this;
+    }
+
 
     public function updateFlags(int|null $value): self
     {
@@ -147,7 +182,7 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function decrement(int|RegisterType $registerType): self
     {
-        $this->add($registerType, -1);
+        $this->sub($registerType, 1);
 
         return $this;
     }
@@ -188,25 +223,45 @@ class MemoryAccessor implements MemoryAccessorInterface
     public function pop(int|RegisterType $registerType, int $size = 16): MemoryAccessorFetchResultInterface
     {
         $address = $this->asAddress($registerType);
-        $fetchResult = $this->fetch($address)->asByte();
+        $fetchResult = $this->fetch($address)
+            ->asBytesBySize();
 
-        $this->write(
+        $this->writeBySize(
             $address,
             $fetchResult >> $size,
         );
 
-        return new MemoryAccessorFetchResult($fetchResult & ((1 << $size) - 1));
+        return new MemoryAccessorFetchResult(
+            BinaryInteger::asLittleEndian(
+                $fetchResult & ((1 << $size) - 1),
+                $size,
+            ),
+        );
     }
 
     public function push(int|RegisterType $registerType, int|null $value, int $size = 16): self
     {
         $address = $this->asAddress($registerType);
-        $fetchResult = $this->fetch($address)->asByte();
+        $fetchResult = $this->fetch($address)
+            ->asBytesBySize();
 
-        $this->write(
+        $value = $value & ((1 << $size) - 1);
+
+        $this->writeBySize(
             $address,
-            ($fetchResult << $size) + ($value & ((1 << $size) - 1)),
+            $storeValue = ($fetchResult << $size) + $value,
         );
+
+        if ((($fetchResult << $size) + $value) !== ($actualStoredValue = $this->fetch($address)->asBytesBySize())) {
+            throw new MemoryAccessorException(
+                sprintf(
+                    'Illegal to expect storing value %d but stored actually %d (original value: %d)',
+                    $storeValue,
+                    $actualStoredValue,
+                    $value,
+                )
+            );
+        }
 
         return $this;
     }
@@ -236,6 +291,7 @@ class MemoryAccessor implements MemoryAccessorInterface
                 ->observe(
                     $this->runtime,
                     $address,
+                    $previousValue,
                     $nextValue,
                 );
         }

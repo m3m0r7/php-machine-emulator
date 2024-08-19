@@ -150,8 +150,13 @@ class Runtime implements RuntimeInterface
 
         $this->machine->option()->logger()->info(sprintf('Process the instruction %s', get_class($instruction)));
 
-        return $instruction
-            ->process($this, $opcode);
+        try {
+            return $instruction
+                ->process($this, $opcode);
+        } finally {
+            $this->memoryAccessor
+                ->enableUpdateFlags(true);
+        }
     }
 
     protected function initialize(): void

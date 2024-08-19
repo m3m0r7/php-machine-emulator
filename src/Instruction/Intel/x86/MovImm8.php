@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class MovImm8 implements InstructionInterface
@@ -19,19 +20,18 @@ class MovImm8 implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $operand = $runtime->streamReader()->byte();
-
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $register = $this->registersAndOPCodes()[$opcode];
 
         if ($opcode >= 0xB8) {
-            $operand2 = $runtime->streamReader()->byte();
-
             // NOTE: move instruction for Xx registers
             $runtime
                 ->memoryAccessor()
+                ->enableUpdateFlags(false)
                 ->write(
                     $register,
-                    ($operand2 << 8) + $operand,
+                    $enhancedStreamReader
+                        ->short(),
                 );
 
             return ExecutionStatus::SUCCESS;
@@ -41,9 +41,12 @@ class MovImm8 implements InstructionInterface
             // NOTE: move instruction for high-bit
             $runtime
                 ->memoryAccessor()
+                ->enableUpdateFlags(false)
                 ->writeToHighBit(
                     $register,
-                    $operand,
+                    $enhancedStreamReader
+                        ->streamReader()
+                        ->byte(),
                 );
 
             return ExecutionStatus::SUCCESS;
@@ -52,9 +55,12 @@ class MovImm8 implements InstructionInterface
         // NOTE: move instruction for low-bit
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->writeToLowBit(
                 $register,
-                $operand,
+                $enhancedStreamReader
+                    ->streamReader()
+                    ->byte(),
             );
 
         return ExecutionStatus::SUCCESS;

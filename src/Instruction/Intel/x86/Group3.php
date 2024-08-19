@@ -72,10 +72,12 @@ class Group3 implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->write(
                 RegisterType::EDX,
                 $remainder,
             );
+
 
         return ExecutionStatus::SUCCESS;
     }

@@ -120,11 +120,14 @@ class Video implements InterruptInterface
             )
         );
 
-        $runtime->memoryAccessor()
-            ->write(
+        $runtime
+            ->memoryAccessor()
+            ->enableUpdateFlags(false)
+            ->writeBySize(
                 $runtime->video()->videoTypeFlagAddress(),
                 // NOTE: Actual width + Actual Height + Video Type
                 (($width & 0b11111111_11111111) << 24) + (($height & 0b11111111_11111111) << 8) + $videoType,
+                32,
             );
     }
 

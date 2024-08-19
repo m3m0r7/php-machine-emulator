@@ -47,6 +47,7 @@ class Stosb implements InstructionInterface
         // TODO: Here is needed to implement decrementing by DF
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->increment(RegisterType::EDI);
 
         return ExecutionStatus::SUCCESS;

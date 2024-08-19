@@ -22,11 +22,13 @@ class PushReg implements InstructionInterface
     {
         $fetchResult = $runtime
             ->memoryAccessor()
-            ->fetch($this->registersAndOPCodes()[$opcode]);
+            ->fetch($this->registersAndOPCodes()[$opcode])
+            ->asByte();
 
         $runtime
             ->memoryAccessor()
-            ->push(RegisterType::ESP, $fetchResult->asByte());
+            ->enableUpdateFlags(false)
+            ->push(RegisterType::ESP, $fetchResult);
 
         return ExecutionStatus::SUCCESS;
     }

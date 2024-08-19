@@ -46,10 +46,10 @@ class FizzBuzzTest extends TestCase
     protected function createFizzBuzz(int $loops): string
     {
         $result = '';
-        for ($i = 0; $i < $loops; $i++) {
+        for ($i = 1; $i <= $loops; $i++) {
             $result .= ($i % 15 ? ($i % 5 ? ($i % 3 ? $i : 'Fizz') : 'Buzz') : 'FizzBuzz') . "\r\n";
         }
 
-        return $result . "\r\n";
+        return $result;
     }
 }

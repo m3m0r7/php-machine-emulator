@@ -62,6 +62,7 @@ class MovMem implements InstructionInterface
         // TODO: here is to write low bits only
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->writeToLowBit(
                 $modRegRM
                     ->destination(),

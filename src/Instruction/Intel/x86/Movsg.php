@@ -32,6 +32,7 @@ class Movsg implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->write(
                 $modRegRM->destination() + ($runtime->register())::getRaisedSegmentRegister(),
                 $runtime

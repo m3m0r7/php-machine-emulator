@@ -37,6 +37,7 @@ class CmpImmAX implements InstructionInterface
                 // TODO: You should implement 16bit and 32bit
                 0x3D => ($fetchResult->asByte() & 0b11111111_11111111) - ($operand & 0b11111111_11111111),
             })
+            // TODO: You should implement 16bit and 32bit
             ->setCarryFlag($fetchResult->asLowBit() < $operand);
 
 

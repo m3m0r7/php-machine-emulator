@@ -37,6 +37,6 @@ class Print0To99Test extends TestCase
         $output = $option->IO()->output();
         assert($output instanceof Buffer);
 
-        $this->assertSame(implode("\n", range(0, 100)) . "\n", $output->getBuffer());
+        $this->assertSame(implode("\r\n", range(0, 99)) . "\r\n", $output->getBuffer());
     }
 }

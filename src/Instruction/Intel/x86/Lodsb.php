@@ -42,6 +42,7 @@ class Lodsb implements InstructionInterface
         }
 
         $runtime->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->writeToLowBit(
                 RegisterType::EAX,
                 $value,
@@ -50,6 +51,7 @@ class Lodsb implements InstructionInterface
         // TODO: apply DF flag
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->increment(RegisterType::ESI);
 
         return ExecutionStatus::SUCCESS;

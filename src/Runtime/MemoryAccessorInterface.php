@@ -17,6 +17,7 @@ interface MemoryAccessorInterface
     public function sub(int|RegisterType $registerType, int $value): self;
     public function decrement(int|RegisterType $registerType): self;
     public function write(int|RegisterType $registerType, int|null $value): self;
+    public function writeBySize(int|RegisterType $registerType, int|null $value, int $size = 64): self;
     public function writeToHighBit(int|RegisterType $registerType, int|null $value): self;
     public function writeToLowBit(int|RegisterType $registerType, int|null $value): self;
 
@@ -24,6 +25,8 @@ interface MemoryAccessorInterface
     public function setCarryFlag(bool $which): self;
     public function pop(int|RegisterType $registerType, int $size = 16): MemoryAccessorFetchResultInterface;
     public function push(int|RegisterType $registerType, int|null $value, int $size = 16): self;
+
+    public function enableUpdateFlags(bool $which): self;
 
     public function shouldZeroFlag(): bool;
     public function shouldSignFlag(): bool;

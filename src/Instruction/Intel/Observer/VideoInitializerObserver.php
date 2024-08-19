@@ -22,7 +22,7 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
         return $address === $runtime->video()->videoTypeFlagAddress();
     }
 
-    public function observe(RuntimeInterface $runtime, int $address, ?int $value): void
+    public function observe(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): void
     {
         $videoSettingAddress = $runtime
             ->memoryAccessor()

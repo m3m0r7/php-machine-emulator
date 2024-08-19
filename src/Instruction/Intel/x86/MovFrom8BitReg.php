@@ -12,7 +12,7 @@ use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
-class MovRegToReg implements InstructionInterface
+class MovFrom8BitReg implements InstructionInterface
 {
     use Instructable;
 
@@ -30,6 +30,13 @@ class MovRegToReg implements InstructionInterface
 
         $proxiedStreamReader = $runtime->streamReader()->proxy();
         $register = $modRegRM->registerOrMemoryAddress();
+
+        // TODO: Here is 16 bit addressing mode only. You need to fix/implement for 32 bit protection mode here
+        if ($register === 0b100) {
+            // NOTE: Here is incorrect implementation.
+            //       Actually here need to use SI (0b100) register but here is replacing ESI (0b110) register
+            $register = RegisterType::ESI;
+        }
 
         // TODO: Here is 16 bit addressing mode only. You need to fix/implement for 32 bit protection mode here
         if ($register === 0b101) {
@@ -67,6 +74,7 @@ class MovRegToReg implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->writeToLowBit(
                 $offset,
                 $runtime

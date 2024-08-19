@@ -38,7 +38,7 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
             ($di + $es) <= VideoMemoryService::VIDEO_MEMORY_ADDRESS_ENDED;
     }
 
-    public function observe(RuntimeInterface $runtime, int $address, int|null $value): void
+    public function observe(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): void
     {
         $di = $runtime->memoryAccessor()
             ->fetch(
@@ -63,8 +63,8 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
 
         $this->writer ??= new TerminalScreenWriter($runtime, $videoTypeInfo);
 
-        $textColor = $value & 0b00001111;
-        $backgroundColor = ($value & 0b11110000) >> 4;
+        $textColor = $nextValue & 0b00001111;
+        $backgroundColor = ($nextValue & 0b11110000) >> 4;
 
         for ($i = 0; $i < $diff; $i++) {
             $this->writer

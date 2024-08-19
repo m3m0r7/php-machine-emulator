@@ -22,16 +22,17 @@ class PopReg implements InstructionInterface
     {
         $stackedValue = $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->pop(RegisterType::ESP)
             ->asByte();
 
         $runtime
             ->memoryAccessor()
+            ->enableUpdateFlags(false)
             ->write(
                 $this->registersAndOPCodes()[$opcode],
                 $stackedValue,
             );
-
 
         return ExecutionStatus::SUCCESS;
     }
