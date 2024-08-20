@@ -33,7 +33,7 @@ class Xor_ implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->write(
+            ->write16Bit(
                 $register,
                 $runtime->memoryAccessor()->fetch($register)->asByte() ^ $runtime->memoryAccessor()->fetch($registerOrMemory)->asByte(),
             );

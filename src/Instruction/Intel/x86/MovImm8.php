@@ -28,7 +28,7 @@ class MovImm8 implements InstructionInterface
             $runtime
                 ->memoryAccessor()
                 ->enableUpdateFlags(false)
-                ->write(
+                ->write16Bit(
                     $register,
                     $enhancedStreamReader
                         ->short(),

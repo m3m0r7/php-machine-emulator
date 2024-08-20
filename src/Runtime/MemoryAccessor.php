@@ -56,7 +56,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         return new MemoryAccessorFetchResult($this->memory[$address]);
     }
 
-    public function write(int|RegisterType $registerType, int|null $value): self
+    public function write16Bit(int|RegisterType $registerType, int|null $value): self
     {
         return $this->writeBySize($registerType, $value, 16);
     }
@@ -158,7 +158,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     public function add(int|RegisterType $registerType, int $value): self
     {
         $this
-            ->write(
+            ->write16Bit(
                 $registerType,
                 $this->fetch($registerType)->asByte() + $value
             );

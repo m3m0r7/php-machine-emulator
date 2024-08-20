@@ -28,7 +28,7 @@ class Movsx implements InstructionInterface
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->write(
+            ->write16Bit(
                 $targetOffset,
                 $enhancedStreamReader
                     ->short(),

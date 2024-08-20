@@ -36,7 +36,7 @@ class Mov implements InstructionInterface
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->write(
+            ->write16Bit(
                 $modRegRM->registerOrMemoryAddress(),
                 $runtime
                     ->memoryAccessor()

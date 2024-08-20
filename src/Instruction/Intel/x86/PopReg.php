@@ -29,7 +29,7 @@ class PopReg implements InstructionInterface
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->write(
+            ->write16Bit(
                 $this->registersAndOPCodes()[$opcode],
                 $stackedValue,
             );

@@ -65,7 +65,7 @@ class Group3 implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->write(
+            ->write16Bit(
                 RegisterType::EAX,
                 $quotient,
             );
@@ -73,7 +73,7 @@ class Group3 implements InstructionInterface
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->write(
+            ->write16Bit(
                 RegisterType::EDX,
                 $remainder,
             );
