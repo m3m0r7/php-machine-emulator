@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Runtime;
 
 use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
-use PHPMachineEmulator\Backtrace\BacktraceableInterface;
 use PHPMachineEmulator\Backtrace\Frame\FrameProxy;
 use PHPMachineEmulator\Backtrace\Stream\StreamReaderProxy;
 use PHPMachineEmulator\Exception\OperationNotFoundException;
-use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Frame\FrameSetInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\IO\IO;
@@ -23,7 +21,6 @@ use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
 use Symfony\Component\Console\Helper\Table;
 use Symfony\Component\Console\Output\ConsoleOutput;
-use function PHPUnit\Framework\assertSame;
 
 class InstructionListRuntime extends Runtime implements RuntimeInterface
 {
@@ -152,11 +149,7 @@ class InstructionListRuntime extends Runtime implements RuntimeInterface
         }
 
         return sprintf(
-            '<FrameSet<%s>#%s, caller_instruction: %s<%s>, caller_offset: %d, value: %s>',
-            match ($type) {
-                FrameProxy::APPENDED => 'Append',
-                FrameProxy::POPPED => 'Pop',
-            },
+            '<FrameSet<Append>#%s, callee_instruction: %s<%s>, callee_offset: %d, value: %s>',
             spl_object_id($frameSet),
             $clasName->getShortName(),
             spl_object_id($frameSet->instruction()),
