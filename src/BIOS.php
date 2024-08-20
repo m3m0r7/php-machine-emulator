@@ -61,7 +61,7 @@ class BIOS extends Machine
 
     protected function createRuntime(ArchitectureProviderInterface $architectureProvider): RuntimeInterface
     {
-        return new Runtime(
+        return new ($this->option->runtimeClass())(
             $this,
             new RuntimeOption(self::BIOS_ENTRYPOINT),
             $architectureProvider,

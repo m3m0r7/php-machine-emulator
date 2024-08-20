@@ -14,7 +14,7 @@ class Frame implements FrameInterface
     {
     }
 
-    public function append(FrameSetInterface $frameSet): self
+    public function append(FrameSetInterface $frameSet): FrameInterface
     {
         $this->frameSets[] = $frameSet;
         return $this;
@@ -23,5 +23,10 @@ class Frame implements FrameInterface
     public function pop(): FrameSetInterface|null
     {
         return array_pop($this->frameSets);
+    }
+
+    public function frameSets(): array
+    {
+        return $this->frameSets;
     }
 }

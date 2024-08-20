@@ -26,9 +26,11 @@ class JmpShort implements InstructionInterface
             ->streamReader()
             ->offset();
 
-        $runtime
-            ->streamReader()
-            ->setOffset($pos + $operand);
+        if ($runtime->option()->shouldChangeOffset()) {
+            $runtime
+                ->streamReader()
+                ->setOffset($pos + $operand);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

@@ -39,9 +39,11 @@ class Loop implements InstructionInterface
         $runtime->memoryAccessor()
             ->decrement(RegisterType::ECX);
 
-        $runtime
-            ->streamReader()
-            ->setOffset($pos + $operand);
+        if ($runtime->option()->shouldChangeOffset()) {
+            $runtime
+                ->streamReader()
+                ->setOffset($pos + $operand);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

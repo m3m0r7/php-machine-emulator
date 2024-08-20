@@ -36,10 +36,13 @@ class Ret implements InstructionInterface
             return ExecutionStatus::EXIT;
         }
 
-        // NOTE: Back to previous frame stack
-        $runtime
-            ->streamReader()
-            ->setOffset($frameSet->pos());
+
+        if ($runtime->option()->shouldChangeOffset()) {
+            // NOTE: Back to previous frame stack
+            $runtime
+                ->streamReader()
+                ->setOffset($frameSet->pos());
+        }
 
         return ExecutionStatus::SUCCESS;
     }

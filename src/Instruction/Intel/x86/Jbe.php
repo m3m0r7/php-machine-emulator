@@ -26,7 +26,7 @@ class Jbe implements InstructionInterface
             ->streamReader()
             ->offset();
 
-        if ($runtime->memoryAccessor()->shouldCarryFlag() || $runtime->memoryAccessor()->shouldZeroFlag()) {
+        if ($runtime->option()->shouldChangeOffset() && ($runtime->memoryAccessor()->shouldCarryFlag() || $runtime->memoryAccessor()->shouldZeroFlag())) {
             $runtime
                 ->streamReader()
                 ->setOffset($pos + $operand);

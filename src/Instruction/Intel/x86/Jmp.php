@@ -40,6 +40,10 @@ class Jmp implements InstructionInterface
                 $pos + $offset - $runtime->addressMap()->getDisk()->entrypointOffset(),
             );
 
+        if (!$runtime->option()->shouldChangeOffset()) {
+            return ExecutionStatus::SUCCESS;
+        }
+
         if ($disk !== null) {
             $runtime
                 ->streamReader()

@@ -26,7 +26,7 @@ class Jc implements InstructionInterface
             ->streamReader()
             ->offset();
 
-        if ($runtime->memoryAccessor()->shouldCarryFlag()) {
+        if ($runtime->option()->shouldChangeOffset() && $runtime->memoryAccessor()->shouldCarryFlag()) {
             $runtime
                 ->streamReader()
                 ->setOffset($pos + $operand);

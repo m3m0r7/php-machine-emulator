@@ -53,6 +53,11 @@ class Machine implements MachineInterface
 
     protected function createRuntime(ArchitectureProviderInterface $architectureProvider): RuntimeInterface
     {
-        return new Runtime($this, new RuntimeOption(), $architectureProvider, $this->streamReader);
+        return new ($this->option->runtimeClass())(
+            $this,
+            new RuntimeOption(),
+            $architectureProvider,
+            $this->streamReader,
+        );
     }
 }

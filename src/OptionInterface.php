@@ -9,4 +9,6 @@ interface OptionInterface
 {
     public function logger(): LoggerInterface;
     public function IO(): IOInterface;
+    public function runtimeClass(): string;
+    public function shouldChangeOffset(): bool;
 }

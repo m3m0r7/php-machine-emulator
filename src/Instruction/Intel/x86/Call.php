@@ -29,12 +29,15 @@ class Call implements InstructionInterface
             ->streamReader()
             ->offset();
 
-        $runtime
-            ->streamReader()
-            ->setOffset($pos + $offset);
+        if ($runtime->option()->shouldChangeOffset()) {
+            $runtime
+                ->streamReader()
+                ->setOffset($pos + $offset);
+        }
 
-        $runtime->frame()
-            ->append(new FrameSet($runtime, $this, $pos));
+        $runtime
+            ->frame()
+            ->append(new FrameSet($runtime, $this, $pos, $pos + $offset));
 
         return ExecutionStatus::SUCCESS;
     }
