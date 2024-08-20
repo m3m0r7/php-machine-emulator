@@ -45,6 +45,8 @@ class Runtime implements RuntimeInterface
             $this->architectureProvider
                 ->observers(),
         );
+
+        $this->showHeader();
     }
 
     public function start(): void
@@ -181,6 +183,23 @@ class Runtime implements RuntimeInterface
             $service->initialize($this);
             $this->machine->option()->logger()->debug(sprintf('Initialize %s service', get_class($service)));
         }
+    }
 
+    private function showHeader(): void
+    {
+        $this
+            ->option()
+            ->IO()
+            ->output()
+            ->write(<<<HEADER
+             __        __                                __
+            |__) |__| |__)   |\/|  _   _ |_  .  _   _   |_   _      |  _  |_  _   _
+            |    |  | |      |  | (_| (_ | ) | | ) (-   |__ ||| |_| | (_| |_ (_) |
+
+            Welcome to PHP Machine emulator. This project is experimental to implement a part of PHP-OS.
+            NOTICE: We do not guarantee safety when using this. So please use at your own risk.
+
+
+            HEADER);
     }
 }
