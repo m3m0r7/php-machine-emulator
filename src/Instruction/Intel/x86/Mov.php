@@ -27,9 +27,10 @@ class Mov implements InstructionInterface
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
 
-        $value = $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asByte();
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $size);
 
-        $this->writeRm16($runtime, $enhancedStreamReader, $modRegRM, $value);
+        $this->writeRm($runtime, $enhancedStreamReader, $modRegRM, $value, $size);
 
         return ExecutionStatus::SUCCESS;
     }

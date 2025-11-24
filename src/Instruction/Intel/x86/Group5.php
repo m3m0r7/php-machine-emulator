@@ -39,24 +39,29 @@ class Group5 implements InstructionInterface
 
     protected function inc(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $value = $this->readRm16($runtime, $reader, $modRegRM);
-        $result = ($value + 1) & 0xFFFF;
-        $this->writeRm16($runtime, $reader, $modRegRM, $result);
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $result = ($value + 1) & $mask;
+        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
         // NOTE: Carry flag unaffected by INC.
         return ExecutionStatus::SUCCESS;
     }
 
     protected function dec(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $value = $this->readRm16($runtime, $reader, $modRegRM);
-        $result = ($value - 1) & 0xFFFF;
-        $this->writeRm16($runtime, $reader, $modRegRM, $result);
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $result = ($value - 1) & $mask;
+        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
         return ExecutionStatus::SUCCESS;
     }
 
     protected function callNearRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $target = $this->readRm16($runtime, $reader, $modRegRM);
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $target = $this->readRm($runtime, $reader, $modRegRM, $size);
         $pos = $runtime->streamReader()->offset();
 
         $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $pos, $runtime->runtimeOption()->context()->operandSize());
@@ -70,7 +75,8 @@ class Group5 implements InstructionInterface
 
     protected function jmpNearRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $target = $this->readRm16($runtime, $reader, $modRegRM);
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $target = $this->readRm($runtime, $reader, $modRegRM, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime->streamReader()->setOffset($target);
@@ -82,8 +88,9 @@ class Group5 implements InstructionInterface
     protected function callFarRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $addr = $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $offset = $this->readMemory16($runtime, $addr);
-        $segment = $this->readMemory16($runtime, $addr + 2);
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
+        $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
 
         $pos = $runtime->streamReader()->offset();
 
@@ -104,8 +111,9 @@ class Group5 implements InstructionInterface
     protected function jmpFarRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $addr = $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $offset = $this->readMemory16($runtime, $addr);
-        $segment = $this->readMemory16($runtime, $addr + 2);
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
+        $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime->streamReader()->setOffset($offset);
@@ -117,8 +125,9 @@ class Group5 implements InstructionInterface
 
     protected function push(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $value = $this->readRm16($runtime, $reader, $modRegRM);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $value);
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $value, $size);
         return ExecutionStatus::SUCCESS;
     }
 }

@@ -25,6 +25,8 @@ interface MemoryAccessorInterface
     public function setCarryFlag(bool $which): self;
     public function pop(int|RegisterType $registerType, int $size = 16): MemoryAccessorFetchResultInterface;
     public function push(int|RegisterType $registerType, int|null $value, int $size = 16): self;
+    public function readControlRegister(int $index): int;
+    public function writeControlRegister(int $index, int $value): void;
 
     public function enableUpdateFlags(bool $which): self;
 

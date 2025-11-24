@@ -21,6 +21,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     protected bool $enableUpdateFlags = false;
     protected bool $directionFlag = false;
     protected bool $interruptFlag = false;
+    protected array $controlRegisters = [];
 
     public function __construct(protected RuntimeInterface $runtime, protected MemoryAccessorObserverCollectionInterface $memoryAccessorObserverCollection)
     {
@@ -358,6 +359,16 @@ class MemoryAccessor implements MemoryAccessorInterface
         }
 
         return $this;
+    }
+
+    public function readControlRegister(int $index): int
+    {
+        return $this->controlRegisters[$index] ?? 0;
+    }
+
+    public function writeControlRegister(int $index, int $value): void
+    {
+        $this->controlRegisters[$index] = $value;
     }
 
     private function processWrite(int|RegisterType $registerType, int|null $value): array

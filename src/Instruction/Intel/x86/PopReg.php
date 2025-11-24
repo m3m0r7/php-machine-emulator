@@ -20,18 +20,20 @@ class PopReg implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
+        $size = $runtime->runtimeOption()->context()->operandSize();
         $stackedValue = $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->pop(RegisterType::ESP)
-            ->asByte();
+            ->pop(RegisterType::ESP, $size)
+            ->asBytesBySize($size);
 
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->write16Bit(
+            ->writeBySize(
                 $this->registersAndOPCodes()[$opcode],
                 $stackedValue,
+                $size,
             );
 
         return ExecutionStatus::SUCCESS;

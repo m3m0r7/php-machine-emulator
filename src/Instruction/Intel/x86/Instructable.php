@@ -58,12 +58,53 @@ trait Instructable
 
     protected function segmentBase(RuntimeInterface $runtime, RegisterType $segment): int
     {
-        return ($runtime->memoryAccessor()->fetch($segment)->asByte() << 4) & 0xFFFFF;
+        $selector = $runtime->memoryAccessor()->fetch($segment)->asByte();
+
+        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            $gdtr = $runtime->runtimeOption()->context()->gdtr();
+            $base = $gdtr['base'] ?? 0;
+            $limit = $gdtr['limit'] ?? 0;
+            $index = ($selector >> 3) & 0x1FFF;
+            $offset = $base + ($index * 8);
+            if ($offset + 7 > $base + $limit) {
+                return 0;
+            }
+
+            $b0 = $this->readMemory8($runtime, $offset + 2);
+            $b1 = $this->readMemory8($runtime, $offset + 3);
+            $b2 = $this->readMemory8($runtime, $offset + 4);
+            $b7 = $this->readMemory8($runtime, $offset + 7);
+
+            $segBase = ($b0) | ($b1 << 8) | ($b2 << 16) | ($b7 << 24);
+            return $segBase & 0xFFFFFFFF;
+        }
+
+        return ($selector << 4) & 0xFFFFF;
     }
 
     protected function segmentOffsetAddress(RuntimeInterface $runtime, RegisterType $segment, int $offset): int
     {
         return ($this->segmentBase($runtime, $segment) + ($offset & 0xFFFF)) & 0xFFFFF;
+    }
+
+    protected function readRegisterBySize(RuntimeInterface $runtime, int $register, int $size): int
+    {
+        return match ($size) {
+            8 => $this->read8BitRegister($runtime, $register),
+            16 => $runtime->memoryAccessor()->fetch($register)->asByte(),
+            32 => $runtime->memoryAccessor()->fetch($register)->asBytesBySize(32),
+            default => $runtime->memoryAccessor()->fetch($register)->asBytesBySize($size),
+        };
+    }
+
+    protected function writeRegisterBySize(RuntimeInterface $runtime, int $register, int $value, int $size): void
+    {
+        match ($size) {
+            8 => $this->write8BitRegister($runtime, $register, $value),
+            16 => $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($register, $value),
+            32 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, 32),
+            default => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, $size),
+        };
     }
 
     protected function defaultSegmentFor16(ModRegRMInterface $modRegRM): RegisterType
@@ -191,6 +232,38 @@ trait Instructable
         return [$offset, $defaultSegment];
     }
 
+    protected function readRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): int
+    {
+        if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
+            return $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
+        }
+
+        $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        return match ($size) {
+            8 => $this->readMemory8($runtime, $address),
+            16 => $this->readMemory16($runtime, $address),
+            32 => $this->readMemory32($runtime, $address),
+            default => $this->readMemory16($runtime, $address) & ((1 << $size) - 1),
+        };
+    }
+
+    protected function writeRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $value, int $size): void
+    {
+        if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $value, $size);
+            return;
+        }
+
+        $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $runtime->memoryAccessor()->allocate($address, safe: false);
+        match ($size) {
+            8 => $runtime->memoryAccessor()->writeBySize($address, $value, 8),
+            16 => $runtime->memoryAccessor()->write16Bit($address, $value),
+            32 => $runtime->memoryAccessor()->writeBySize($address, $value, 32),
+            default => $runtime->memoryAccessor()->writeBySize($address, $value, $size),
+        };
+    }
+
     protected function readRm8(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): int
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
@@ -291,6 +364,39 @@ trait Instructable
             $hi = $proxy->byte();
             $proxy->setOffset($currentOffset);
             return ($hi << 8) + $lo;
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    protected function readMemory32(RuntimeInterface $runtime, int $address): int
+    {
+        $value = $runtime->memoryAccessor()->tryToFetch($address)?->asBytesBySize(32);
+        if ($value !== null) {
+            return $value;
+        }
+
+        try {
+            $origin = $runtime->addressMap()->getOrigin();
+            if ($address < $origin) {
+                return 0;
+            }
+        } catch (\Throwable) {
+            return 0;
+        }
+
+        try {
+            $proxy = $runtime->streamReader()->proxy();
+            $currentOffset = $runtime->streamReader()->offset();
+            $proxy->setOffset(
+                $runtime->addressMap()->getDisk()->entrypointOffset() + ($address - $runtime->addressMap()->getOrigin())
+            );
+            $b1 = $proxy->byte();
+            $b2 = $proxy->byte();
+            $b3 = $proxy->byte();
+            $b4 = $proxy->byte();
+            $proxy->setOffset($currentOffset);
+            return ($b4 << 24) + ($b3 << 16) + ($b2 << 8) + $b1;
         } catch (\Throwable) {
             return 0;
         }

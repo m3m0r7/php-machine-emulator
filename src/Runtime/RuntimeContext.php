@@ -8,6 +8,9 @@ class RuntimeContext implements RuntimeContextInterface
 {
     private bool $operandSizeOverride = false;
     private bool $addressSizeOverride = false;
+    private bool $protectedMode = false;
+    private array $gdtr = ['base' => 0, 'limit' => 0];
+    private array $idtr = ['base' => 0, 'limit' => 0];
 
     public function setOperandSizeOverride(bool $flag = true): void
     {
@@ -33,7 +36,20 @@ class RuntimeContext implements RuntimeContextInterface
 
     public function operandSize(): int
     {
-        return $this->shouldUse32bit(false) ? 32 : 16;
+        if ($this->operandSizeOverride) {
+            return $this->shouldUse32bit(false) ? 32 : 16;
+        }
+        return $this->protectedMode ? 32 : 16;
+    }
+
+    public function setProtectedMode(bool $enabled): void
+    {
+        $this->protectedMode = $enabled;
+    }
+
+    public function isProtectedMode(): bool
+    {
+        return $this->protectedMode;
     }
 
     public function setAddressSizeOverride(bool $flag = true): void
@@ -60,12 +76,35 @@ class RuntimeContext implements RuntimeContextInterface
 
     public function addressSize(): int
     {
-        return $this->shouldUse32bitAddress(false) ? 32 : 16;
+        if ($this->addressSizeOverride) {
+            return $this->shouldUse32bitAddress(false) ? 32 : 16;
+        }
+        return $this->protectedMode ? 32 : 16;
     }
 
     public function clearTransientOverrides(): void
     {
         $this->operandSizeOverride = false;
         $this->addressSizeOverride = false;
+    }
+
+    public function setGdtr(int $base, int $limit): void
+    {
+        $this->gdtr = ['base' => $base, 'limit' => $limit];
+    }
+
+    public function gdtr(): array
+    {
+        return $this->gdtr;
+    }
+
+    public function setIdtr(int $base, int $limit): void
+    {
+        $this->idtr = ['base' => $base, 'limit' => $limit];
+    }
+
+    public function idtr(): array
+    {
+        return $this->idtr;
     }
 }

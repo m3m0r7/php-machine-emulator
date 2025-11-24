@@ -22,14 +22,16 @@ class MovRm16 implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
-        $value = $this->readRm16($runtime, $enhancedStreamReader, $modRegRM);
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $value = $this->readRm($runtime, $enhancedStreamReader, $modRegRM, $size);
 
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->write16Bit(
+            ->writeBySize(
                 $modRegRM->registerOrOPCode(),
                 $value,
+                $size,
             );
 
         return ExecutionStatus::SUCCESS;

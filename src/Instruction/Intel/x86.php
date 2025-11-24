@@ -83,6 +83,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\OperandSizePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\AddressSizePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\SegmentOverridePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\LockPrefix;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoBytePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\CbwCwd;
 use PHPMachineEmulator\Instruction\Intel\x86\Nop;
 use PHPMachineEmulator\Instruction\Intel\x86\In_;
@@ -194,6 +195,7 @@ class x86 implements InstructionListInterface
             AddressSizePrefix::class,
             SegmentOverridePrefix::class,
             LockPrefix::class,
+            TwoBytePrefix::class,
             CbwCwd::class,
             PushReg::class,
             Group5::class,

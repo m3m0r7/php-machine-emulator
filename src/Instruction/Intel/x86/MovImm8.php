@@ -22,17 +22,17 @@ class MovImm8 implements InstructionInterface
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $register = $this->registersAndOPCodes()[$opcode];
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
 
         if ($opcode >= 0xB8) {
-            // NOTE: move instruction for Xx registers
+            // NOTE: move instruction for Xx registers, respect operand size
+            $value = $opSize === 32
+                ? $enhancedStreamReader->dword()
+                : $enhancedStreamReader->short();
             $runtime
                 ->memoryAccessor()
                 ->enableUpdateFlags(false)
-                ->write16Bit(
-                    $register,
-                    $enhancedStreamReader
-                        ->short(),
-                );
+                ->writeBySize($register, $value, $opSize);
 
             return ExecutionStatus::SUCCESS;
         }
