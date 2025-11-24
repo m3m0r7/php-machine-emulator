@@ -19,6 +19,8 @@ class MemoryAccessor implements MemoryAccessorInterface
     protected bool $parityFlag = false;
     protected bool $fireEvents = true;
     protected bool $enableUpdateFlags = false;
+    protected bool $directionFlag = false;
+    protected bool $interruptFlag = false;
 
     public function __construct(protected RuntimeInterface $runtime, protected MemoryAccessorObserverCollectionInterface $memoryAccessorObserverCollection)
     {
@@ -138,12 +140,23 @@ class MemoryAccessor implements MemoryAccessorInterface
     }
 
 
-    public function updateFlags(int|null $value): self
+    public function updateFlags(int|null $value, int $size = 16): self
     {
-        $this->zeroFlag = $value === 0;
-        $this->signFlag = $value !== null && $value < 0;
-        $this->overflowFlag = $value !== null && $value > 0xFFFF;
-        $this->parityFlag = $value !== null && substr_count(decbin($value & 0b11111111), '1') % 2 === 0;
+        if ($value === null) {
+            $this->zeroFlag = true;
+            $this->signFlag = false;
+            $this->overflowFlag = false;
+            $this->parityFlag = true;
+            return $this;
+        }
+
+        $mask = (1 << $size) - 1;
+        $masked = $value & $mask;
+
+        $this->zeroFlag = $masked === 0;
+        $this->signFlag = ($masked & (1 << ($size - 1))) !== 0;
+        $this->overflowFlag = $value < 0 || $value > $mask;
+        $this->parityFlag = substr_count(decbin($masked & 0b11111111), '1') % 2 === 0;
 
         return $this;
     }
@@ -212,6 +225,46 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this->parityFlag;
     }
 
+    public function setParityFlag(bool $which): self
+    {
+        $this->parityFlag = $which;
+        return $this;
+    }
+
+    public function setSignFlag(bool $which): self
+    {
+        $this->signFlag = $which;
+        return $this;
+    }
+
+    public function setOverflowFlag(bool $which): self
+    {
+        $this->overflowFlag = $which;
+        return $this;
+    }
+
+    public function setDirectionFlag(bool $which): self
+    {
+        $this->directionFlag = $which;
+        return $this;
+    }
+
+    public function shouldDirectionFlag(): bool
+    {
+        return $this->directionFlag;
+    }
+
+    public function setInterruptFlag(bool $which): self
+    {
+        $this->interruptFlag = $which;
+        return $this;
+    }
+
+    public function shouldInterruptFlag(): bool
+    {
+        return $this->interruptFlag;
+    }
+
     protected function asAddress(int|RegisterType $address): int
     {
         if ($address instanceof RegisterType) {
@@ -222,6 +275,28 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function pop(int|RegisterType $registerType, int $size = 16): MemoryAccessorFetchResultInterface
     {
+        // Stack-aware pop when targeting ESP.
+        if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
+            $sp = $this->fetch(RegisterType::ESP)->asByte() & 0xFFFF;
+            $ss = $this->fetch(RegisterType::SS)->asByte();
+            $bytes = intdiv($size, 8);
+
+            $address = (($ss << 4) + $sp) & 0xFFFFF;
+            $value = 0;
+            for ($i = 0; $i < $bytes; $i++) {
+                $value |= ($this->memory[$address + $i] ?? 0) << ($i * 8);
+            }
+
+            $this->write16Bit(RegisterType::ESP, ($sp + $bytes) & 0xFFFF);
+
+            return new MemoryAccessorFetchResult(
+                BinaryInteger::asLittleEndian(
+                    $value,
+                    $size,
+                ),
+            );
+        }
+
         $address = $this->asAddress($registerType);
         $fetchResult = $this->fetch($address)
             ->asBytesBySize();
@@ -241,6 +316,25 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function push(int|RegisterType $registerType, int|null $value, int $size = 16): self
     {
+        // Stack-aware push when targeting ESP.
+        if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
+            $sp = $this->fetch(RegisterType::ESP)->asByte() & 0xFFFF;
+            $ss = $this->fetch(RegisterType::SS)->asByte();
+            $bytes = intdiv($size, 8);
+            $newSp = ($sp - $bytes) & 0xFFFF;
+            $address = (($ss << 4) + $newSp) & 0xFFFFF;
+
+            $this->write16Bit(RegisterType::ESP, $newSp);
+            $this->allocate($address, $bytes, safe: false);
+
+            $masked = $value & ((1 << $size) - 1);
+            for ($i = 0; $i < $bytes; $i++) {
+                $this->writeBySize($address + $i, ($masked >> ($i * 8)) & 0xFF, 8);
+            }
+
+            return $this;
+        }
+
         $address = $this->asAddress($registerType);
         $fetchResult = $this->fetch($address)
             ->asBytesBySize();

@@ -21,7 +21,7 @@ interface MemoryAccessorInterface
     public function writeToHighBit(int|RegisterType $registerType, int|null $value): self;
     public function writeToLowBit(int|RegisterType $registerType, int|null $value): self;
 
-    public function updateFlags(int|null $value): self;
+    public function updateFlags(int|null $value, int $size = 16): self;
     public function setCarryFlag(bool $which): self;
     public function pop(int|RegisterType $registerType, int $size = 16): MemoryAccessorFetchResultInterface;
     public function push(int|RegisterType $registerType, int|null $value, int $size = 16): self;

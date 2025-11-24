@@ -8,16 +8,22 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Keyboard implements InterruptInterface
 {
+    protected bool $isTty;
+
     public function __construct(protected RuntimeInterface $runtime)
     {
         $runtime->option()->logger()->debug('Reached to keyboard interruption');
 
-        // NOTE: Disable canonical mode and echo texts
-        system('stty -icanon -echo');
+        $this->isTty = function_exists('posix_isatty') && posix_isatty(STDIN);
+
+        if ($this->isTty) {
+            // NOTE: Disable canonical mode and echo texts
+            system('stty -icanon -echo');
+        }
 
         $this->runtime->shutdown(
             // NOTE: Rollback to sane for stty
-            fn () => system('stty sane')
+            fn () => $this->isTty ? system('stty sane') : null
         );
     }
 

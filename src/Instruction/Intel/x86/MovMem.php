@@ -27,48 +27,9 @@ class MovMem implements InstructionInterface
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
 
-        if (ModType::from($modRegRM->mode()) !== ModType::NO_DISPLACEMENT_OR_16BITS_DISPLACEMENT) {
-            throw new ExecutionException(
-                sprintf('The addressing mode (0b%02s) is not supported yet', decbin($modRegRM->mode()))
-            );
-        }
+        $value = $this->readRm8($runtime, $enhancedStreamReader, $modRegRM);
 
-        $source = $modRegRM->source();
-
-        // TODO: Here is 16 bit addressing mode only. You need to fix/implement for 32 bit protection mode here
-        if ($source === 0b100) {
-            // NOTE: Here is incorrect implementation.
-            //       Actually here need to use SI (0b100) register but here is replacing ESI (0b110) register
-            $source = RegisterType::ESI;
-        }
-
-        $sourceOffset = $runtime
-            ->memoryAccessor()
-            ->fetch($source)
-            ->asByte();
-
-        $offset = $runtime
-                ->addressMap()
-                ->getDisk()
-                ->entrypointOffset() + ($sourceOffset - $runtime->addressMap()->getOrigin());
-
-        $proxiedStreamReader = $runtime
-            ->streamReader()
-            ->proxy();
-
-        $proxiedStreamReader
-            ->setOffset($offset);
-
-        // TODO: here is to write low bits only
-        $runtime
-            ->memoryAccessor()
-            ->enableUpdateFlags(false)
-            ->writeToLowBit(
-                $modRegRM
-                    ->destination(),
-                $proxiedStreamReader
-                    ->byte(),
-            );
+        $this->write8BitRegister($runtime, $modRegRM->destination(), $value, updateFlags: false);
 
         return ExecutionStatus::SUCCESS;
     }

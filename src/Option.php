@@ -15,6 +15,7 @@ class Option implements OptionInterface
         protected IOInterface $IO = new IO(),
         protected string $runtimeClass = Runtime::class,
         protected bool $shouldChangeOffset = true,
+        protected bool $showHeader = false,
     ) {
     }
 
@@ -36,5 +37,10 @@ class Option implements OptionInterface
     public function shouldChangeOffset(): bool
     {
         return $this->shouldChangeOffset;
+    }
+
+    public function shouldShowHeader(): bool
+    {
+        return $this->showHeader;
     }
 }

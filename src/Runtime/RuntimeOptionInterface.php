@@ -7,4 +7,5 @@ namespace PHPMachineEmulator\Runtime;
 interface RuntimeOptionInterface
 {
     public function entrypoint(): int;
+    public function context(): RuntimeContextInterface;
 }

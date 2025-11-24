@@ -67,56 +67,11 @@ class Video implements InterruptInterface
             );
         }
 
-        // NOTE: Rollback to default setting
-        [$defaultHeight, $defaultWidth] = exec('stty size');
-        $runtime->shutdown(function () use ($defaultHeight, $defaultWidth) {
-            exec(
-                sprintf(
-                    'stty rows %d cols %d',
-                    $defaultHeight,
-                    $defaultWidth,
-                )
-            );
-        });
-
-        // NOTE: Calculate terminal (as a video mode) size
-        [$height, $width] = explode(
-            ' ',
-            exec(
-                sprintf(
-                    'stty rows %d cols %d; stty size',
-                    $video->height,
-                    $video->width,
-                )
-            ),
-        );
-
-        $width = (int) $width;
-        $height = (int) $height;
-
-        if ($video->width > $width) {
-            throw new VideoInterruptException(
-                sprintf(
-                    'The video is not enough rendering spaces of the width: not enough %d cols',
-                    $video->width - $width,
-                )
-            );
-        }
-
-        if ($video->height > $height) {
-            throw new VideoInterruptException(
-                sprintf(
-                    'The video is not enough rendering spaces of the height: not enough %d rows',
-                    $video->height - $height,
-                )
-            );
-        }
-
         $runtime->option()->logger()->debug(
             sprintf(
                 'Render video size %dx%d',
-                $width,
-                $height,
+                $video->width,
+                $video->height,
             )
         );
 
@@ -125,9 +80,14 @@ class Video implements InterruptInterface
             ->enableUpdateFlags(false)
             ->writeBySize(
                 $runtime->video()->videoTypeFlagAddress(),
-                // NOTE: Actual width + Actual Height + Video Type
-                (($width & 0b11111111_11111111) << 24) + (($height & 0b11111111_11111111) << 8) + $videoType,
-                32,
+                // NOTE: Store width, height, and video type in a single flag address.
+                // width: 16 bits (bits 48..63)
+                // height: 16 bits (bits 32..47)
+                // video type: 8 bits (bits 0..7)
+                (($video->width & 0xFFFF) << 48) +
+                (($video->height & 0xFFFF) << 32) +
+                ($videoType & 0xFF),
+                64,
             );
     }
 

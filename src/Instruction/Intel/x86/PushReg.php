@@ -24,11 +24,12 @@ class PushReg implements InstructionInterface
             ->memoryAccessor()
             ->fetch($this->registersAndOPCodes()[$opcode])
             ->asByte();
+        $size = $runtime->runtimeOption()->context()->operandSize();
 
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->push(RegisterType::ESP, $fetchResult);
+            ->push(RegisterType::ESP, $fetchResult, $size);
 
         return ExecutionStatus::SUCCESS;
     }

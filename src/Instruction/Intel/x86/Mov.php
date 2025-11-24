@@ -27,22 +27,9 @@ class Mov implements InstructionInterface
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
 
-        if (ModType::from($modRegRM->mode()) !== ModType::REGISTER_TO_REGISTER) {
-            throw new ExecutionException(
-                sprintf('The addressing mode (0b%02s) is not supported yet', decbin($modRegRM->mode()))
-            );
-        }
+        $value = $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asByte();
 
-        $runtime
-            ->memoryAccessor()
-            ->enableUpdateFlags(false)
-            ->write16Bit(
-                $modRegRM->registerOrMemoryAddress(),
-                $runtime
-                    ->memoryAccessor()
-                    ->fetch($modRegRM->registerOrOPCode())
-                    ->asByte(),
-            );
+        $this->writeRm16($runtime, $enhancedStreamReader, $modRegRM, $value);
 
         return ExecutionStatus::SUCCESS;
     }

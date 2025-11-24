@@ -37,6 +37,24 @@ class EnhanceStreamReader
             : $value;
     }
 
+    public function dword(): int
+    {
+        $b1 = $this->streamReader->byte();
+        $b2 = $this->streamReader->byte();
+        $b3 = $this->streamReader->byte();
+        $b4 = $this->streamReader->byte();
+
+        return ($b4 << 24) + ($b3 << 16) + ($b2 << 8) + $b1;
+    }
+
+    public function signedDword(): int
+    {
+        $value = $this->dword();
+        return $value >= 0x80000000
+            ? $value - 0x100000000
+            : $value;
+    }
+
     public function short(): int
     {
         $operand1 = $this->streamReader->byte();

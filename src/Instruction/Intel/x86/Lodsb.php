@@ -19,27 +19,13 @@ class Lodsb implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = $runtime->streamReader()->proxy();
+        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
+        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
 
-        $si = $runtime
-            ->memoryAccessor()
-            ->fetch(RegisterType::ESI)
-            ->asByte();
-
-        // NOTE: Try to fetch from allocated memory because the DI register writes to it.
-        $value = $runtime
-            ->memoryAccessor()
-            ->tryToFetch($si)
-            ?->asLowBit();
-
-        // NOTE: Looking for bits from disk
-        if ($value === null) {
-            $reader
-                ->setOffset(
-                    $runtime->addressMap()->getDisk()->entrypointOffset() + ($si - $runtime->addressMap()->getOrigin()),
-                );
-            $value = $reader->byte();
-        }
+        $value = $this->readMemory8(
+            $runtime,
+            $this->segmentOffsetAddress($runtime, $segment, $si),
+        );
 
         $runtime->memoryAccessor()
             ->enableUpdateFlags(false)
@@ -52,7 +38,7 @@ class Lodsb implements InstructionInterface
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->increment(RegisterType::ESI);
+            ->add(RegisterType::ESI, $runtime->memoryAccessor()->shouldDirectionFlag() ? -1 : 1);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -24,4 +24,6 @@ interface RuntimeInterface
     public function frame(): FrameInterface;
     public function option(): OptionInterface;
     public function video(): VideoInterface;
+    public function segmentOverride(): ?\PHPMachineEmulator\Instruction\RegisterType;
+    public function setSegmentOverride(?\PHPMachineEmulator\Instruction\RegisterType $segment): void;
 }

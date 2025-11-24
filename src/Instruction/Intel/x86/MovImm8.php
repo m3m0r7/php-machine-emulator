@@ -38,7 +38,7 @@ class MovImm8 implements InstructionInterface
         }
 
         if ($opcode >= 0xB4) {
-            // NOTE: move instruction for high-bit
+            // NOTE: move instruction for high-bit registers (AH/CH/DH/BH)
             $runtime
                 ->memoryAccessor()
                 ->enableUpdateFlags(false)
@@ -52,7 +52,7 @@ class MovImm8 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        // NOTE: move instruction for low-bit
+        // NOTE: move instruction for low-bit registers (AL/CL/DL/BL)
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
@@ -83,6 +83,10 @@ class MovImm8 implements InstructionInterface
             0xB8 + ($this->instructionList->register())::addressBy(RegisterType::ECX) => RegisterType::ECX,
             0xB8 + ($this->instructionList->register())::addressBy(RegisterType::EDX) => RegisterType::EDX,
             0xB8 + ($this->instructionList->register())::addressBy(RegisterType::EBX) => RegisterType::EBX,
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::ESP) => RegisterType::ESP,
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::EBP) => RegisterType::EBP,
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::ESI) => RegisterType::ESI,
+            0xB8 + ($this->instructionList->register())::addressBy(RegisterType::EDI) => RegisterType::EDI,
         ];
     }
 }

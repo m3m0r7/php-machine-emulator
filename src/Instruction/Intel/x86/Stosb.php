@@ -25,30 +25,26 @@ class Stosb implements InstructionInterface
             ->fetch(RegisterType::EAX)
             ->asLowBit();
 
-        $es = $runtime->memoryAccessor()
-            ->fetch(($runtime->register())::addressBy(RegisterType::ES))
-            ->asByte();
-
         $di = $runtime->memoryAccessor()
             ->fetch(($runtime->register())::addressBy(RegisterType::EDI))
             ->asByte();
 
-        $runtime
-            ->memoryAccessor()
-            ->allocate(
-                $es + $di,
-                safe: false,
-            );
+        $address = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
 
         $runtime
             ->memoryAccessor()
-            ->writeToLowBit($es + $di, $byte);
+            ->allocate($address, safe: false);
+
+        $runtime
+            ->memoryAccessor()
+            ->enableUpdateFlags(false)
+            ->writeBySize($address, $byte, 8);
 
         // TODO: Here is needed to implement decrementing by DF
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->increment(RegisterType::EDI);
+            ->add(RegisterType::EDI, $runtime->memoryAccessor()->shouldDirectionFlag() ? -1 : 1);
 
         return ExecutionStatus::SUCCESS;
     }

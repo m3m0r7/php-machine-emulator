@@ -22,12 +22,16 @@ class AddressMap implements AddressMapInterface
 
     public function getDiskByAddress(int $address): DiskInterface|null
     {
+        $closest = null;
         foreach ($this->addresses as [$targetAddress, $disk]) {
             if ($address === $targetAddress) {
                 return $disk;
             }
+            if ($targetAddress <= $address) {
+                $closest = [$targetAddress, $disk];
+            }
         }
-        return null;
+        return $closest[1] ?? null;
     }
 
     public function getAddressAndDisk(): array

@@ -19,12 +19,12 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
 
     public function shouldMatch(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): bool
     {
-        $es = $runtime
+        $esBase = $runtime
             ->memoryAccessor()
             ->fetch(
                 ($runtime->register())::addressBy(RegisterType::ES),
             )
-            ->asByte();
+            ->asByte() << 4;
 
         $di = $runtime
             ->memoryAccessor()
@@ -33,9 +33,11 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
             )
             ->asByte();
 
-        return $address === ($di + $es) &&
-            ($di + $es) >= VideoMemoryService::VIDEO_MEMORY_ADDRESS_STARTED &&
-            ($di + $es) <= VideoMemoryService::VIDEO_MEMORY_ADDRESS_ENDED;
+        $linear = $di + $esBase;
+
+        return $address === $linear &&
+            $linear >= VideoMemoryService::VIDEO_MEMORY_ADDRESS_STARTED &&
+            $linear <= VideoMemoryService::VIDEO_MEMORY_ADDRESS_ENDED;
     }
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): void
@@ -55,11 +57,14 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
                 $runtime->video()
                     ->videoTypeFlagAddress(),
             )
-            ->asByte();
+            ->asBytesBySize(64);
 
-        $videoType = $videoSettingAddress & 0b11111111;
+        $width = ($videoSettingAddress >> 48) & 0xFFFF;
+        $videoType = $videoSettingAddress & 0xFF;
 
         $videoTypeInfo = $runtime->video()->supportedVideoModes()[$videoType];
+
+        $width = $width === 0 ? $videoTypeInfo->width : $width;
 
         $this->writer ??= new TerminalScreenWriter($runtime, $videoTypeInfo);
 
@@ -71,7 +76,7 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
                 ->dot(Color::asBlack());
         }
 
-        if ($di > 0 && ($di % ($videoTypeInfo->width)) === 0) {
+        if ($di > 0 && ($di % $width) === 0) {
             $this->writer
                 ->newline();
         }

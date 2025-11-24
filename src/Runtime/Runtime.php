@@ -13,6 +13,7 @@ use PHPMachineEmulator\Frame\Frame;
 use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterInterface;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\ServiceInterface;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
@@ -26,6 +27,7 @@ class Runtime implements RuntimeInterface
     protected MemoryAccessorInterface $memoryAccessor;
     protected AddressMapInterface $addressMap;
     protected array $shutdown = [];
+    protected ?RegisterType $segmentOverride = null;
 
     public function __construct(
         protected MachineInterface $machine,
@@ -46,7 +48,9 @@ class Runtime implements RuntimeInterface
                 ->observers(),
         );
 
-        $this->showHeader();
+        if ($this->option()->shouldShowHeader()) {
+            $this->showHeader();
+        }
     }
 
     public function start(): void
@@ -141,6 +145,16 @@ class Runtime implements RuntimeInterface
             ->video();
     }
 
+    public function segmentOverride(): ?RegisterType
+    {
+        return $this->segmentOverride;
+    }
+
+    public function setSegmentOverride(?RegisterType $segment): void
+    {
+        $this->segmentOverride = $segment;
+    }
+
     public function execute(int $opcode): ExecutionStatus
     {
         $this->machine->option()->logger()->debug(sprintf('Reached the opcode is 0x%04X', $opcode));
@@ -158,6 +172,8 @@ class Runtime implements RuntimeInterface
         } finally {
             $this->memoryAccessor
                 ->enableUpdateFlags(true);
+            $this->segmentOverride = null;
+            $this->runtimeOption->context()->clearTransientOverrides();
         }
     }
 

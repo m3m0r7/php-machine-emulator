@@ -11,4 +11,5 @@ interface OptionInterface
     public function IO(): IOInterface;
     public function runtimeClass(): string;
     public function shouldChangeOffset(): bool;
+    public function shouldShowHeader(): bool;
 }

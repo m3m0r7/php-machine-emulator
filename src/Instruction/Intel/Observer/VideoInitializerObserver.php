@@ -29,15 +29,25 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
             ->fetch(
                 $runtime->video()->videoTypeFlagAddress(),
             )
-            ->asByte();
+            ->asBytesBySize(64);
 
-        $width = $videoSettingAddress >> 24;
-        $height = ($videoSettingAddress >> 8) & 0b11111111_11111111;
-        $videoType = $videoSettingAddress & 0b11111111;
+        $width = ($videoSettingAddress >> 48) & 0xFFFF;
+        $height = ($videoSettingAddress >> 32) & 0xFFFF;
+        $videoType = $videoSettingAddress & 0xFF;
 
         $videoTypeInfo = $runtime
             ->video()
             ->supportedVideoModes()[$videoType];
+
+        // NOTE: Fallback to predefined size if header was not set.
+        $width = $width === 0 ? $videoTypeInfo->width : $width;
+        $height = $height === 0 ? $videoTypeInfo->height : $height;
+
+        // NOTE: Clear the screen with a tiny bootstrap text area (mode 0x00) to avoid rendering an
+        // enormous frame when switching video modes during boot.
+        $bootstrapVideoType = $runtime->video()->supportedVideoModes()[0x00] ?? $videoTypeInfo;
+        $clearWidth = $bootstrapVideoType->width;
+        $clearHeight = $bootstrapVideoType->height;
 
         $this->writer ??= new TerminalScreenWriter(
             $runtime,
@@ -46,14 +56,14 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
 
         $this->cursor ??= new Cursor($this->writer);
 
-        for ($i = 0; $i < $videoTypeInfo->width * $videoTypeInfo->height; $i++) {
+        for ($i = 0; $i < $clearWidth * $clearHeight; $i++) {
             $this->writer->dot(Color::asBlack());
-            if (($i % $videoTypeInfo->width) === 0) {
+            if (($i % $clearWidth) === 0) {
                 $this->writer->newline();
             }
         }
 
-        // Roll back to cursor
+        // Roll back to cursor.
         $this->cursor->reset();
     }
 }

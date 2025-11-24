@@ -30,24 +30,11 @@ class Group1 implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
-        if (ModType::from($modRegRM->mode()) !== ModType::REGISTER_TO_REGISTER) {
-            throw new ExecutionException(
-                sprintf('The addressing mode (0b%02s) is not supported yet', decbin($modRegRM->mode()))
-            );
-        }
-
-        if ($this->shouldIncludedSignOperation($opcode)) {
-            $operand = $enhancedStreamReader
-                ->streamReader()
-                ->signedByte();
-        } else {
-            $operand = $this->should16BitOperation($opcode)
-                ? $enhancedStreamReader
-                    ->streamReader()
-                    ->byte()
-                : $enhancedStreamReader
-                    ->short();
-        }
+        $operand = $this->isSignExtendedWordOperation($opcode)
+            ? $enhancedStreamReader->streamReader()->signedByte()
+            : ($this->isByteOperation($opcode)
+                ? $enhancedStreamReader->streamReader()->byte()
+                : $enhancedStreamReader->short());
 
         match ($modRegRM->digit()) {
             0x0 => $this->add($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand),
@@ -63,107 +50,182 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function should16BitOperation(int $opcode): bool
+    private function isByteOperation(int $opcode): bool
     {
         return $opcode === 0x80 || $opcode === 0x82;
     }
 
-    private function shouldIncludedSignOperation(int $opcode): bool
+    private function isSignExtendedWordOperation(int $opcode): bool
     {
         return $opcode === 0x83;
     }
 
     protected function add(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand): ExecutionStatus
     {
-        $runtime
-            ->memoryAccessor()
-            ->add(
-                $modRegRM->registerOrMemoryAddress(),
-                $operand,
-            );
+        if ($this->isByteOperation($opcode)) {
+            $original = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                : $this->readRm8($runtime, $streamReader, $modRegRM);
+            $result = $original + $operand;
+            $this->writeRm8($runtime, $streamReader, $modRegRM, $result);
+            $runtime->memoryAccessor()->setCarryFlag($result > 0xFF);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $original = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER
+            ? $runtime->memoryAccessor()->fetch($modRegRM->registerOrMemoryAddress())->asByte()
+            : $this->readRm16($runtime, $streamReader, $modRegRM);
+
+        $result = $original + $operand;
+
+        $this->writeRm16($runtime, $streamReader, $modRegRM, $result);
+        $runtime->memoryAccessor()->setCarryFlag($result > 0xFFFF);
 
         return ExecutionStatus::SUCCESS;
     }
 
     protected function or(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand): ExecutionStatus
     {
-        throw new ExecutionException(
-            sprintf(
-                'The %s was not implemented yet',
-                __FUNCTION__,
-            ),
-        );
+        if ($this->isByteOperation($opcode)) {
+            $result = $this->readRm8($runtime, $streamReader, $modRegRM) | ($operand & 0xFF);
+            $this->writeRm8($runtime, $streamReader, $modRegRM, $result);
+            $runtime->memoryAccessor()->setCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $left = $this->readRm16($runtime, $streamReader, $modRegRM);
+        $result = $left | $operand;
+
+        $this->writeRm16($runtime, $streamReader, $modRegRM, $result);
+        $runtime->memoryAccessor()->setCarryFlag(false);
+
+        return ExecutionStatus::SUCCESS;
     }
 
     protected function adc(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand): ExecutionStatus
     {
-        throw new ExecutionException(
-            sprintf(
-                'The %s was not implemented yet',
-                __FUNCTION__,
-            ),
-        );
+        $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
+
+        if ($this->isByteOperation($opcode)) {
+            $left = $this->readRm8($runtime, $streamReader, $modRegRM);
+            $result = $left + ($operand & 0xFF) + $carry;
+            $this->writeRm8($runtime, $streamReader, $modRegRM, $result);
+            $runtime->memoryAccessor()->setCarryFlag($result > 0xFF);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $left = $this->readRm16($runtime, $streamReader, $modRegRM);
+        $result = $left + $operand + $carry;
+
+        $this->writeRm16($runtime, $streamReader, $modRegRM, $result);
+        $runtime->memoryAccessor()->setCarryFlag($result > 0xFFFF);
+
+        return ExecutionStatus::SUCCESS;
     }
 
     protected function sbb(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand): ExecutionStatus
     {
-        throw new ExecutionException(
-            sprintf(
-                'The %s was not implemented yet',
-                __FUNCTION__,
-            ),
-        );
+        $borrow = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
+
+        if ($this->isByteOperation($opcode)) {
+            $left = $this->readRm8($runtime, $streamReader, $modRegRM);
+            $result = ($left - ($operand & 0xFF) - $borrow) & 0xFF;
+            $this->writeRm8($runtime, $streamReader, $modRegRM, $result);
+            $runtime->memoryAccessor()->setCarryFlag(($left - ($operand & 0xFF) - $borrow) < 0);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $left = $this->readRm16($runtime, $streamReader, $modRegRM);
+        $calc = $left - $operand - $borrow;
+        $result = $calc & 0xFFFF;
+
+        $this->writeRm16($runtime, $streamReader, $modRegRM, $result);
+        $runtime->memoryAccessor()->setCarryFlag($calc < 0);
+
+        return ExecutionStatus::SUCCESS;
     }
 
     protected function and(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand): ExecutionStatus
     {
-        throw new ExecutionException(
-            sprintf(
-                'The %s was not implemented yet',
-                __FUNCTION__,
-            ),
-        );
+        if ($this->isByteOperation($opcode)) {
+            $result = $this->readRm8($runtime, $streamReader, $modRegRM) & ($operand & 0xFF);
+            $this->writeRm8($runtime, $streamReader, $modRegRM, $result);
+            $runtime->memoryAccessor()->setCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $left = $this->readRm16($runtime, $streamReader, $modRegRM);
+        $result = $left & $operand;
+
+        $this->writeRm16($runtime, $streamReader, $modRegRM, $result);
+        $runtime->memoryAccessor()->setCarryFlag(false);
+
+        return ExecutionStatus::SUCCESS;
     }
 
     protected function sub(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand): ExecutionStatus
     {
-        throw new ExecutionException(
-            sprintf(
-                'The %s was not implemented yet',
-                __FUNCTION__,
-            ),
-        );
+        if ($this->isByteOperation($opcode)) {
+            $left = $this->readRm8($runtime, $streamReader, $modRegRM);
+            $result = ($left - ($operand & 0xFF)) & 0xFF;
+            $this->writeRm8($runtime, $streamReader, $modRegRM, $result);
+            $runtime->memoryAccessor()->setCarryFlag(($left - ($operand & 0xFF)) < 0);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $left = $this->readRm16($runtime, $streamReader, $modRegRM);
+        $calc = $left - $operand;
+        $result = $calc & 0xFFFF;
+
+        $this->writeRm16($runtime, $streamReader, $modRegRM, $result);
+        $runtime->memoryAccessor()->setCarryFlag($calc < 0);
+
+        return ExecutionStatus::SUCCESS;
     }
 
     protected function xor(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand): ExecutionStatus
     {
-        throw new ExecutionException(
-            sprintf(
-                'The %s was not implemented yet',
-                __FUNCTION__,
-            ),
-        );
+        if ($this->isByteOperation($opcode)) {
+            $result = $this->readRm8($runtime, $streamReader, $modRegRM) ^ ($operand & 0xFF);
+            $this->writeRm8($runtime, $streamReader, $modRegRM, $result);
+            $runtime->memoryAccessor()->setCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $left = $this->readRm16($runtime, $streamReader, $modRegRM);
+        $result = $left ^ $operand;
+
+        $this->writeRm16($runtime, $streamReader, $modRegRM, $result);
+        $runtime->memoryAccessor()->setCarryFlag(false);
+
+        return ExecutionStatus::SUCCESS;
     }
 
     protected function cmp(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand): ExecutionStatus
     {
-        $fetchResult = $runtime
-            ->memoryAccessor()
-            ->fetch($modRegRM->registerOrMemoryAddress())
-            ->asBytesBySize(
-                $this->shouldIncludedSignOperation($opcode)
-                    // TODO: In 16 bit mode, here is extended to 32 bit
-                    ? 16
-                    : ($this->should16BitOperation($opcode)
-                        ? 16
-                        : 32
-                    ),
-            );
+        if ($this->isByteOperation($opcode)) {
+            $leftHand = $this->readRm8($runtime, $streamReader, $modRegRM) & 0xFF;
+            $runtime
+                ->memoryAccessor()
+            ->updateFlags($leftHand - ($operand & 0xFF), 8)
+            ->setCarryFlag($leftHand < ($operand & 0xFF));
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $leftHand = $this->readRm16($runtime, $streamReader, $modRegRM);
 
         $runtime
             ->memoryAccessor()
-            ->updateFlags($fetchResult - $operand)
-            ->setCarryFlag($fetchResult < $operand);
+            ->updateFlags($leftHand - $operand, 16)
+            ->setCarryFlag($leftHand < $operand);
 
         return ExecutionStatus::SUCCESS;
     }

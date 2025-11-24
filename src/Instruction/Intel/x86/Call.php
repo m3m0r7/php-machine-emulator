@@ -3,10 +3,10 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
-use PHPMachineEmulator\Frame\FrameSet;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Call implements InstructionInterface
@@ -22,22 +22,23 @@ class Call implements InstructionInterface
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
-        $offset = $enhancedStreamReader
-            ->signedShort();
+        $offset = $runtime->runtimeOption()->context()->operandSize() === 32
+            ? $enhancedStreamReader->signedDword()
+            : $enhancedStreamReader->signedShort();
 
-        $pos = $runtime
-            ->streamReader()
-            ->offset();
+        $pos = $runtime->streamReader()->offset();
+
+        // Push return address onto stack.
+        $runtime
+            ->memoryAccessor()
+            ->enableUpdateFlags(false)
+            ->push(RegisterType::ESP, $pos, $runtime->runtimeOption()->context()->operandSize());
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime
                 ->streamReader()
                 ->setOffset($pos + $offset);
         }
-
-        $runtime
-            ->frame()
-            ->append(new FrameSet($runtime, $this, $pos, $pos + $offset));
 
         return ExecutionStatus::SUCCESS;
     }

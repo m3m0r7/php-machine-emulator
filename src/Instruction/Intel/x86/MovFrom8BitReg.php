@@ -28,60 +28,12 @@ class MovFrom8BitReg implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
-        $proxiedStreamReader = $runtime->streamReader()->proxy();
-        $register = $modRegRM->registerOrMemoryAddress();
-
-        // TODO: Here is 16 bit addressing mode only. You need to fix/implement for 32 bit protection mode here
-        if ($register === 0b100) {
-            // NOTE: Here is incorrect implementation.
-            //       Actually here need to use SI (0b100) register but here is replacing ESI (0b110) register
-            $register = RegisterType::ESI;
-        }
-
-        // TODO: Here is 16 bit addressing mode only. You need to fix/implement for 32 bit protection mode here
-        if ($register === 0b101) {
-            // NOTE: Here is incorrect implementation.
-            //       Actually here need to use DI (0b101) register but here is replacing EDI (0b111) register
-            $register = RegisterType::EDI;
-        }
-
-        $displacement = null;
-        if (ModType::from($modRegRM->mode()) === ModType::SIGNED_8BITS_DISPLACEMENT) {
-            $displacement = $runtime
-                ->streamReader()
-                ->signedByte();
-        }
-
-        if (ModType::from($modRegRM->mode()) === ModType::SIGNED_16BITS_DISPLACEMENT) {
-            $displacement = $enhancedStreamReader
-                ->signedShort();
-        }
-
-        $offset = $runtime->memoryAccessor()
-            ->fetch($register)
-            ->asByte();
-
-        if ($displacement !== null) {
-            $offset += $displacement;
-        }
-
-        $runtime
-            ->memoryAccessor()
-            ->allocate(
-                $offset,
-                safe: false,
-            );
-
-        $runtime
-            ->memoryAccessor()
-            ->enableUpdateFlags(false)
-            ->writeToLowBit(
-                $offset,
-                $runtime
-                    ->memoryAccessor()
-                    ->fetch($modRegRM->registerOrOPCode())
-                    ->asLowBit(),
-            );
+        $this->writeRm8(
+            $runtime,
+            $enhancedStreamReader,
+            $modRegRM,
+            $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode()),
+        );
 
         return ExecutionStatus::SUCCESS;
     }

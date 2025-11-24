@@ -30,18 +30,11 @@ class Or_ implements InstructionInterface
             );
         }
 
-        $runtime
-            ->memoryAccessor()
-            ->writeToLowBit(
-                $modRegRM->destination(),
-                $runtime
-                    ->memoryAccessor()
-                    ->fetch($modRegRM->destination())
-                    ->asLowBit() | $runtime
-                    ->memoryAccessor()
-                    ->fetch($modRegRM->source())
-                    ->asLowBit(),
-            );
+        $result = $this->read8BitRegister($runtime, $modRegRM->destination()) |
+            $this->read8BitRegister($runtime, $modRegRM->source());
+
+        $this->write8BitRegister($runtime, $modRegRM->destination(), $result);
+        $runtime->memoryAccessor()->setCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }

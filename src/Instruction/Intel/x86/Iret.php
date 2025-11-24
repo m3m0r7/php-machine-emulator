@@ -1,0 +1,43 @@
+<?php
+declare(strict_types=1);
+
+namespace PHPMachineEmulator\Instruction\Intel\x86;
+
+use PHPMachineEmulator\Instruction\ExecutionStatus;
+use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Runtime\RuntimeInterface;
+
+class Iret implements InstructionInterface
+{
+    use Instructable;
+
+    public function opcodes(): array
+    {
+        return [0xCF];
+    }
+
+    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    {
+        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+
+        $ip = $ma->pop(RegisterType::ESP)->asByte();
+        $cs = $ma->pop(RegisterType::ESP)->asByte();
+        $flags = $ma->pop(RegisterType::ESP)->asByte();
+
+        $ma->write16Bit(RegisterType::CS, $cs);
+        if ($runtime->option()->shouldChangeOffset()) {
+            $runtime->streamReader()->setOffset($ip);
+        }
+
+        $ma->setCarryFlag(($flags & 0x1) !== 0);
+        $ma->setParityFlag(($flags & (1 << 2)) !== 0);
+        $ma->updateFlags(($flags & (1 << 6)) ? 0 : 1, 16);
+        $ma->setSignFlag(($flags & (1 << 7)) !== 0);
+        $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
+        $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);
+        $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);
+
+        return ExecutionStatus::SUCCESS;
+    }
+}

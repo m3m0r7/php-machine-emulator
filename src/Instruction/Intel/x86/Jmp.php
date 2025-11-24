@@ -22,8 +22,9 @@ class Jmp implements InstructionInterface
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
-        $offset = $enhancedStreamReader
-            ->signedShort();
+        $offset = $runtime->runtimeOption()->context()->operandSize() === 32
+            ? $enhancedStreamReader->signedDword()
+            : $enhancedStreamReader->signedShort();
 
         // NOTE: Add current origin
         $offset += $runtime->addressMap()->getOrigin();
