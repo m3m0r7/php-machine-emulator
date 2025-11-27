@@ -4,8 +4,10 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Exception\ExecutionException;
+use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -30,16 +32,24 @@ class Movsg implements InstructionInterface
             );
         }
 
-        $runtime
-            ->memoryAccessor()
-            ->enableUpdateFlags(false)
-            ->write16Bit(
-                $modRegRM->destination() + ($runtime->register())::getRaisedSegmentRegister(),
-                $runtime
-                    ->memoryAccessor()
-                    ->fetch($modRegRM->source())
-                    ->asByte(),
-            );
+        $segment = $modRegRM->destination() + ($runtime->register())::getRaisedSegmentRegister();
+        $selector = $runtime->memoryAccessor()->fetch($modRegRM->source())->asByte();
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($segment, $selector);
+
+        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $selector);
+            if ($descriptor === null || !$descriptor['present']) {
+                throw new FaultException(0x0B, $selector, sprintf('Segment not present for selector 0x%04X', $selector));
+            }
+            $segmentType = $runtime->register()->find($segment);
+            $dataSegments = [RegisterType::SS, RegisterType::DS, RegisterType::ES, RegisterType::FS, RegisterType::GS];
+            if ($segmentType === RegisterType::CS) {
+                throw new FaultException(0x0D, $selector, 'Cannot load CS with MOV Sreg,r/m');
+            }
+            if ($descriptor['executable'] && in_array($segmentType, $dataSegments, true)) {
+                throw new FaultException(0x0D, $selector, 'Cannot load code segment into data segment register');
+            }
+        }
 
         return ExecutionStatus::SUCCESS;
     }

@@ -19,19 +19,21 @@ class Lodsw implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $width = $opSize === 32 ? 4 : 2;
+        $si = $this->readIndex($runtime, RegisterType::ESI);
 
         $segment = $runtime->segmentOverride() ?? RegisterType::DS;
 
-        $value = $this->readMemory16(
-            $runtime,
-            $this->segmentOffsetAddress($runtime, $segment, $si),
-        );
+        $address = $this->segmentOffsetAddress($runtime, $segment, $si);
+        $value = $opSize === 32
+            ? $this->readMemory32($runtime, $address)
+            : $this->readMemory16($runtime, $address);
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $value);
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $value, $opSize);
 
-        $step = $runtime->memoryAccessor()->shouldDirectionFlag() ? -2 : 2;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::ESI, $step);
+        $step = $this->stepForElement($runtime, $width);
+        $this->writeIndex($runtime, RegisterType::ESI, $si + $step);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -23,6 +23,7 @@ class AdcRegRm implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x10, 0x12], true);
+        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
         $destIsRm = in_array($opcode, [0x10, 0x11], true);
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
@@ -31,8 +32,8 @@ class AdcRegRm implements InstructionInterface
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
                 : $this->readRm8($runtime, $reader, $modRegRM))
             : ($destIsRm
-                ? $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asByte()
-                : $this->readRm16($runtime, $reader, $modRegRM));
+                ? $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize)
+                : $this->readRm($runtime, $reader, $modRegRM, $opSize));
 
         if ($isByte) {
             $dest = $destIsRm
@@ -47,15 +48,16 @@ class AdcRegRm implements InstructionInterface
             $runtime->memoryAccessor()->setCarryFlag($result > 0xFF)->updateFlags($result, 8);
         } else {
             $dest = $destIsRm
-                ? $this->readRm16($runtime, $reader, $modRegRM)
-                : $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asByte();
+                ? $this->readRm($runtime, $reader, $modRegRM, $opSize)
+                : $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
             $result = $dest + $src + $carry;
             if ($destIsRm) {
-                $this->writeRm16($runtime, $reader, $modRegRM, $result);
+                $this->writeRm($runtime, $reader, $modRegRM, $result, $opSize);
             } else {
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($modRegRM->registerOrOPCode(), $result);
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $result, $opSize);
             }
-            $runtime->memoryAccessor()->setCarryFlag($result > 0xFFFF)->updateFlags($result, 16);
+            $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $runtime->memoryAccessor()->setCarryFlag($result > $mask)->updateFlags($result, $opSize);
         }
 
         return ExecutionStatus::SUCCESS;

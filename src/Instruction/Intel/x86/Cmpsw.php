@@ -19,25 +19,28 @@ class Cmpsw implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
-        $di = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asByte();
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $width = $opSize === 32 ? 4 : 2;
+        $si = $this->readIndex($runtime, RegisterType::ESI);
+        $di = $this->readIndex($runtime, RegisterType::EDI);
 
         $sourceSegment = $runtime->segmentOverride() ?? RegisterType::DS;
 
-        $left = $this->readMemory16(
-            $runtime,
-            $this->segmentOffsetAddress($runtime, $sourceSegment, $si),
-        );
-        $right = $this->readMemory16(
-            $runtime,
-            $this->segmentOffsetAddress($runtime, RegisterType::ES, $di),
-        );
+        $leftAddress = $this->segmentOffsetAddress($runtime, $sourceSegment, $si);
+        $rightAddress = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
 
-        $runtime->memoryAccessor()->updateFlags($left - $right, 16)->setCarryFlag($left < $right);
+        $left = $opSize === 32
+            ? $this->readMemory32($runtime, $leftAddress)
+            : $this->readMemory16($runtime, $leftAddress);
+        $right = $opSize === 32
+            ? $this->readMemory32($runtime, $rightAddress)
+            : $this->readMemory16($runtime, $rightAddress);
 
-        $step = $runtime->memoryAccessor()->shouldDirectionFlag() ? -2 : 2;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::ESI, $step);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::EDI, $step);
+        $runtime->memoryAccessor()->updateFlags($left - $right, $opSize)->setCarryFlag($left < $right);
+
+        $step = $this->stepForElement($runtime, $width);
+        $this->writeIndex($runtime, RegisterType::ESI, $si + $step);
+        $this->writeIndex($runtime, RegisterType::EDI, $di + $step);
 
         return ExecutionStatus::SUCCESS;
     }

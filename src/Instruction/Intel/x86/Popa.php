@@ -31,13 +31,13 @@ class Popa implements InstructionInterface
         $cx = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $ax = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
-        $ma->write16Bit(RegisterType::EDI, $di);
-        $ma->write16Bit(RegisterType::ESI, $si);
-        $ma->write16Bit(RegisterType::EBP, $bp);
-        $ma->write16Bit(RegisterType::EBX, $bx);
-        $ma->write16Bit(RegisterType::EDX, $dx);
-        $ma->write16Bit(RegisterType::ECX, $cx);
-        $ma->write16Bit(RegisterType::EAX, $ax);
+        $ma->writeBySize(RegisterType::EDI, $di, $size);
+        $ma->writeBySize(RegisterType::ESI, $si, $size);
+        $ma->writeBySize(RegisterType::EBP, $bp, $size);
+        $ma->writeBySize(RegisterType::EBX, $bx, $size);
+        $ma->writeBySize(RegisterType::EDX, $dx, $size);
+        $ma->writeBySize(RegisterType::ECX, $cx, $size);
+        $ma->writeBySize(RegisterType::EAX, $ax, $size);
 
         return ExecutionStatus::SUCCESS;
     }

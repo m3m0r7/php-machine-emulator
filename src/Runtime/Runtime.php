@@ -7,6 +7,8 @@ namespace PHPMachineEmulator\Runtime;
 use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Disk\Bootloader;
 use PHPMachineEmulator\Disk\HardDisk;
+use PHPMachineEmulator\Exception\ExecutionException;
+use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Frame\Frame;
@@ -15,6 +17,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\ServiceInterface;
+use PHPMachineEmulator\Instruction\Intel\x86\Int_ as X86Int;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
@@ -28,6 +31,7 @@ class Runtime implements RuntimeInterface
     protected AddressMapInterface $addressMap;
     protected array $shutdown = [];
     protected ?RegisterType $segmentOverride = null;
+    protected int $instructionCount = 0;
 
     public function __construct(
         protected MachineInterface $machine,
@@ -58,9 +62,12 @@ class Runtime implements RuntimeInterface
         $this->initialize();
 
         while (!$this->streamReader->isEOF()) {
-            $result = $this->execute(
-                $this->streamReader->byte(),
-            );
+            $this->instructionCount++;
+            $this->tickTimers();
+            $this->memoryAccessor->setInstructionFetch(true);
+            $opcode = $this->streamReader->byte();
+            $this->memoryAccessor->setInstructionFetch(false);
+            $result = $this->execute($opcode);
             if ($result === ExecutionStatus::EXIT) {
                 $this->machine->option()->logger()->info('Exited program');
                 $this->processShutdownCallbacks();
@@ -102,6 +109,57 @@ class Runtime implements RuntimeInterface
     {
         $this->shutdown[] = $callback;
         return $this;
+    }
+
+    private function tickTimers(): void
+    {
+        // Minimal PIT/LAPIC tick every N instructions to simulate timer.
+        if ($this->instructionCount % 10 === 0) {
+            $pit = \PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit::shared();
+            $picState = $this->runtimeOption->context()->picState();
+            $pit->tick(function () use ($picState) {
+                $picState->raiseIrq0();
+            });
+
+            $apic = $this->runtimeOption->context()->apicState();
+            $apic->tick(null); // queue LAPIC timer deliveries when enabled
+
+            $deliveryBlocked = $this->runtimeOption->context()->consumeInterruptDeliveryBlock();
+
+            // Deliver any pending APIC vectors directly when allowed.
+            if (!$deliveryBlocked && $apic->apicEnabled() && $this->memoryAccessor()->shouldInterruptFlag()) {
+                while (($apicVector = $apic->pendingVector()) !== null) {
+                    try {
+                        $handler = $this
+                            ->architectureProvider
+                            ->instructionList()
+                            ->getInstructionByOperationCode(0xCD);
+                    } catch (\Throwable) {
+                        break;
+                    }
+                    if ($handler instanceof \PHPMachineEmulator\Instruction\Intel\x86\Int_) {
+                        $handler->raise($this, $apicVector, $this->streamReader->offset(), null);
+                        return;
+                    }
+                }
+            }
+
+            $vector = $picState->pendingVector();
+            if (!$deliveryBlocked && $vector !== null && $this->memoryAccessor()->shouldInterruptFlag()) {
+                try {
+                    $handler = $this
+                        ->architectureProvider
+                        ->instructionList()
+                        ->getInstructionByOperationCode(0xCD);
+                } catch (\Throwable) {
+                    return;
+                }
+                if ($handler instanceof \PHPMachineEmulator\Instruction\Intel\x86\Int_) {
+                    $handler->raise($this, $vector, $this->streamReader->offset(), null);
+                    return;
+                }
+            }
+        }
     }
 
     public function addressMap(): AddressMapInterface
@@ -169,6 +227,36 @@ class Runtime implements RuntimeInterface
         try {
             return $instruction
                 ->process($this, $opcode);
+        } catch (FaultException $e) {
+            $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
+            try {
+                $handler = $this
+                    ->architectureProvider
+                    ->instructionList()
+                    ->getInstructionByOperationCode(0xCD);
+            } catch (\Throwable) {
+                $handler = null;
+            }
+            if ($handler instanceof X86Int) {
+                $handler->raise($this, $e->vector(), $this->streamReader->offset(), $e->errorCode());
+                return ExecutionStatus::SUCCESS;
+            }
+            throw $e;
+        } catch (ExecutionException $e) {
+            $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
+            try {
+                $handler = $this
+                    ->architectureProvider
+                    ->instructionList()
+                    ->getInstructionByOperationCode(0xCD);
+            } catch (\Throwable) {
+                $handler = null;
+            }
+            if ($handler instanceof X86Int) {
+                $handler->raise($this, 0x0D, $this->streamReader->offset(), 0);
+                return ExecutionStatus::SUCCESS;
+            }
+            throw $e;
         } finally {
             $this->memoryAccessor
                 ->enableUpdateFlags(true);

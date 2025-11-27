@@ -19,8 +19,8 @@ class Movsb implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
-        $di = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asByte();
+        $si = $this->readIndex($runtime, RegisterType::ESI);
+        $di = $this->readIndex($runtime, RegisterType::EDI);
 
         $sourceSegment = $runtime->segmentOverride() ?? RegisterType::DS;
 
@@ -29,13 +29,13 @@ class Movsb implements InstructionInterface
             $this->segmentOffsetAddress($runtime, $sourceSegment, $si),
         );
 
-        $destAddress = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
+        $destAddress = $this->translateLinear($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
         $runtime->memoryAccessor()->allocate($destAddress, safe: false);
         $runtime->memoryAccessor()->writeBySize($destAddress, $value, 8);
 
-        $step = $runtime->memoryAccessor()->shouldDirectionFlag() ? -1 : 1;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::ESI, $step);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::EDI, $step);
+        $step = $this->stepForElement($runtime, 1);
+        $this->writeIndex($runtime, RegisterType::ESI, $si + $step);
+        $this->writeIndex($runtime, RegisterType::EDI, $di + $step);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -19,23 +19,25 @@ class Movsw implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
-        $di = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asByte();
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $width = $opSize === 32 ? 4 : 2;
+        $si = $this->readIndex($runtime, RegisterType::ESI);
+        $di = $this->readIndex($runtime, RegisterType::EDI);
 
         $sourceSegment = $runtime->segmentOverride() ?? RegisterType::DS;
 
-        $value = $this->readMemory16(
-            $runtime,
-            $this->segmentOffsetAddress($runtime, $sourceSegment, $si),
-        );
+        $address = $this->segmentOffsetAddress($runtime, $sourceSegment, $si);
+        $value = $opSize === 32
+            ? $this->readMemory32($runtime, $address)
+            : $this->readMemory16($runtime, $address);
 
-        $destAddress = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
-        $runtime->memoryAccessor()->allocate($destAddress, safe: false);
-        $runtime->memoryAccessor()->write16Bit($destAddress, $value);
+        $destAddress = $this->translateLinear($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
+        $runtime->memoryAccessor()->allocate($destAddress, $width, safe: false);
+        $runtime->memoryAccessor()->writeBySize($destAddress, $value, $opSize);
 
-        $step = $runtime->memoryAccessor()->shouldDirectionFlag() ? -2 : 2;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::ESI, $step);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::EDI, $step);
+        $step = $this->stepForElement($runtime, $width);
+        $this->writeIndex($runtime, RegisterType::ESI, $si + $step);
+        $this->writeIndex($runtime, RegisterType::EDI, $di + $step);
 
         return ExecutionStatus::SUCCESS;
     }

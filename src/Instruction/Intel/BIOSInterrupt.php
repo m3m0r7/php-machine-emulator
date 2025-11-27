@@ -13,5 +13,6 @@ enum BIOSInterrupt: int
     case VIDEO_INTERRUPT = 0x10;
     case DISK_INTERRUPT = 0x13;
     case KEYBOARD_INTERRUPT = 0x16;
+    case SYSTEM_INTERRUPT = 0x15;
     case DOS_INTERRUPT = 0x21;
 }

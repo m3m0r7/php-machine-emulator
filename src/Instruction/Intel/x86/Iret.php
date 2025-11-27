@@ -19,24 +19,59 @@ class Iret implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
 
-        $ip = $ma->pop(RegisterType::ESP)->asByte();
-        $cs = $ma->pop(RegisterType::ESP)->asByte();
-        $flags = $ma->pop(RegisterType::ESP)->asByte();
+        $ip = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+        $cs = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+        $flags = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
 
-        $ma->write16Bit(RegisterType::CS, $cs);
+        if ($runtime->runtimeOption()->context()->isProtectedMode() && (($flags & (1 << 14)) !== 0)) {
+            // Task switch via IRET when NT set: use backlink from current TSS.
+            $tr = $runtime->runtimeOption()->context()->taskRegister();
+            $tssSelector = $tr['selector'] ?? 0;
+            if ($tssSelector !== 0) {
+                $backlink = $this->readMemory16($runtime, $tr['base']);
+                $this->taskSwitch($runtime, $backlink, setBusy: false, gateSelector: null, isJump: true);
+                return ExecutionStatus::SUCCESS;
+            }
+        }
+
+        $descriptor = null;
+        $nextCpl = null;
+        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            $descriptor = $this->resolveCodeDescriptor($runtime, $cs);
+            $nextCpl = $this->computeCplForTransfer($runtime, $cs, $descriptor);
+        }
+
+        $newCpl = $cs & 0x3;
+        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $returningToOuter = $runtime->runtimeOption()->context()->isProtectedMode()
+            && ($newCpl > $runtime->runtimeOption()->context()->cpl());
+
+        if ($returningToOuter) {
+            $newEsp = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+            $newSs = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+            $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
+            $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $opSize);
+        }
+
+        $this->writeCodeSegment($runtime, $cs, $nextCpl, $descriptor);
         if ($runtime->option()->shouldChangeOffset()) {
-            $runtime->streamReader()->setOffset($ip);
+            $linear = $this->linearCodeAddress($runtime, $cs & 0xFFFF, $ip, $opSize);
+            $runtime->streamReader()->setOffset($linear);
         }
 
         $ma->setCarryFlag(($flags & 0x1) !== 0);
         $ma->setParityFlag(($flags & (1 << 2)) !== 0);
-        $ma->updateFlags(($flags & (1 << 6)) ? 0 : 1, 16);
+        $ma->updateFlags(($flags & (1 << 6)) ? 0 : 1, $opSize);
         $ma->setSignFlag(($flags & (1 << 7)) !== 0);
         $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
         $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);
         $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);
+        // IOPL and NT bits
+        $runtime->runtimeOption()->context()->setIopl(($flags >> 12) & 0x3);
+        $runtime->runtimeOption()->context()->setNt(($flags & (1 << 14)) !== 0);
 
         return ExecutionStatus::SUCCESS;
     }

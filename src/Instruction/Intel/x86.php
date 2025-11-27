@@ -13,11 +13,13 @@ use PHPMachineEmulator\Instruction\Intel\x86\Call;
 use PHPMachineEmulator\Instruction\Intel\x86\Cli;
 use PHPMachineEmulator\Instruction\Intel\x86\CmpImmAX;
 use PHPMachineEmulator\Instruction\Intel\x86\Dec;
+use PHPMachineEmulator\Instruction\Intel\x86\FpuStub;
 use PHPMachineEmulator\Instruction\Intel\x86\Group1;
 use PHPMachineEmulator\Instruction\Intel\x86\Group2;
 use PHPMachineEmulator\Instruction\Intel\x86\Group3;
 use PHPMachineEmulator\Instruction\Intel\x86\Hlt;
 use PHPMachineEmulator\Instruction\Intel\x86\Inc;
+use PHPMachineEmulator\Instruction\Intel\x86\ImulImmediate;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
 use PHPMachineEmulator\Instruction\Intel\x86\Jbe;
 use PHPMachineEmulator\Instruction\Intel\x86\Jc;
@@ -179,6 +181,8 @@ class x86 implements InstructionListInterface
             Cmpsw::class,
             Scasb::class,
             Scasw::class,
+            Ins::class,
+            Outs::class,
             RepPrefix::class,
             AddRegRm::class,
             SubRegRm::class,
@@ -204,6 +208,8 @@ class x86 implements InstructionListInterface
             Stosb::class,
             Stosw::class,
             Xor_::class,
+            ImulImmediate::class,
+            FpuStub::class,
         ];
 
         if (!empty($this->instructionList)) {
@@ -217,6 +223,9 @@ class x86 implements InstructionListInterface
             foreach ($instance->opcodes() as $opcode) {
                 $this->instructionList[$opcode] = $instance;
             }
+
+            // Allow class-name lookup for auxiliary dispatch (e.g., faults calling INT).
+            $this->instructionList[$className] = $instance;
         }
 
         return $this->instructionList;

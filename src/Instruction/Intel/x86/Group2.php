@@ -26,12 +26,13 @@ class Group2 implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
+        $opSize = $this->isByteOp($opcode) ? 8 : $runtime->runtimeOption()->context()->operandSize();
 
         return match ($modRegRM->digit()) {
-            0x1 => $this->rotateRight($runtime, $opcode, $enhancedStreamReader, $modRegRM),
-            0x4 => $this->shiftLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM),
-            0x5 => $this->shiftRightLogical($runtime, $opcode, $enhancedStreamReader, $modRegRM),
-            0x7 => $this->shiftRightArithmetic($runtime, $opcode, $enhancedStreamReader, $modRegRM),
+            0x1 => $this->rotateRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
+            0x4 => $this->shiftLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
+            0x5 => $this->shiftRightLogical($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
+            0x7 => $this->shiftRightArithmetic($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             default => throw new ExecutionException(
                 sprintf('The digit (0b%s) is not supported yet', decbin($modRegRM->digit()))
             ),
@@ -53,7 +54,7 @@ class Group2 implements InstructionInterface
         return in_array($opcode, [0xC0, 0xD0, 0xD2], true);
     }
 
-    protected function rotateRight(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function rotateRight(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
 
@@ -64,20 +65,24 @@ class Group2 implements InstructionInterface
 
             $this->writeRm8($runtime, $reader, $modRegRM, $result);
             $runtime->memoryAccessor()->setCarryFlag($count > 0 ? (($value >> ($count - 1)) & 0x1) !== 0 : false);
+            $runtime->memoryAccessor()->updateFlags($result, 8);
 
             return ExecutionStatus::SUCCESS;
         }
 
-        $value = $this->readRm16($runtime, $reader, $modRegRM) & 0xFFFF;
-        $count = $operand % 16;
-        $result = $count === 0 ? $value : (($value >> $count) | (($value & ((1 << $count) - 1)) << (16 - $count)));
-        $this->writeRm16($runtime, $reader, $modRegRM, $result);
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $value = $this->readRm($runtime, $reader, $modRegRM, $size) & $mask;
+        $mod = $size;
+        $count = $operand % $mod;
+        $result = $count === 0 ? $value : (($value >> $count) | (($value & ((1 << $count) - 1)) << ($mod - $count)));
+        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
         $runtime->memoryAccessor()->setCarryFlag($count > 0 ? (($value >> ($count - 1)) & 0x1) !== 0 : false);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function shiftLeft(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function shiftLeft(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
 
@@ -87,19 +92,22 @@ class Group2 implements InstructionInterface
 
             $this->writeRm8($runtime, $reader, $modRegRM, $result);
             $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value << ($operand - 1)) & 0x100) !== 0 : false);
+            $runtime->memoryAccessor()->updateFlags($result, 8);
 
             return ExecutionStatus::SUCCESS;
         }
 
-        $value = $this->readRm16($runtime, $reader, $modRegRM);
-        $result = ($value << $operand) & 0xFFFF;
-        $this->writeRm16($runtime, $reader, $modRegRM, $result);
-        $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value << ($operand - 1)) & 0x10000) !== 0 : false);
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $result = ($value << $operand) & $mask;
+        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value << ($operand - 1)) & ($mask + 1)) !== 0 : false);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function shiftRightLogical(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function shiftRightLogical(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
 
@@ -109,20 +117,23 @@ class Group2 implements InstructionInterface
 
             $this->writeRm8($runtime, $reader, $modRegRM, $result);
             $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
+            $runtime->memoryAccessor()->updateFlags($result, 8);
 
             return ExecutionStatus::SUCCESS;
         }
 
-        $value = $this->readRm16($runtime, $reader, $modRegRM);
-        $result = ($value >> $operand) & 0xFFFF;
+        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $result = ($value >> $operand) & $mask;
 
-        $this->writeRm16($runtime, $reader, $modRegRM, $result);
+        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
         $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function shiftRightArithmetic(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function shiftRightArithmetic(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
 
@@ -136,19 +147,23 @@ class Group2 implements InstructionInterface
 
             $this->writeRm8($runtime, $reader, $modRegRM, $result);
             $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
+            $runtime->memoryAccessor()->updateFlags($result, 8);
 
             return ExecutionStatus::SUCCESS;
         }
 
-        $value = $this->readRm16($runtime, $reader, $modRegRM);
-        $sign = $value & 0x8000;
-        $result = ($value >> $operand) & 0x7FFF;
+        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $signBit = 1 << ($size - 1);
+        $sign = $value & $signBit;
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $result = ($value >> $operand) & (~$signBit & $mask);
         if ($sign) {
-            $result |= 0x8000;
+            $result |= $signBit;
         }
 
-        $this->writeRm16($runtime, $reader, $modRegRM, $result);
+        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
         $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
 
         return ExecutionStatus::SUCCESS;
     }

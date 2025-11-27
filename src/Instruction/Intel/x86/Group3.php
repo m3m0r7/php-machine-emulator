@@ -28,15 +28,16 @@ class Group3 implements InstructionInterface
             ->byteAsModRegRM();
 
         $isByte = $opcode === 0xF6;
+        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
 
         match ($modRegRM->digit()) {
-            0x0 => $this->test($runtime, $enhancedStreamReader, $modRegRM, $isByte),
-            0x2 => $this->not($runtime, $enhancedStreamReader, $modRegRM, $isByte),
-            0x3 => $this->neg($runtime, $enhancedStreamReader, $modRegRM, $isByte),
-            0x4 => $this->mul($runtime, $enhancedStreamReader, $modRegRM, $isByte),
-            0x5 => $this->imul($runtime, $enhancedStreamReader, $modRegRM, $isByte),
-            0x6 => $this->div($runtime, $enhancedStreamReader, $modRegRM, $isByte),
-            0x7 => $this->idiv($runtime, $enhancedStreamReader, $modRegRM, $isByte),
+            0x0 => $this->test($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
+            0x2 => $this->not($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
+            0x3 => $this->neg($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
+            0x4 => $this->mul($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
+            0x5 => $this->imul($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
+            0x6 => $this->div($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
+            0x7 => $this->idiv($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
             default => throw new ExecutionException(
                 sprintf(
                     'The %s#%d was not implemented yet',
@@ -50,117 +51,131 @@ class Group3 implements InstructionInterface
     }
 
 
-    protected function test(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte): ExecutionStatus
+    protected function test(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
-        if ($isByte) {
-            $immediate = $streamReader->streamReader()->byte();
-            $value = $this->readRm8($runtime, $streamReader, $modRegRM);
-        } else {
-            $immediate = $streamReader->short();
-            $value = $this->readRm16($runtime, $streamReader, $modRegRM);
-        }
+        $size = $isByte ? 8 : $opSize;
+        $immediate = $isByte
+            ? $streamReader->streamReader()->byte()
+            : ($opSize === 32 ? $streamReader->dword() : $streamReader->short());
+        $value = $this->readRm($runtime, $streamReader, $modRegRM, $size);
 
         $runtime
             ->memoryAccessor()
-            ->updateFlags($value & $immediate, $isByte ? 8 : 16)
+            ->updateFlags($value & $immediate, $size)
             ->setCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function not(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte): ExecutionStatus
+    protected function not(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
-        if ($isByte) {
-            $value = $this->readRm8($runtime, $streamReader, $modRegRM);
-            $this->writeRm8($runtime, $streamReader, $modRegRM, ~$value);
-        } else {
-            $value = $this->readRm16($runtime, $streamReader, $modRegRM);
-            $this->writeRm16($runtime, $streamReader, $modRegRM, ~$value);
-        }
+        $size = $isByte ? 8 : $opSize;
+        $mask = $this->maskForSize($size);
+        $value = $this->readRm($runtime, $streamReader, $modRegRM, $size);
+        $this->writeRm($runtime, $streamReader, $modRegRM, ~$value & $mask, $size);
         $runtime->memoryAccessor()->setCarryFlag(false);
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function neg(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte): ExecutionStatus
+    protected function neg(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
-        if ($isByte) {
-            $value = $this->readRm8($runtime, $streamReader, $modRegRM);
-            $result = (0 - $value) & 0xFF;
-            $this->writeRm8($runtime, $streamReader, $modRegRM, $result);
-        } else {
-            $value = $this->readRm16($runtime, $streamReader, $modRegRM);
-            $result = (0 - $value) & 0xFFFF;
+        $size = $isByte ? 8 : $opSize;
+        $mask = $this->maskForSize($size);
+        $value = $this->readRm($runtime, $streamReader, $modRegRM, $size) & $mask;
+        $result = (-$value) & $mask;
 
-            $this->writeRm16($runtime, $streamReader, $modRegRM, $result);
-        }
+        $this->writeRm($runtime, $streamReader, $modRegRM, $result, $size);
         $runtime->memoryAccessor()->setCarryFlag($value !== 0);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function mul(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte): ExecutionStatus
+    protected function mul(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
             $operand = $this->readRm8($runtime, $streamReader, $modRegRM);
             $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
             $product = $al * $operand;
             $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $product & 0xFFFF);
-            $runtime->memoryAccessor()->setCarryFlag(($product & 0xFF00) !== 0);
+            $flag = ($product & 0xFF00) !== 0;
+            $runtime->memoryAccessor()->setCarryFlag($flag)->setOverflowFlag($flag);
             return ExecutionStatus::SUCCESS;
         }
 
-        $operand = $this->readRm16($runtime, $streamReader, $modRegRM);
-        $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
+        $operand = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+        $acc = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
+        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
 
-        $product = $ax * $operand;
+        if ($opSize === 16) {
+            $product = ($acc & 0xFFFF) * ($operand & 0xFFFF);
 
-        $runtime
-            ->memoryAccessor()
-            ->write16Bit(RegisterType::EAX, $product & 0xFFFF)
-            ->enableUpdateFlags(false)
-            ->write16Bit(RegisterType::EDX, ($product >> 16) & 0xFFFF);
+            $ma
+                ->write16Bit(RegisterType::EAX, $product & 0xFFFF)
+                ->write16Bit(RegisterType::EDX, ($product >> 16) & 0xFFFF);
 
-        $runtime->memoryAccessor()->setCarryFlag(($product >> 16) !== 0);
+            $flag = ($product >> 16) !== 0;
+        } else {
+            $product = ($acc & 0xFFFFFFFF) * ($operand & 0xFFFFFFFF);
+            $low = $product & 0xFFFFFFFF;
+            $high = ($product >> 32) & 0xFFFFFFFF;
+
+            $ma
+                ->writeBySize(RegisterType::EAX, $low, 32)
+                ->writeBySize(RegisterType::EDX, $high, 32);
+
+            $flag = $high !== 0;
+        }
+
+        $runtime->memoryAccessor()->setCarryFlag($flag)->setOverflowFlag($flag);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function imul(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte): ExecutionStatus
+    protected function imul(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
             $operandRaw = $this->readRm8($runtime, $streamReader, $modRegRM);
             $alRaw = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
-            $operand = $operandRaw >= 0x80 ? $operandRaw - 0x100 : $operandRaw;
-            $al = $alRaw >= 0x80 ? $alRaw - 0x100 : $alRaw;
+            $operand = $this->signExtend($operandRaw, 8);
+            $al = $this->signExtend($alRaw, 8);
             $product = $al * $operand;
             $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $product & 0xFFFF);
-            $runtime->memoryAccessor()->setCarryFlag(($product < -128) || ($product > 127));
+            $flag = ($product < -128) || ($product > 127);
+            $runtime->memoryAccessor()->setCarryFlag($flag)->setOverflowFlag($flag);
             return ExecutionStatus::SUCCESS;
         }
 
-        $operand = $this->readRm16($runtime, $streamReader, $modRegRM);
-        $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
+        $operand = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+        $acc = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
 
-        // interpret as signed 16-bit
-        $sOperand = $operand >= 0x8000 ? $operand - 0x10000 : $operand;
-        $sAx = $ax >= 0x8000 ? $ax - 0x10000 : $ax;
-        $product = $sAx * $sOperand;
+        $sOperand = $this->signExtend($operand, $opSize);
+        $sAcc = $this->signExtend($acc, $opSize);
+        $product = $sAcc * $sOperand;
 
+        $mask = $this->maskForSize($opSize);
         $runtime
             ->memoryAccessor()
-            ->write16Bit(RegisterType::EAX, $product & 0xFFFF)
             ->enableUpdateFlags(false)
-            ->write16Bit(RegisterType::EDX, ($product >> 16) & 0xFFFF);
+            ->writeBySize(RegisterType::EAX, $product & $mask, $opSize)
+            ->writeBySize(
+                RegisterType::EDX,
+                ($product >> $opSize) & $mask,
+                $opSize,
+            );
 
-        $runtime->memoryAccessor()->setCarryFlag(($product >> 16) !== 0);
+        $fits = $product >= -(1 << ($opSize - 1)) && $product < (1 << ($opSize - 1));
+        $runtime->memoryAccessor()->setCarryFlag(!$fits)->setOverflowFlag(!$fits);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function div(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte): ExecutionStatus
+    protected function div(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
             $divider = $this->readRm8($runtime, $streamReader, $modRegRM);
+            if ($divider === 0) {
+                throw new ExecutionException('Divide by zero');
+            }
             $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
             $quotient = intdiv($ax, $divider);
             $remainder = $ax % $divider;
@@ -169,81 +184,136 @@ class Group3 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $divider = $this->readRm16($runtime, $streamReader, $modRegRM);
+        $divider = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+        if ($divider === 0) {
+            throw new ExecutionException('Divide by zero');
+        }
 
-        $ax = $runtime
-            ->memoryAccessor()
-            ->fetch(RegisterType::EAX)
-            ->asByte();
+        $ma = $runtime->memoryAccessor();
 
-        $dx = $runtime
-            ->memoryAccessor()
-            ->fetch(RegisterType::EDX)
-            ->asByte();
+        if ($opSize === 16) {
+            $ax = $ma->fetch(RegisterType::EAX)->asByte();
+            $dx = $ma->fetch(RegisterType::EDX)->asByte();
 
-        $dividee = ($dx << 16) + $ax;
+            $dividee = ($dx << 16) + $ax;
 
-        $quotient = (int) ($dividee / $divider);
-        $remainder = $dividee % $divider;
+            $quotient = (int) ($dividee / $divider);
+            $remainder = $dividee % $divider;
 
-        $runtime
-            ->memoryAccessor()
-            ->write16Bit(
-                RegisterType::EAX,
-                $quotient & 0xFFFF,
-            );
+            $ma
+                ->write16Bit(
+                    RegisterType::EAX,
+                    $quotient & 0xFFFF,
+                )
+                ->enableUpdateFlags(false)
+                ->write16Bit(
+                    RegisterType::EDX,
+                    $remainder & 0xFFFF,
+                );
+        } else {
+            $ax = $ma->fetch(RegisterType::EAX)->asBytesBySize(32);
+            $dx = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
+            $dividee = (($dx & 0xFFFFFFFF) << 32) | ($ax & 0xFFFFFFFF);
 
-        $runtime
-            ->memoryAccessor()
-            ->enableUpdateFlags(false)
-            ->write16Bit(
-                RegisterType::EDX,
-                $remainder & 0xFFFF,
-            );
+            $quotient = intdiv($dividee, $divider);
+            $remainder = $dividee % $divider;
+
+            $ma
+                ->enableUpdateFlags(false)
+                ->writeBySize(RegisterType::EAX, $quotient & 0xFFFFFFFF, 32)
+                ->writeBySize(RegisterType::EDX, $remainder & 0xFFFFFFFF, 32);
+        }
 
 
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function idiv(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte): ExecutionStatus
+    protected function idiv(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
             $dividerRaw = $this->readRm8($runtime, $streamReader, $modRegRM);
-            $divider = $dividerRaw >= 0x80 ? $dividerRaw - 0x100 : $dividerRaw;
+            $divider = $this->signExtend($dividerRaw, 8);
+            if ($divider === 0) {
+                throw new ExecutionException('Divide by zero');
+            }
 
             $axRaw = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
-            $ax = $axRaw >= 0x8000 ? $axRaw - 0x10000 : $axRaw;
+            $ax = $this->signExtend($axRaw, 16);
 
             $quotient = (int) ($ax / $divider);
             $remainder = $ax % $divider;
 
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $quotient & 0xFF);
             $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, $remainder & 0xFF);
-            $runtime->memoryAccessor()->setCarryFlag(false);
+            $runtime->memoryAccessor()->setCarryFlag(false)->setOverflowFlag(false);
             return ExecutionStatus::SUCCESS;
         } else {
-            $dividerRaw = $this->readRm16($runtime, $streamReader, $modRegRM);
-            $divider = $dividerRaw >= 0x8000 ? $dividerRaw - 0x10000 : $dividerRaw;
+            $dividerRaw = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+            $divider = $this->signExtend($dividerRaw, $opSize);
+            if ($divider === 0) {
+                throw new ExecutionException('Divide by zero');
+            }
 
-            $axRaw = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
-            $dxRaw = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asByte();
-            $ax = $axRaw >= 0x8000 ? $axRaw - 0x10000 : $axRaw;
-            $dx = $dxRaw >= 0x8000 ? $dxRaw - 0x10000 : $dxRaw;
+            $ma = $runtime->memoryAccessor();
 
-            $dividee = ($dx << 16) + ($ax & 0xFFFF);
+            if ($opSize === 16) {
+                $axRaw = $ma->fetch(RegisterType::EAX)->asByte();
+                $dxRaw = $ma->fetch(RegisterType::EDX)->asByte();
+                $ax = $this->signExtend($axRaw, 16);
+                $dx = $this->signExtend($dxRaw, 16);
 
-            $quotient = (int) ($dividee / $divider);
-            $remainder = $dividee % $divider;
+                $dividee = ($dx << 16) + ($ax & 0xFFFF);
 
-            $runtime
-                ->memoryAccessor()
-                ->write16Bit(RegisterType::EAX, $quotient & 0xFFFF)
-                ->enableUpdateFlags(false)
-                ->write16Bit(RegisterType::EDX, $remainder & 0xFFFF);
+                $quotient = (int) ($dividee / $divider);
+                $remainder = $dividee % $divider;
 
-            $runtime->memoryAccessor()->setCarryFlag(false);
+                $ma
+                    ->write16Bit(RegisterType::EAX, $quotient & 0xFFFF)
+                    ->enableUpdateFlags(false)
+                    ->write16Bit(RegisterType::EDX, $remainder & 0xFFFF);
+            } else {
+                $axRaw = $ma->fetch(RegisterType::EAX)->asBytesBySize(32);
+                $dxRaw = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
+                $ax = $this->signExtend($axRaw, 32);
+                $dx = $this->signExtend($dxRaw, 32);
+
+                $dividee = ($dx << 32) | ($ax & 0xFFFFFFFF);
+
+                $quotient = (int) ($dividee / $divider);
+                $remainder = $dividee % $divider;
+
+                $ma
+                    ->enableUpdateFlags(false)
+                    ->writeBySize(RegisterType::EAX, $quotient & 0xFFFFFFFF, 32)
+                    ->writeBySize(RegisterType::EDX, $remainder & 0xFFFFFFFF, 32);
+            }
+
+            $runtime->memoryAccessor()->setCarryFlag(false)->setOverflowFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
+    }
+
+    private function maskForSize(int $size): int
+    {
+        return match ($size) {
+            8 => 0xFF,
+            16 => 0xFFFF,
+            default => 0xFFFFFFFF,
+        };
+    }
+
+    private function signExtend(int $value, int $bits): int
+    {
+        if ($bits >= 32) {
+            $value &= 0xFFFFFFFF;
+            return ($value & 0x80000000) ? $value - 0x100000000 : $value;
+        }
+
+        $mask = 1 << ($bits - 1);
+        $fullMask = (1 << $bits) - 1;
+        $value &= $fullMask;
+
+        return ($value & $mask) ? $value - (1 << $bits) : $value;
     }
 }

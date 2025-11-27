@@ -19,9 +19,14 @@ class Inc implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $runtime
-            ->memoryAccessor()
-            ->increment(($this->registersAndOPCodes())[$opcode]);
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $reg = ($this->registersAndOPCodes())[$opcode];
+        $ma = $runtime->memoryAccessor();
+        $value = $ma->fetch($reg)->asBytesBySize($size);
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $result = ($value + 1) & $mask;
+        $ma->enableUpdateFlags(false)->writeBySize($reg, $result, $size);
+        $ma->updateFlags($result, $size);
 
         return ExecutionStatus::SUCCESS;
     }

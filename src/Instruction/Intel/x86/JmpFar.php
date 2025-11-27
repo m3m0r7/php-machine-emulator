@@ -21,12 +21,31 @@ class JmpFar implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $reader = new EnhanceStreamReader($runtime->streamReader());
-        $offset = $reader->short();
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $offset = $opSize === 32 ? $reader->dword() : $reader->short();
         $segment = $reader->short();
 
         if ($runtime->option()->shouldChangeOffset()) {
-            $runtime->streamReader()->setOffset($offset);
-            $runtime->memoryAccessor()->write16Bit(RegisterType::CS, $segment);
+            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+                $gate = $this->readCallGateDescriptor($runtime, $segment);
+                if ($gate !== null) {
+                    $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+                    $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $runtime->streamReader()->offset(), $opSize);
+                    $this->callThroughGate($runtime, $gate, $returnOffset, $currentCs, $opSize, pushReturn: false, copyParams: false);
+                    return ExecutionStatus::SUCCESS;
+                }
+
+                $descriptor = $this->resolveCodeDescriptor($runtime, $segment);
+                $newCpl = $this->computeCplForTransfer($runtime, $segment, $descriptor);
+                $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
+                $runtime->streamReader()->setOffset($linearTarget);
+                $this->writeCodeSegment($runtime, $segment, $newCpl, $descriptor);
+                return ExecutionStatus::SUCCESS;
+            }
+
+            $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
+            $runtime->streamReader()->setOffset($linearTarget);
+            $this->writeCodeSegment($runtime, $segment);
         }
 
         return ExecutionStatus::SUCCESS;

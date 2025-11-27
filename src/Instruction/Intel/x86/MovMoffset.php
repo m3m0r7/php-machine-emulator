@@ -24,33 +24,39 @@ class MovMoffset implements InstructionInterface
         $offset = $runtime->runtimeOption()->context()->addressSize() === 32
             ? $enhancedStreamReader->dword()
             : $enhancedStreamReader->short();
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
         $segment = $runtime->segmentOverride() ?? RegisterType::DS;
         $linearOffset = $this->segmentOffsetAddress($runtime, $segment, $offset);
 
         switch ($opcode) {
             case 0xA0: // AL <- moffs8
-                $value = $this->readMemory8($runtime, $linearOffset);
-                $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $value);
-                break;
-            case 0xA1: // AX <- moffs16
-                $value = $this->readMemory16($runtime, $linearOffset);
-                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $value);
-                break;
-            case 0xA2: // moffs8 <- AL
-                $runtime->memoryAccessor()->allocate($linearOffset, safe: false);
-                $runtime->memoryAccessor()->writeBySize(
-                    $linearOffset,
-                    $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit(),
-                    8,
-                );
-                break;
-            case 0xA3: // moffs16 <- AX
-                $runtime->memoryAccessor()->allocate($linearOffset, safe: false);
-                $runtime->memoryAccessor()->write16Bit(
-                    $linearOffset,
-                    $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte(),
-                );
-                break;
+            $value = $this->readMemory8($runtime, $linearOffset);
+            $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $value);
+            break;
+        case 0xA1: // AX <- moffs16
+            $value = $opSize === 32
+                ? $this->readMemory32($runtime, $linearOffset)
+                : $this->readMemory16($runtime, $linearOffset);
+            $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $value, $opSize);
+            break;
+        case 0xA2: // moffs8 <- AL
+            $phys = $this->translateLinear($runtime, $linearOffset);
+            $runtime->memoryAccessor()->allocate($phys, safe: false);
+            $runtime->memoryAccessor()->writeBySize(
+                $phys,
+                $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit(),
+                8,
+            );
+            break;
+        case 0xA3: // moffs16 <- AX
+            $phys = $this->translateLinear($runtime, $linearOffset);
+            $runtime->memoryAccessor()->allocate($phys, safe: false);
+            $runtime->memoryAccessor()->writeBySize(
+                $phys,
+                $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize),
+                $opSize,
+            );
+            break;
         }
 
         return ExecutionStatus::SUCCESS;

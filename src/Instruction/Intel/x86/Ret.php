@@ -28,18 +28,43 @@ class Ret implements InstructionInterface
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $returnIp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
+        $targetCs = $ma->fetch(RegisterType::CS)->asByte();
+        $currentCpl = $runtime->runtimeOption()->context()->cpl();
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $descriptor = null;
+        $nextCpl = null;
+
         if ($opcode === 0xCB || $opcode === 0xCA) {
             // FAR ret: pop CS as well
-            $cs = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
-            $ma->write16Bit(RegisterType::CS, $cs);
+            $targetCs = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
+            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+                $descriptor = $this->resolveCodeDescriptor($runtime, $targetCs);
+                $nextCpl = $this->computeCplForTransfer($runtime, $targetCs, $descriptor);
+            }
+            $newCpl = $targetCs & 0x3;
+
+            if ($runtime->runtimeOption()->context()->isProtectedMode() && $newCpl > $currentCpl) {
+                // Returning to outer privilege: pop new ESP/SS from current stack before switching.
+                $newEsp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
+                $newSs = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
+                $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
+                $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $size);
+            }
         }
 
         if ($popBytes > 0) {
-            $ma->write16Bit(RegisterType::ESP, ($ma->fetch(RegisterType::ESP)->asByte() + $popBytes) & 0xFFFF);
+            $ma->writeBySize(RegisterType::ESP, ($ma->fetch(RegisterType::ESP)->asBytesBySize($size) + $popBytes) & $mask, $size);
+        }
+
+        if ($opcode === 0xCB || $opcode === 0xCA) {
+            $this->writeCodeSegment($runtime, $targetCs, $nextCpl, $descriptor);
         }
 
         if ($runtime->option()->shouldChangeOffset()) {
-            $runtime->streamReader()->setOffset($returnIp);
+            $linear = ($opcode === 0xCB || $opcode === 0xCA)
+                ? $this->linearCodeAddress($runtime, $targetCs, $returnIp, $size)
+                : $returnIp;
+            $runtime->streamReader()->setOffset($linear);
         }
 
         return ExecutionStatus::SUCCESS;

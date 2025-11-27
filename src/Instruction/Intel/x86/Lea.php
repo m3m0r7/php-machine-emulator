@@ -30,12 +30,16 @@ class Lea implements InstructionInterface
 
         [$address] = $this->effectiveAddressInfo($runtime, $reader, $modRegRM);
 
+        $size = $runtime->runtimeOption()->context()->operandSize();
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->write16Bit(
+            ->writeBySize(
                 $modRegRM->registerOrOPCode(),
-                $address & 0xFFFF,
+                $address & $mask,
+                $size,
             );
 
         return ExecutionStatus::SUCCESS;

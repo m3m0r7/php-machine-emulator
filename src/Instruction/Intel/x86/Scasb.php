@@ -19,7 +19,7 @@ class Scasb implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $di = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asByte();
+        $di = $this->readIndex($runtime, RegisterType::EDI);
 
         $value = $this->readMemory8(
             $runtime,
@@ -29,8 +29,8 @@ class Scasb implements InstructionInterface
 
         $runtime->memoryAccessor()->updateFlags($al - $value, 8)->setCarryFlag($al < $value);
 
-        $step = $runtime->memoryAccessor()->shouldDirectionFlag() ? -1 : 1;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::EDI, $step);
+        $step = $this->stepForElement($runtime, 1);
+        $this->writeIndex($runtime, RegisterType::EDI, $di + $step);
 
         return ExecutionStatus::SUCCESS;
     }

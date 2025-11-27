@@ -19,7 +19,7 @@ class Lodsb implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
+        $si = $this->readIndex($runtime, RegisterType::ESI);
         $segment = $runtime->segmentOverride() ?? RegisterType::DS;
 
         $value = $this->readMemory8(
@@ -34,11 +34,8 @@ class Lodsb implements InstructionInterface
                 $value,
             );
 
-        // TODO: apply DF flag
-        $runtime
-            ->memoryAccessor()
-            ->enableUpdateFlags(false)
-            ->add(RegisterType::ESI, $runtime->memoryAccessor()->shouldDirectionFlag() ? -1 : 1);
+        $step = $this->stepForElement($runtime, 1);
+        $this->writeIndex($runtime, RegisterType::ESI, $si + $step);
 
         return ExecutionStatus::SUCCESS;
     }

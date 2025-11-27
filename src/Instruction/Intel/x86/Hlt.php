@@ -18,6 +18,8 @@ class Hlt implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        return ExecutionStatus::HALT;
+        // Treat HLT as a low-power wait; do not terminate the emulator.
+        // We rely on periodic timer ticks to inject pending interrupts.
+        return ExecutionStatus::SUCCESS;
     }
 }

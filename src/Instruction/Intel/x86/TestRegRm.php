@@ -23,18 +23,19 @@ class TestRegRm implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = $opcode === 0x84;
+        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
 
         if ($isByte) {
             $left = $this->readRm8($runtime, $reader, $modRegRM);
             $right = $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
             $result = $left & $right;
         } else {
-            $left = $this->readRm16($runtime, $reader, $modRegRM);
-            $right = $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asByte();
-            $result = $left & $right;
+            $left = $this->readRm($runtime, $reader, $modRegRM, $opSize);
+            $right = $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
+            $result = ($left & $right) & ($opSize === 32 ? 0xFFFFFFFF : 0xFFFF);
         }
 
-        $runtime->memoryAccessor()->setCarryFlag(false)->updateFlags($result, $isByte ? 8 : 16);
+        $runtime->memoryAccessor()->setCarryFlag(false)->updateFlags($result, $isByte ? 8 : $opSize);
 
         return ExecutionStatus::SUCCESS;
     }

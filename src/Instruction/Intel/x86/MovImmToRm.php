@@ -22,6 +22,7 @@ class MovImmToRm implements InstructionInterface
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
+        $size = $runtime->runtimeOption()->context()->operandSize();
 
         if ($modRegRM->registerOrOPCode() !== 0) {
             throw new ExecutionException('Invalid MOV immediate to r/m digit');
@@ -31,8 +32,8 @@ class MovImmToRm implements InstructionInterface
             $value = $enhancedStreamReader->streamReader()->byte();
             $this->writeRm8($runtime, $enhancedStreamReader, $modRegRM, $value);
         } else {
-            $value = $enhancedStreamReader->short();
-            $this->writeRm16($runtime, $enhancedStreamReader, $modRegRM, $value);
+            $value = $size === 32 ? $enhancedStreamReader->dword() : $enhancedStreamReader->short();
+            $this->writeRm($runtime, $enhancedStreamReader, $modRegRM, $value, $size);
         }
 
         return ExecutionStatus::SUCCESS;

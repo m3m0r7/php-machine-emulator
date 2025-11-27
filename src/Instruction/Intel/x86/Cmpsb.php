@@ -19,8 +19,8 @@ class Cmpsb implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
-        $di = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asByte();
+        $si = $this->readIndex($runtime, RegisterType::ESI);
+        $di = $this->readIndex($runtime, RegisterType::EDI);
 
         $sourceSegment = $runtime->segmentOverride() ?? RegisterType::DS;
 
@@ -35,9 +35,9 @@ class Cmpsb implements InstructionInterface
 
         $runtime->memoryAccessor()->updateFlags($left - $right, 8)->setCarryFlag($left < $right);
 
-        $step = $runtime->memoryAccessor()->shouldDirectionFlag() ? -1 : 1;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::ESI, $step);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::EDI, $step);
+        $step = $this->stepForElement($runtime, 1);
+        $this->writeIndex($runtime, RegisterType::ESI, $si + $step);
+        $this->writeIndex($runtime, RegisterType::EDI, $di + $step);
 
         return ExecutionStatus::SUCCESS;
     }

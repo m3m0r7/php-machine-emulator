@@ -19,18 +19,21 @@ class Scasw implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $di = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asByte();
+        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $width = $opSize === 32 ? 4 : 2;
+        $di = $this->readIndex($runtime, RegisterType::EDI);
 
-        $value = $this->readMemory16(
-            $runtime,
-            $this->segmentOffsetAddress($runtime, RegisterType::ES, $di),
-        );
-        $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
+        $address = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
+        $value = $opSize === 32
+            ? $this->readMemory32($runtime, $address)
+            : $this->readMemory16($runtime, $address);
 
-        $runtime->memoryAccessor()->updateFlags($ax - $value, 16)->setCarryFlag($ax < $value);
+        $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
 
-        $step = $runtime->memoryAccessor()->shouldDirectionFlag() ? -2 : 2;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->add(RegisterType::EDI, $step);
+        $runtime->memoryAccessor()->updateFlags($ax - $value, $opSize)->setCarryFlag($ax < $value);
+
+        $step = $this->stepForElement($runtime, $width);
+        $this->writeIndex($runtime, RegisterType::EDI, $di + $step);
 
         return ExecutionStatus::SUCCESS;
     }

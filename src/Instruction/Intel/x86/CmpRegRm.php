@@ -23,6 +23,7 @@ class CmpRegRm implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x38, 0x3A], true);
+        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
         $destIsRm = in_array($opcode, [0x38, 0x39], true);
 
         $src = $isByte
@@ -30,8 +31,8 @@ class CmpRegRm implements InstructionInterface
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
                 : $this->readRm8($runtime, $reader, $modRegRM))
             : ($destIsRm
-                ? $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asByte()
-                : $this->readRm16($runtime, $reader, $modRegRM));
+                ? $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize)
+                : $this->readRm($runtime, $reader, $modRegRM, $opSize));
 
         if ($isByte) {
             $dest = $destIsRm
@@ -40,9 +41,9 @@ class CmpRegRm implements InstructionInterface
             $runtime->memoryAccessor()->updateFlags($dest - $src, 8)->setCarryFlag($dest < $src);
         } else {
             $dest = $destIsRm
-                ? $this->readRm16($runtime, $reader, $modRegRM)
-                : $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asByte();
-            $runtime->memoryAccessor()->updateFlags($dest - $src, 16)->setCarryFlag($dest < $src);
+                ? $this->readRm($runtime, $reader, $modRegRM, $opSize)
+                : $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
+            $runtime->memoryAccessor()->updateFlags($dest - $src, $opSize)->setCarryFlag($dest < $src);
         }
 
         return ExecutionStatus::SUCCESS;

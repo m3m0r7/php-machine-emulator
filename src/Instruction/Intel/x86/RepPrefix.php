@@ -26,14 +26,15 @@ class RepPrefix implements InstructionInterface
         $isCmpsOrScas = in_array($nextOpcode, [0xA6, 0xAE, 0xA7, 0xAF], true);
         $isMovsOrStos = in_array($nextOpcode, [0xA4, 0xA5, 0xAA, 0xAB], true);
 
-        $counter = $runtime->memoryAccessor()->fetch(RegisterType::ECX)->asByte();
+        // REP count uses CX/ECX depending on address-size.
+        $counter = $this->readIndex($runtime, RegisterType::ECX);
 
         // In this simplified emulator, apply REP to a subset of string ops
         while ($counter > 0) {
             $instruction = $this->instructionList->getInstructionByOperationCode($nextOpcode);
             $result = $instruction->process($runtime, $nextOpcode);
             $counter--;
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::ECX, $counter);
+            $this->writeIndex($runtime, RegisterType::ECX, $counter);
 
             if ($result !== ExecutionStatus::SUCCESS) {
                 return $result;

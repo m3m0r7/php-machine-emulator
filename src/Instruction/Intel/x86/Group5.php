@@ -44,6 +44,7 @@ class Group5 implements InstructionInterface
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value + 1) & $mask;
         $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
         // NOTE: Carry flag unaffected by INC.
         return ExecutionStatus::SUCCESS;
     }
@@ -55,6 +56,7 @@ class Group5 implements InstructionInterface
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value - 1) & $mask;
         $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
         return ExecutionStatus::SUCCESS;
     }
 
@@ -96,13 +98,33 @@ class Group5 implements InstructionInterface
 
         $size = $runtime->runtimeOption()->context()->operandSize();
 
-        // push return CS:IP
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte(), $size);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $pos, $size);
+        $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+        $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $pos, $size);
+
+        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            $gate = $this->readCallGateDescriptor($runtime, $segment);
+            if ($gate !== null) {
+                $this->callThroughGate($runtime, $gate, $returnOffset, $currentCs, $size);
+                return ExecutionStatus::SUCCESS;
+            }
+        }
+
+        // push return CS:IP on current stack
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $currentCs, $size);
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $returnOffset, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {
-            $runtime->streamReader()->setOffset($offset);
-            $runtime->memoryAccessor()->write16Bit(RegisterType::CS, $segment);
+            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+                $descriptor = $this->resolveCodeDescriptor($runtime, $segment);
+                $newCpl = $this->computeCplForTransfer($runtime, $segment, $descriptor);
+                $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
+                $runtime->streamReader()->setOffset($linearTarget);
+                $this->writeCodeSegment($runtime, $segment, $newCpl, $descriptor);
+            } else {
+                $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
+                $runtime->streamReader()->setOffset($linearTarget);
+                $this->writeCodeSegment($runtime, $segment);
+            }
         }
 
         return ExecutionStatus::SUCCESS;
@@ -116,8 +138,24 @@ class Group5 implements InstructionInterface
         $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
 
         if ($runtime->option()->shouldChangeOffset()) {
-            $runtime->streamReader()->setOffset($offset);
-            $runtime->memoryAccessor()->write16Bit(RegisterType::CS, $segment);
+            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+                $gate = $this->readCallGateDescriptor($runtime, $segment);
+                if ($gate !== null) {
+                    $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+                    $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $runtime->streamReader()->offset(), $opSize);
+                    $this->callThroughGate($runtime, $gate, $returnOffset, $currentCs, $opSize, pushReturn: false, copyParams: false);
+                } else {
+                    $descriptor = $this->resolveCodeDescriptor($runtime, $segment);
+                    $newCpl = $this->computeCplForTransfer($runtime, $segment, $descriptor);
+                    $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
+                    $runtime->streamReader()->setOffset($linearTarget);
+                    $this->writeCodeSegment($runtime, $segment, $newCpl, $descriptor);
+                }
+            } else {
+                $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
+                $runtime->streamReader()->setOffset($linearTarget);
+                $this->writeCodeSegment($runtime, $segment);
+            }
         }
 
         return ExecutionStatus::SUCCESS;
