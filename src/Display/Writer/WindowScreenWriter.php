@@ -130,4 +130,41 @@ class WindowScreenWriter implements ScreenWriterInterface
     {
         $this->window->stop();
     }
+
+    public function showSplash(string $imagePath, int $durationMs = 5000): void
+    {
+        if (!file_exists($imagePath)) {
+            return;
+        }
+
+        $imageInfo = getimagesize($imagePath);
+        if ($imageInfo === false) {
+            return;
+        }
+
+        $imgWidth = $imageInfo[0];
+        $imgHeight = $imageInfo[1];
+
+        // Resize window to match image
+        $this->window->resize($imgWidth, $imgHeight);
+
+        // Draw splash image
+        $this->canvas->clear(Color::asBlack());
+        $this->canvas->image($imagePath, 0, 0);
+        $this->canvas->present();
+
+        // Wait for duration while handling events
+        $startTime = microtime(true) * 1000;
+        $frameDelay = 16; // ~60fps
+
+        while ((microtime(true) * 1000 - $startTime) < $durationMs) {
+            // Process SDL events to keep window responsive
+            $this->window->processEvents();
+            usleep($frameDelay * 1000);
+        }
+
+        // Clear screen after splash
+        $this->canvas->clear(Color::asBlack());
+        $this->canvas->present();
+    }
 }

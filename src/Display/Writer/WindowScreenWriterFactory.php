@@ -18,6 +18,8 @@ class WindowScreenWriterFactory implements ScreenWriterFactoryInterface
 
     public function create(RuntimeInterface $runtime, VideoTypeInfo $videoTypeInfo): ScreenWriterInterface
     {
-        return new WindowScreenWriter($videoTypeInfo, $this->windowOption, $this->pixelSize);
+        $writer = new WindowScreenWriter($videoTypeInfo, $this->windowOption, $this->pixelSize);
+        $writer->showSplash(__DIR__ . '/../../../src/Asset/splash.png', 1000);
+        return $writer;
     }
 }

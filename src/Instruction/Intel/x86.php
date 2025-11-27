@@ -93,6 +93,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\In_;
 use PHPMachineEmulator\Instruction\Intel\x86\Or_;
 use PHPMachineEmulator\Instruction\Intel\x86\Out_;
 use PHPMachineEmulator\Instruction\Intel\x86\Outs;
+use PHPMachineEmulator\Instruction\Intel\x86\Bound;
 use PHPMachineEmulator\Instruction\Intel\x86\PopReg;
 use PHPMachineEmulator\Instruction\Intel\x86\PushReg;
 use PHPMachineEmulator\Instruction\Intel\x86\Ret;
@@ -185,6 +186,7 @@ class x86 implements InstructionListInterface
             Scasw::class,
             Ins::class,
             Outs::class,
+            Bound::class,
             RepPrefix::class,
             AddRegRm::class,
             SubRegRm::class,

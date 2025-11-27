@@ -19,6 +19,7 @@ class Option implements OptionInterface
         protected bool $shouldChangeOffset = true,
         protected bool $showHeader = false,
         protected ScreenWriterFactoryInterface $screenWriterFactory = new WindowScreenWriterFactory(),
+        protected BootType $bootType = BootType::BOOT_SIGNATURE,
     ) {
     }
 
@@ -50,5 +51,10 @@ class Option implements OptionInterface
     public function screenWriterFactory(): ScreenWriterFactoryInterface
     {
         return $this->screenWriterFactory;
+    }
+
+    public function bootType(): BootType
+    {
+        return $this->bootType;
     }
 }

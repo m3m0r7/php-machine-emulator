@@ -166,4 +166,51 @@ class WindowCanvas
     {
         return $this->window->height();
     }
+
+    public function image(string $path, int $x = 0, int $y = 0, ?int $width = null, ?int $height = null): self
+    {
+        if (!file_exists($path)) {
+            return $this;
+        }
+
+        $imageInfo = getimagesize($path);
+        if ($imageInfo === false) {
+            return $this;
+        }
+
+        $gdImage = match ($imageInfo[2]) {
+            IMAGETYPE_PNG => imagecreatefrompng($path),
+            IMAGETYPE_JPEG => imagecreatefromjpeg($path),
+            IMAGETYPE_GIF => imagecreatefromgif($path),
+            default => false,
+        };
+
+        if ($gdImage === false) {
+            return $this;
+        }
+
+        $srcWidth = imagesx($gdImage);
+        $srcHeight = imagesy($gdImage);
+        $dstWidth = $width ?? $srcWidth;
+        $dstHeight = $height ?? $srcHeight;
+
+        for ($dy = 0; $dy < $dstHeight; $dy++) {
+            for ($dx = 0; $dx < $dstWidth; $dx++) {
+                $sx = (int) ($dx * $srcWidth / $dstWidth);
+                $sy = (int) ($dy * $srcHeight / $dstHeight);
+
+                $rgb = imagecolorat($gdImage, $sx, $sy);
+                $r = ($rgb >> 16) & 0xFF;
+                $g = ($rgb >> 8) & 0xFF;
+                $b = $rgb & 0xFF;
+
+                $this->ffi->SDL_SetRenderDrawColor($this->renderer, $r, $g, $b, 255);
+                $this->ffi->SDL_RenderDrawPoint($this->renderer, $x + $dx, $y + $dy);
+            }
+        }
+
+        imagedestroy($gdImage);
+
+        return $this;
+    }
 }

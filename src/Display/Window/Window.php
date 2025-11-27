@@ -169,6 +169,16 @@ class Window
         $this->running = false;
     }
 
+    public function processEvents(): bool
+    {
+        while ($this->ffi->SDL_PollEvent(FFI::addr($this->event))) {
+            if ($this->event->type === self::SDL_QUIT_EVENT) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public function width(): int
     {
         return $this->option->width;

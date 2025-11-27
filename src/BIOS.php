@@ -24,7 +24,9 @@ class BIOS extends Machine
     {
         parent::__construct($streamReader, $option);
 
-        $this->verifyBIOSSignature();
+        if ($option->bootType() === BootType::BOOT_SIGNATURE) {
+            $this->verifyBIOSSignature();
+        }
     }
 
     public static function start(StreamReaderIsProxyableInterface $streamReader, MachineType $useMachineType = MachineType::Intel_x86, OptionInterface $option = new Option()): void

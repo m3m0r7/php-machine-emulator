@@ -8,10 +8,14 @@ use PHPMachineEmulator\Disk\HardDisk;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Exception\StreamReaderException;
+use PHPMachineEmulator\Stream\ISO\ISOStream;
+use PHPMachineEmulator\Stream\ISO\ISOStreamProxy;
+use PHPMachineEmulator\Stream\ISO\ISO9660;
 
 class Disk implements InterruptInterface
 {
     private const SECTOR_SIZE = BIOS::READ_SIZE_PER_SECTOR;
+    private const CD_SECTOR_SIZE = ISO9660::SECTOR_SIZE;
     private const SECTORS_PER_TRACK = 63;
     private const HEADS_PER_CYLINDER = 16;
 
@@ -30,10 +34,14 @@ class Disk implements InterruptInterface
         match ($ah) {
             0x00 => $this->reset($runtime),
             0x02 => $this->readSectorsCHS($runtime, $al),
+            0x03 => $this->writeSectorsCHS($runtime, $al),
             0x41 => $this->extensionsPresent($runtime),
             0x42 => $this->readSectorsLBA($runtime),
+            0x43 => $this->writeSectorsLBA($runtime),
             0x48 => $this->getDriveParametersExtended($runtime),
             0x08 => $this->getDriveParameters($runtime),
+            0x15 => $this->getDiskType($runtime),
+            0x4B => $this->terminateDiskEmulation($runtime),
             default => $this->unsupported($runtime, $ah),
         };
     }
@@ -263,6 +271,109 @@ class Disk implements InterruptInterface
         }
 
         return ((($selector << 4) & 0xFFFFF) + ($offset & $offsetMask)) & $linearMask;
+    }
+
+    private function writeSectorsCHS(RuntimeInterface $runtime, int $sectorsToWrite): void
+    {
+        if ($sectorsToWrite === 0) {
+            $this->fail($runtime, 0x04);
+            return;
+        }
+
+        $addressSize = $runtime->context()->cpu()->addressSize();
+        $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+
+        $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize($addressSize) & $offsetMask;
+        $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
+
+        $cx = $runtime->memoryAccessor()->fetch(RegisterType::ECX);
+        $ch = $cx->asHighBit();
+        $cl = $cx->asLowBit();
+
+        $dx = $runtime->memoryAccessor()->fetch(RegisterType::EDX);
+        $dh = $dx->asHighBit();
+        $dl = $dx->asLowBit();
+
+        if ($dl < 0x80) {
+            $this->fail($runtime, 0x01);
+            return;
+        }
+
+        $cylinder = (($cl >> 6) & 0x03) << 8;
+        $cylinder |= $ch;
+        $sector = $cl & 0x3F;
+        $head = $dh;
+
+        if ($sector === 0) {
+            $this->fail($runtime, 0x04);
+            return;
+        }
+
+        $lba = ($cylinder * self::HEADS_PER_CYLINDER + $head) * self::SECTORS_PER_TRACK + ($sector - 1);
+        $bufferAddress = $this->segmentLinearAddress($runtime, $es, $bx, $addressSize);
+
+        // Write is a no-op for read-only media, but we accept the data
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorsToWrite);
+        $runtime->memoryAccessor()->setCarryFlag(false);
+    }
+
+    private function writeSectorsLBA(RuntimeInterface $runtime): void
+    {
+        $addressSize = $runtime->context()->cpu()->addressSize();
+        $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
+        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($addressSize);
+        $dapLinear = $this->segmentLinearAddress($runtime, $ds, $si, $addressSize);
+
+        $size = $this->readMemory8($runtime, $dapLinear);
+        if ($size < 16) {
+            $this->fail($runtime, 0x01);
+            return;
+        }
+
+        $sectorCount = $this->readMemory16($runtime, $dapLinear + 2);
+
+        if ($sectorCount === 0) {
+            $this->fail($runtime, 0x04);
+            return;
+        }
+
+        // Write is a no-op for read-only media, but we accept the data
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
+        $runtime->memoryAccessor()->setCarryFlag(false);
+    }
+
+    private function getDiskType(RuntimeInterface $runtime): void
+    {
+        $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
+        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+
+        if ($dl >= 0x80) {
+            // Hard disk - return type 3
+            $ma->writeToHighBit(RegisterType::EAX, 0x03);
+            // CX:DX = number of 512-byte sectors
+            $totalSectors = 0x0010_0000; // ~512MB
+            $ma->write16Bit(RegisterType::ECX, ($totalSectors >> 16) & 0xFFFF);
+            $ma->write16Bit(RegisterType::EDX, $totalSectors & 0xFFFF);
+        } else {
+            // Floppy or no drive
+            $ma->writeToHighBit(RegisterType::EAX, 0x00);
+        }
+
+        $ma->setCarryFlag(false);
+    }
+
+    private function terminateDiskEmulation(RuntimeInterface $runtime): void
+    {
+        // El Torito: Terminate disk emulation (INT 13h AH=4Bh)
+        // AL = 00h: Terminate and return boot catalog
+        // AL = 01h: Terminate and return boot catalog only if emulation active
+        $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
+        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+
+        // For now, just report no emulation active
+        $ma->writeToHighBit(RegisterType::EAX, 0x00); // Success
+        $ma->setCarryFlag(false);
     }
 
     private function unsupported(RuntimeInterface $runtime, int $command): void

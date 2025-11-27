@@ -24,7 +24,7 @@ class Ins implements InstructionInterface
         $isByte = $opcode === 0x6C;
         $width = $isByte ? 8 : $opSize;
 
-        $port = $runtime->memoryAccessor()->fetch(RegisterType::DX)->asByte() & 0xFFFF;
+        $port = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asBytesBySize(16) & 0xFFFF;
 
         $this->assertIoPermission($runtime, $port, $width);
         if ($runtime->context()->cpu()->isProtectedMode()) {
@@ -41,7 +41,15 @@ class Ins implements InstructionInterface
         $value = $this->readPort($runtime, $port, $width);
 
         $dest = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize());
-        $this->writeBySize($runtime, $dest, $value, $width, $runtime->segmentOverride() ?? RegisterType::ES);
+        $segment = $runtime->segmentOverride() ?? RegisterType::ES;
+        $segBase = $runtime->memoryAccessor()->fetch($segment)->asByte();
+        $linearAddr = ($segBase << 4) + $dest;
+        match ($width) {
+            8 => $this->writeMemory8($runtime, $linearAddr, $value),
+            16 => $this->writeMemory16($runtime, $linearAddr, $value),
+            32 => $this->writeMemory32($runtime, $linearAddr, $value),
+            default => null,
+        };
 
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EDI, $dest + $delta, $runtime->context()->cpu()->addressSize());
 

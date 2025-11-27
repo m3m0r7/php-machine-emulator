@@ -1403,7 +1403,12 @@ trait Instructable
             return;
         }
 
-        if (($port >= 0x1F0 && $port <= 0x1F7) || ($port >= 0x170 && $port <= 0x177)) {
+        if ($port === 0x1F0 || $port === 0x170) {
+            // Data port - write word to ATA
+            $ata->writeDataWord($value);
+            return;
+        }
+        if (($port >= 0x1F1 && $port <= 0x1F7) || ($port >= 0x171 && $port <= 0x177)) {
             $ata->writeRegister($port, $value);
             return;
         }

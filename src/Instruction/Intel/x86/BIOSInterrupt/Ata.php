@@ -25,6 +25,9 @@ class Ata
     private bool $bmActive = false;
     private bool $irqDisabled = false;
     private bool $srst = false;
+    private bool $writeMode = false;
+    private int $writeBufferPos = 0;
+    private array $writeBuffer = [];
 
     public function __construct(private RuntimeInterface $runtime)
     {
@@ -60,6 +63,10 @@ class Ata
                         $this->status = 0x58; // DRDY | DRQ | DSC
                         $this->raiseIrq();
                     }
+                } elseif ($v === 0x30 || $v === 0x31) { // WRITE SECTORS
+                    $this->status = 0x80; // BSY
+                    $this->prepareWriteBuffer();
+                    $this->status = 0x58; // DRDY | DRQ | DSC - ready for data
                 } elseif ($v === 0xEC) { // IDENTIFY DEVICE
                     $this->status = 0x80;
                     $this->loadIdentify();
@@ -68,6 +75,10 @@ class Ata
                     $this->raiseIrq();
                 } elseif ($v === 0xE7) { // FLUSH CACHE
                     $this->status = 0x50; // ready, no-op
+                } elseif ($v === 0xCA) { // WRITE DMA
+                    $this->status = 0x80; // BSY
+                    $this->prepareWriteBuffer();
+                    $this->status = 0x58; // ready for DMA transfer
                 } else {
                     $this->status = 0x50; // default ready + DSC
                 }
@@ -119,6 +130,48 @@ class Ata
             $this->status = 0x50; // DRDY + DSC
         }
         return ($hi << 8) | $lo;
+    }
+
+    public function writeDataWord(int $value): void
+    {
+        if (!$this->writeMode) {
+            return;
+        }
+
+        $lo = $value & 0xFF;
+        $hi = ($value >> 8) & 0xFF;
+        $this->writeBuffer[$this->writeBufferPos++] = $lo;
+        $this->writeBuffer[$this->writeBufferPos++] = $hi;
+
+        $expectedSize = max(1, $this->sectorCount) * BIOS::READ_SIZE_PER_SECTOR;
+        if ($this->writeBufferPos >= $expectedSize) {
+            $this->flushWriteBuffer();
+            $this->writeMode = false;
+            $this->status = 0x50; // DRDY + DSC
+            $this->raiseIrq();
+        }
+    }
+
+    private function prepareWriteBuffer(): void
+    {
+        $this->writeMode = true;
+        $this->writeBufferPos = 0;
+        $this->writeBuffer = [];
+        $this->error = 0;
+    }
+
+    private function flushWriteBuffer(): void
+    {
+        $lba = $this->lba0 | ($this->lba1 << 8) | ($this->lba2 << 16) | (($this->driveHead & 0x0F) << 24);
+        $offset = $lba * BIOS::READ_SIZE_PER_SECTOR;
+
+        // Write to the underlying stream if it supports writing
+        $proxy = $this->runtime->streamReader()->proxy();
+        if (method_exists($proxy, 'writeAt')) {
+            $proxy->writeAt($offset, $this->writeBuffer);
+        }
+        // Note: For read-only disk images, this is a no-op
+        // The data is still accepted to avoid errors, but not persisted
     }
 
     public function readBusMaster(int $port): int

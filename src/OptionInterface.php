@@ -14,4 +14,5 @@ interface OptionInterface
     public function shouldChangeOffset(): bool;
     public function shouldShowHeader(): bool;
     public function screenWriterFactory(): ScreenWriterFactoryInterface;
+    public function bootType(): BootType;
 }

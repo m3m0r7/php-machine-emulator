@@ -24,7 +24,7 @@ class Outs implements InstructionInterface
         $isByte = $opcode === 0x6E;
         $width = $isByte ? 8 : $opSize;
 
-        $port = $runtime->memoryAccessor()->fetch(RegisterType::DX)->asByte() & 0xFFFF;
+        $port = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asBytesBySize(16) & 0xFFFF;
 
         $this->assertIoPermission($runtime, $port, $width);
         if ($runtime->context()->cpu()->isProtectedMode()) {
@@ -39,7 +39,15 @@ class Outs implements InstructionInterface
         $delta = $count * ($isByte ? 1 : ($opSize === 32 ? 4 : 2));
 
         $src = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($runtime->context()->cpu()->addressSize());
-        $value = $this->readBySize($runtime, $src, $width, $runtime->segmentOverride() ?? RegisterType::DS);
+        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $segBase = $runtime->memoryAccessor()->fetch($segment)->asByte();
+        $linearAddr = ($segBase << 4) + $src;
+        $value = match ($width) {
+            8 => $this->readMemory8($runtime, $linearAddr),
+            16 => $this->readMemory16($runtime, $linearAddr),
+            32 => $this->readMemory32($runtime, $linearAddr),
+            default => 0,
+        };
 
         $this->writePort($runtime, $port, $value, $width);
 
