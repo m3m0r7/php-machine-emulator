@@ -26,9 +26,10 @@ class WindowScreenWriter implements ScreenWriterInterface
     ) {
         $this->pixelSize = $pixelSize;
 
+        $effectivePixelSize = $videoTypeInfo->isTextMode ? 1 : $pixelSize;
         $windowOption ??= new WindowOption(
-            width: $videoTypeInfo->width * $pixelSize,
-            height: $videoTypeInfo->height * $pixelSize,
+            width: $videoTypeInfo->pixelWidth() * $effectivePixelSize,
+            height: $videoTypeInfo->pixelHeight() * $effectivePixelSize,
         );
 
         $this->window = new Window('PHP Machine Emulator', $windowOption);
@@ -38,23 +39,36 @@ class WindowScreenWriter implements ScreenWriterInterface
 
     public function write(string $value): void
     {
-        $color = Color::asWhite();
-        $this->canvas->text($this->cursorX, $this->cursorY, $value, $color, 1);
-        $this->canvas->present();
+        // Handle control characters
+        if ($value === "\r") {
+            $this->cursorX = 0;
+            return;
+        }
+        if ($value === "\n") {
+            $this->cursorX = 0;
+            $this->cursorY += 16; // Line height
+            return;
+        }
+
+        $x = $this->cursorX;
+        $y = $this->cursorY;
+        $this->canvas->add(function (WindowCanvas $canvas) use ($x, $y, $value) {
+            $canvas->text($x, $y, $value, Color::asWhite(), 1);
+        });
         $this->cursorX += strlen($value) * 8;
     }
 
     public function dot(ColorInterface $color): void
     {
+        $x = $this->cursorX * $this->pixelSize;
+        $y = $this->cursorY * $this->pixelSize;
+        $size = $this->pixelSize;
         $windowColor = new Color($color->red(), $color->green(), $color->blue());
-        $this->canvas->rect(
-            $this->cursorX * $this->pixelSize,
-            $this->cursorY * $this->pixelSize,
-            $this->pixelSize,
-            $this->pixelSize,
-            $windowColor
-        );
-        $this->canvas->present();
+
+        $this->canvas->add(function (WindowCanvas $canvas) use ($x, $y, $size, $windowColor) {
+            $canvas->rect($x, $y, $size, $size, $windowColor);
+        });
+
         $this->cursorX++;
 
         if ($this->cursorX >= $this->videoTypeInfo->width) {
@@ -87,8 +101,19 @@ class WindowScreenWriter implements ScreenWriterInterface
 
     public function clear(): void
     {
-        $this->canvas->clear(Color::asBlack());
+        $this->canvas->clearChunks();
         $this->resetCursor();
+    }
+
+    public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void
+    {
+        $this->videoTypeInfo = $videoTypeInfo;
+        $effectivePixelSize = $videoTypeInfo->isTextMode ? 1 : $this->pixelSize;
+        $width = $videoTypeInfo->pixelWidth() * $effectivePixelSize;
+        $height = $videoTypeInfo->pixelHeight() * $effectivePixelSize;
+
+        $this->window->resize($width, $height);
+        $this->clear();
     }
 
     public function present(): void

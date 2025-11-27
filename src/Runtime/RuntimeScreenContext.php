@@ -7,6 +7,7 @@ namespace PHPMachineEmulator\Runtime;
 use PHPMachineEmulator\Display\Writer\ScreenWriterInterface;
 use PHPMachineEmulator\Display\Writer\ScreenWriterFactoryInterface;
 use PHPMachineEmulator\Video\VideoInterface;
+use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class RuntimeScreenContext implements RuntimeScreenContextInterface
 {
@@ -17,8 +18,8 @@ class RuntimeScreenContext implements RuntimeScreenContextInterface
         RuntimeInterface $runtime,
         VideoInterface $video,
     ) {
-        // Initialize with default video mode (0x03 - 80x25 text mode)
-        $defaultVideoMode = 0x03;
+        // Initialize with default video mode (0x13 - 320x200 graphics mode)
+        $defaultVideoMode = 0x13;
         $videoTypeInfo = $video->supportedVideoModes()[$defaultVideoMode];
 
         $this->screenWriter = $screenWriterFactory->create($runtime, $videoTypeInfo);
@@ -45,6 +46,13 @@ class RuntimeScreenContext implements RuntimeScreenContextInterface
     {
         if (method_exists($this->screenWriter, 'stop')) {
             $this->screenWriter->stop();
+        }
+    }
+
+    public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void
+    {
+        if (method_exists($this->screenWriter, 'updateVideoMode')) {
+            $this->screenWriter->updateVideoMode($videoTypeInfo);
         }
     }
 }

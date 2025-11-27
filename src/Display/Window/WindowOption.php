@@ -14,8 +14,8 @@ class WindowOption
     public const SDL_RENDERER_ACCELERATED = 0x00000002;
 
     public function __construct(
-        public int $width = 640,
-        public int $height = 480,
+        public int $width = 100,
+        public int $height = 100,
         public ?string $sdlLibraryPath = null,
         public int $frameRate = 60,
         public int $sdlInitVideo = self::SDL_INIT_VIDEO,

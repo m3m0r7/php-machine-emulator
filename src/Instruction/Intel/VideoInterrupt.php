@@ -19,11 +19,11 @@ class VideoInterrupt implements VideoInterface
     {
         return [
             // NOTE: Text Modes
-            0x00 => new VideoTypeInfo(40, 25, 16, VideoColorType::COLOR),
-            0x01 => new VideoTypeInfo(40, 25, 16, VideoColorType::MONOCHROME),
-            0x02 => new VideoTypeInfo(80, 25, 16, VideoColorType::COLOR),
-            0x03 => new VideoTypeInfo(80, 25, 16, VideoColorType::MONOCHROME),
-            0x07 => new VideoTypeInfo(80, 25, 2, VideoColorType::MONOCHROME),
+            0x00 => new VideoTypeInfo(40, 25, 16, VideoColorType::COLOR, isTextMode: true),
+            0x01 => new VideoTypeInfo(40, 25, 16, VideoColorType::MONOCHROME, isTextMode: true),
+            0x02 => new VideoTypeInfo(80, 25, 16, VideoColorType::COLOR, isTextMode: true),
+            0x03 => new VideoTypeInfo(80, 25, 16, VideoColorType::MONOCHROME, isTextMode: true),
+            0x07 => new VideoTypeInfo(80, 25, 2, VideoColorType::MONOCHROME, isTextMode: true),
 
             // NOTE: Graphic Modes
             0x04 => new VideoTypeInfo(320, 200, 4, VideoColorType::COLOR),

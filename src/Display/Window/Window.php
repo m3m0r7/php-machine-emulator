@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Display\Window;
 
 use Closure;
 use FFI;
+use PHPMachineEmulator\Display\Pixel\Color;
 use PHPMachineEmulator\Exception\WindowException;
 
 class Window
@@ -98,6 +99,7 @@ class Window
 
             int SDL_PollEvent(SDL_Event* event);
             void SDL_Delay(Uint32 ms);
+            void SDL_SetWindowSize(SDL_Window* window, int w, int h);
         CDEF;
     }
 
@@ -152,7 +154,9 @@ class Window
                 break;
             }
 
+            $this->canvas->clear(Color::asBlack());
             $this->canvas->render();
+            $this->canvas->present();
 
             $this->ffi->SDL_Delay($frameDelay);
         }
@@ -173,6 +177,24 @@ class Window
     public function height(): int
     {
         return $this->option->height;
+    }
+
+    public function resize(int $width, int $height): void
+    {
+        $this->option = new WindowOption(
+            width: $width,
+            height: $height,
+            frameRate: $this->option->frameRate,
+            sdlInitVideo: $this->option->sdlInitVideo,
+            sdlWindowPosX: $this->option->sdlWindowPosX,
+            sdlWindowPosY: $this->option->sdlWindowPosY,
+            sdlWindowFlags: $this->option->sdlWindowFlags,
+            sdlRendererFlags: $this->option->sdlRendererFlags,
+        );
+
+        if ($this->window !== null) {
+            $this->ffi->SDL_SetWindowSize($this->window, $width, $height);
+        }
     }
 
     protected function destroy(): void

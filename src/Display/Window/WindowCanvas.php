@@ -13,6 +13,8 @@ class WindowCanvas
     /** @var array<string, Closure(WindowCanvas): void> */
     protected array $chunks = [];
 
+    protected int $chunkId = 0;
+
     public function __construct(
         protected Window $window,
         protected FFI $ffi,
@@ -26,6 +28,17 @@ class WindowCanvas
     public function register(string $name, Closure $callback): self
     {
         $this->chunks[$name] = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Register a callback with auto-generated key
+     * @param Closure(WindowCanvas): void $callback
+     */
+    public function add(Closure $callback): self
+    {
+        $this->chunks['chunk_' . $this->chunkId++] = $callback;
 
         return $this;
     }

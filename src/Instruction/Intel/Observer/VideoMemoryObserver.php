@@ -47,7 +47,7 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
             )
             ->asByte();
 
-        $diff = $di - $this->previousEDI - 1;
+        $diff = $this->previousEDI >= 0 ? $di - $this->previousEDI - 1 : 0;
         $this->previousEDI = $di;
 
         $videoSettingAddress = $runtime
@@ -66,9 +66,9 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
         $width = $width === 0 ? $videoTypeInfo->width : $width;
 
         $this->writer ??= $runtime
-            ->option()
-            ->screenWriterFactory()
-            ->create($runtime, $videoTypeInfo);
+            ->context()
+            ->screen()
+            ->screenWriter();
 
         $textColor = $nextValue & 0b00001111;
         $backgroundColor = ($nextValue & 0b11110000) >> 4;
@@ -76,11 +76,6 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
         for ($i = 0; $i < $diff; $i++) {
             $this->writer
                 ->dot(Color::asBlack());
-        }
-
-        if ($di > 0 && ($di % $width) === 0) {
-            $this->writer
-                ->newline();
         }
 
         $this->writer

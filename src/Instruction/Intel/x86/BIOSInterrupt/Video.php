@@ -89,6 +89,9 @@ class Video implements InterruptInterface
                 ($videoType & 0xFF),
                 64,
             );
+
+        // Update screen writer with new video mode
+        $runtime->context()->screen()->updateVideoMode($video);
     }
 
     protected function teletypeOutput(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
