@@ -21,10 +21,10 @@ class MovMoffset implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
-        $offset = $runtime->runtimeOption()->context()->addressSize() === 32
+        $offset = $runtime->context()->cpu()->addressSize() === 32
             ? $enhancedStreamReader->dword()
             : $enhancedStreamReader->short();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $segment = $runtime->segmentOverride() ?? RegisterType::DS;
         $linearOffset = $this->segmentOffsetAddress($runtime, $segment, $offset);
 

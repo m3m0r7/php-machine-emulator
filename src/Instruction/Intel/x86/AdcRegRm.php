@@ -23,7 +23,7 @@ class AdcRegRm implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x10, 0x12], true);
-        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
         $destIsRm = in_array($opcode, [0x10, 0x11], true);
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 

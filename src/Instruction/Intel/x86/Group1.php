@@ -30,7 +30,7 @@ class Group1 implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
 
         $operand = $this->isSignExtendedWordOperation($opcode)
             ? $enhancedStreamReader->streamReader()->signedByte()

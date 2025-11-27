@@ -30,7 +30,7 @@ class Lea implements InstructionInterface
 
         [$address] = $this->effectiveAddressInfo($runtime, $reader, $modRegRM);
 
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
 
         $runtime

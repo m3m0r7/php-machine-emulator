@@ -19,7 +19,7 @@ class Scasw implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $width = $opSize === 32 ? 4 : 2;
         $di = $this->readIndex($runtime, RegisterType::EDI);
 

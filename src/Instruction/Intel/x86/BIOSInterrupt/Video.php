@@ -93,11 +93,7 @@ class Video implements InterruptInterface
 
     protected function teletypeOutput(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
     {
-        $runtime
-            ->option()
-            ->IO()
-            ->output()
-            ->write($fetchResult->asLowBitChar());
+        $runtime->context()->screen()->write($fetchResult->asLowBitChar());
     }
 
     protected function setCursorPosition(RuntimeInterface $runtime): void
@@ -206,7 +202,7 @@ class Video implements InterruptInterface
     private function vbeGetInfo(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
-        $addr = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->runtimeOption()->context()->addressSize()));
+        $addr = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize()));
         // Zero 512 bytes
         for ($i = 0; $i < 512; $i++) {
             $this->writeMemory8($runtime, $addr + $i, 0);
@@ -228,7 +224,7 @@ class Video implements InterruptInterface
     {
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $mode = $ma->fetch(RegisterType::ECX)->asBytesBySize(16) & 0xFFFF;
-        $dest = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->runtimeOption()->context()->addressSize()));
+        $dest = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize()));
         // Only one mode: 0x141
         if ($mode !== 0x141) {
             $ma->write16Bit(RegisterType::AX, 0x014F);

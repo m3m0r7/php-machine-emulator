@@ -6,11 +6,11 @@ namespace PHPMachineEmulator\Runtime;
 
 class RuntimeOption implements RuntimeOptionInterface
 {
-    protected RuntimeContextInterface $context;
+    protected RuntimeCPUContextInterface $cpuContext;
 
-    public function __construct(protected int $entrypoint = 0x0000, ?RuntimeContextInterface $context = null)
+    public function __construct(protected int $entrypoint = 0x0000, ?RuntimeCPUContextInterface $cpuContext = null)
     {
-        $this->context = $context ?? new RuntimeContext();
+        $this->cpuContext = $cpuContext ?? new RuntimeCPUContext();
     }
 
     public function entrypoint(): int
@@ -18,8 +18,8 @@ class RuntimeOption implements RuntimeOptionInterface
         return $this->entrypoint;
     }
 
-    public function context(): RuntimeContextInterface
+    public function cpuContext(): RuntimeCPUContextInterface
     {
-        return $this->context;
+        return $this->cpuContext;
     }
 }

@@ -20,16 +20,16 @@ class Outs implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $isByte = $opcode === 0x6E;
         $width = $isByte ? 8 : $opSize;
 
         $port = $runtime->memoryAccessor()->fetch(RegisterType::DX)->asByte() & 0xFFFF;
 
         $this->assertIoPermission($runtime, $port, $width);
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
-            $cpl = $runtime->runtimeOption()->context()->cpl();
-            $iopl = $runtime->runtimeOption()->context()->iopl();
+        if ($runtime->context()->cpu()->isProtectedMode()) {
+            $cpl = $runtime->context()->cpu()->cpl();
+            $iopl = $runtime->context()->cpu()->iopl();
             if ($cpl > $iopl) {
                 throw new \PHPMachineEmulator\Exception\FaultException(0x0D, 0, 'OUTS privilege check failed');
             }
@@ -38,12 +38,12 @@ class Outs implements InstructionInterface
         $count = $runtime->memoryAccessor()->shouldDirectionFlag() ? -1 : 1;
         $delta = $count * ($isByte ? 1 : ($opSize === 32 ? 4 : 2));
 
-        $src = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($runtime->runtimeOption()->context()->addressSize());
+        $src = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($runtime->context()->cpu()->addressSize());
         $value = $this->readBySize($runtime, $src, $width, $runtime->segmentOverride() ?? RegisterType::DS);
 
         $this->writePort($runtime, $port, $value, $width);
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::ESI, $src + $delta, $runtime->runtimeOption()->context()->addressSize());
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::ESI, $src + $delta, $runtime->context()->cpu()->addressSize());
 
         return ExecutionStatus::SUCCESS;
     }

@@ -26,7 +26,7 @@ class Group2 implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
-        $opSize = $this->isByteOp($opcode) ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $this->isByteOp($opcode) ? 8 : $runtime->context()->cpu()->operandSize();
 
         return match ($modRegRM->digit()) {
             0x1 => $this->rotateRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),

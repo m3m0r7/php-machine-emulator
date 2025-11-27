@@ -23,7 +23,7 @@ class AndRegRm implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x20, 0x22], true);
-        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
         $destIsRm = in_array($opcode, [0x20, 0x21], true);
 
         $src = $isByte

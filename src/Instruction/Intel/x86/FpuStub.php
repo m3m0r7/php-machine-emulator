@@ -92,7 +92,7 @@ class FpuStub implements InstructionInterface
         }
 
         $addr = $this->rmLinearAddressFromModrm($runtime, $reader, $next);
-        $saveSize = $runtime->runtimeOption()->context()->operandSize() === 32 ? 108 : 94;
+        $saveSize = $runtime->context()->cpu()->operandSize() === 32 ? 108 : 94;
 
         if ($reg === 6) { // FNSAVE m94/108byte
             for ($i = 0; $i < $saveSize; $i++) {

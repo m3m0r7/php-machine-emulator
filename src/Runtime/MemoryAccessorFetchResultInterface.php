@@ -17,4 +17,5 @@ interface MemoryAccessorFetchResultInterface
     public function asLowBit(): int;
     public function asHighBit(): int;
     public function valueOf(): int|null;
+    public function storedSize(): int;
 }

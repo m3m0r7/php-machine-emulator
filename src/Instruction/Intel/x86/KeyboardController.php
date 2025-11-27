@@ -112,7 +112,7 @@ class KeyboardController
                 break;
             case 0xD1: // write output port
                 $this->expectingOutputPort = true;
-                $runtime->runtimeOption()->context()->setWaitingA20OutputPort(true);
+                $runtime->context()->cpu()->setWaitingA20OutputPort(true);
                 break;
             case 0xD2: // write output buffer for CPU (keyboard)
             case 0xD3: // write output buffer for keyboard interface
@@ -148,8 +148,8 @@ class KeyboardController
 
         if ($this->expectingOutputPort) {
             $this->expectingOutputPort = false;
-            $runtime->runtimeOption()->context()->setWaitingA20OutputPort(false);
-            $runtime->runtimeOption()->context()->enableA20(($value & 0x02) !== 0);
+            $runtime->context()->cpu()->setWaitingA20OutputPort(false);
+            $runtime->context()->cpu()->enableA20(($value & 0x02) !== 0);
             $this->inputBufferFull = false;
             return;
         }

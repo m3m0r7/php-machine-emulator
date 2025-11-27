@@ -35,7 +35,7 @@ class PushSeg implements InstructionInterface
         $runtime->memoryAccessor()->enableUpdateFlags(false)->push(
             RegisterType::ESP,
             $value,
-            $runtime->runtimeOption()->context()->operandSize(),
+            $runtime->context()->cpu()->operandSize(),
         );
 
         return ExecutionStatus::SUCCESS;

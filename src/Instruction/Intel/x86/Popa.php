@@ -20,7 +20,7 @@ class Popa implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
 
         $di = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $si = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);

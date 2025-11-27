@@ -51,7 +51,10 @@ class MemoryAccessor implements MemoryAccessorInterface
         $address = $this->asAddress($registerType);
         $this->validateMemoryAddressWasAllocated($address);
 
-        return new MemoryAccessorFetchResult($this->memory[$address]);
+        // Determine stored size: GPRs (addresses 0-7) are stored as 32-bit
+        $storedSize = ($address >= 0 && $address <= 7) ? 32 : 16;
+
+        return new MemoryAccessorFetchResult($this->memory[$address], $storedSize);
     }
 
     public function tryToFetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface|null
@@ -62,7 +65,10 @@ class MemoryAccessor implements MemoryAccessorInterface
             return null;
         }
 
-        return new MemoryAccessorFetchResult($this->memory[$address]);
+        // Determine stored size: GPRs (addresses 0-7) are stored as 32-bit
+        $storedSize = ($address >= 0 && $address <= 7) ? 32 : 16;
+
+        return new MemoryAccessorFetchResult($this->memory[$address], $storedSize);
     }
 
     public function write16Bit(int|RegisterType $registerType, int|null $value): self
@@ -72,10 +78,22 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function writeBySize(int|RegisterType $registerType, int|null $value, int $size = 64): self
     {
-        if ($registerType instanceof RegisterType && $size === 16 && $this->isGeneralPurposeRegister($registerType)) {
-            // Preserve upper bits of 32-bit GPRs when writing a 16-bit value.
-            $current = $this->fetch($registerType)->asBytesBySize(32);
+        $address = $this->asAddress($registerType);
+        $isGpr = $this->isGprAddress($address);
+
+        // For GPRs, always store as 32-bit internally to preserve upper bits when writing 16-bit values
+        if ($isGpr && $size === 16) {
+            // Read current 32-bit value (raw, not encoded)
+            $currentRaw = $this->memory[$address] ?? 0;
+            // Decode current value from little-endian 32-bit
+            $current = BinaryInteger::asLittleEndian($currentRaw, 32);
+            // Preserve upper 16 bits, replace lower 16 bits
             $value = ($current & 0xFFFF0000) | ($value & 0xFFFF);
+            $size = 32;
+        }
+
+        // GPRs are always stored as 32-bit
+        if ($isGpr && $size < 32) {
             $size = 32;
         }
 
@@ -99,9 +117,16 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function writeToHighBit(int|RegisterType $registerType, int|null $value): self
     {
+        $address = $this->asAddress($registerType);
+        $isGpr = $this->isGprAddress($address);
+
+        // Read current value, update high byte (bits 8-15), preserve the rest
+        $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
+        $newValue = ($current & ~0xFF00) | (($value & 0xFF) << 8);
+
         [$address, $previousValue] = $this->processWrite(
             $registerType,
-            (($this->fetch($registerType)->asLowBit() << 8) & 0b11111111_00000000) + ($value & 0b11111111),
+            BinaryInteger::asLittleEndian($newValue, $isGpr ? 32 : 16),
         );
 
         $this->postProcessWhenWrote(
@@ -115,9 +140,16 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function writeToLowBit(int|RegisterType $registerType, int|null $value): self
     {
+        $address = $this->asAddress($registerType);
+        $isGpr = $this->isGprAddress($address);
+
+        // Read current value, update low byte (bits 0-7), preserve the rest
+        $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
+        $newValue = ($current & ~0xFF) | ($value & 0xFF);
+
         [$address, $previousValue] = $this->processWrite(
             $registerType,
-            (($value & 0b11111111) << 8) + ($this->fetch($registerType)->asHighBit() & 0b11111111),
+            BinaryInteger::asLittleEndian($newValue, $isGpr ? 32 : 16),
         );
 
         $this->postProcessWhenWrote(
@@ -482,16 +514,16 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $ssSelector = $this->fetch(RegisterType::SS)->asByte();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $linearMask = $this->runtime->runtimeOption()->context()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
 
-        if ($this->runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($this->runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->segmentDescriptor($ssSelector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0C, $ssSelector, 'Stack segment not present');
             }
 
             // SS must be writable data, and DPL == CPL == RPL.
-            $cpl = $this->runtime->runtimeOption()->context()->cpl();
+            $cpl = $this->runtime->context()->cpu()->cpl();
             $rpl = $ssSelector & 0x3;
             $dpl = $descriptor['dpl'] ?? 0;
             $isWritable = ($descriptor['type'] & 0x2) !== 0;
@@ -526,19 +558,25 @@ class MemoryAccessor implements MemoryAccessorInterface
         ], true);
     }
 
+    private function isGprAddress(int $address): bool
+    {
+        // GPR addresses are 0-7 (EAX=0, ECX=1, EDX=2, EBX=3, ESP=4, EBP=5, ESI=6, EDI=7)
+        return $address >= 0 && $address <= 7;
+    }
+
     private function translateLinear(int $linear, bool $isWrite = false): int
     {
-        $mask = $this->runtime->runtimeOption()->context()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $mask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
         $linear &= $mask;
 
-        if (!$this->runtime->runtimeOption()->context()->isPagingEnabled()) {
+        if (!$this->runtime->context()->cpu()->isPagingEnabled()) {
             return $linear;
         }
 
         $cr4 = $this->readControlRegister(4);
         $pse = ($cr4 & (1 << 4)) !== 0;
         $pae = ($cr4 & (1 << 5)) !== 0;
-        $user = $this->runtime->runtimeOption()->context()->cpl() === 3;
+        $user = $this->runtime->context()->cpu()->cpl() === 3;
 
         if ($pae) {
             $cr3 = $this->readControlRegister(3) & 0xFFFFF000;
@@ -769,14 +807,14 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $ti = ($selector >> 2) & 0x1;
         if ($ti === 1) {
-            $ldtr = $this->runtime->runtimeOption()->context()->ldtr();
+            $ldtr = $this->runtime->context()->cpu()->ldtr();
             $base = $ldtr['base'] ?? 0;
             $limit = $ldtr['limit'] ?? 0;
             if (($ldtr['selector'] ?? 0) === 0) {
                 return null;
             }
         } else {
-            $gdtr = $this->runtime->runtimeOption()->context()->gdtr();
+            $gdtr = $this->runtime->context()->cpu()->gdtr();
             $base = $gdtr['base'] ?? 0;
             $limit = $gdtr['limit'] ?? 0;
         }

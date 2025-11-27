@@ -23,7 +23,7 @@ class XorRegRm implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x30, 0x32], true);
-        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
         $destIsRm = in_array($opcode, [0x30, 0x31], true);
 
         $src = $isByte

@@ -3,6 +3,8 @@ declare(strict_types=1);
 namespace PHPMachineEmulator;
 
 use Monolog\Logger;
+use PHPMachineEmulator\Display\Writer\ScreenWriterFactoryInterface;
+use PHPMachineEmulator\Display\Writer\WindowScreenWriterFactory;
 use PHPMachineEmulator\IO\IO;
 use PHPMachineEmulator\IO\IOInterface;
 use PHPMachineEmulator\Runtime\Runtime;
@@ -16,6 +18,7 @@ class Option implements OptionInterface
         protected string $runtimeClass = Runtime::class,
         protected bool $shouldChangeOffset = true,
         protected bool $showHeader = false,
+        protected ScreenWriterFactoryInterface $screenWriterFactory = new WindowScreenWriterFactory(),
     ) {
     }
 
@@ -42,5 +45,10 @@ class Option implements OptionInterface
     public function shouldShowHeader(): bool
     {
         return $this->showHeader;
+    }
+
+    public function screenWriterFactory(): ScreenWriterFactoryInterface
+    {
+        return $this->screenWriterFactory;
     }
 }

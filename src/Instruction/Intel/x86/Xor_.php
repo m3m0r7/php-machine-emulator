@@ -34,8 +34,8 @@ class Xor_ implements InstructionInterface
         $runtime
             ->memoryAccessor()
             ->write16Bit(
-                $register,
-                $runtime->memoryAccessor()->fetch($register)->asByte() ^ $runtime->memoryAccessor()->fetch($registerOrMemory)->asByte(),
+                $registerOrMemory,
+                $runtime->memoryAccessor()->fetch($registerOrMemory)->asByte() ^ $runtime->memoryAccessor()->fetch($register)->asByte(),
             );
 
         return ExecutionStatus::SUCCESS;

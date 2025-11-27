@@ -19,7 +19,7 @@ class Pushf implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $flags =
             ($runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0) |
             0x2 |
@@ -30,9 +30,9 @@ class Pushf implements InstructionInterface
             ($runtime->memoryAccessor()->shouldDirectionFlag() ? (1 << 10) : 0) |
             ($runtime->memoryAccessor()->shouldOverflowFlag() ? (1 << 11) : 0);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
-            $flags |= ($runtime->runtimeOption()->context()->iopl() & 0x3) << 12;
-            if ($runtime->runtimeOption()->context()->nt()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
+            $flags |= ($runtime->context()->cpu()->iopl() & 0x3) << 12;
+            if ($runtime->context()->cpu()->nt()) {
                 $flags |= (1 << 14);
             }
         }

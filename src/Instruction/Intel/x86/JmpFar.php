@@ -21,12 +21,12 @@ class JmpFar implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $reader = new EnhanceStreamReader($runtime->streamReader());
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $offset = $opSize === 32 ? $reader->dword() : $reader->short();
         $segment = $reader->short();
 
         if ($runtime->option()->shouldChangeOffset()) {
-            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            if ($runtime->context()->cpu()->isProtectedMode()) {
                 $gate = $this->readCallGateDescriptor($runtime, $segment);
                 if ($gate !== null) {
                     $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();

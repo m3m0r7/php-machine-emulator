@@ -22,7 +22,7 @@ class MovRm16 implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $value = $this->readRm($runtime, $enhancedStreamReader, $modRegRM, $size);
 
         $runtime

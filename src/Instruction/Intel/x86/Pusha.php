@@ -20,7 +20,7 @@ class Pusha implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
 
         $ax = $ma->fetch(RegisterType::EAX)->asBytesBySize($size);
         $cx = $ma->fetch(RegisterType::ECX)->asBytesBySize($size);

@@ -28,7 +28,7 @@ class Group3 implements InstructionInterface
             ->byteAsModRegRM();
 
         $isByte = $opcode === 0xF6;
-        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
 
         match ($modRegRM->digit()) {
             0x0 => $this->test($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),

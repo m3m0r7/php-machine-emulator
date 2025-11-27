@@ -35,7 +35,7 @@ class Int_ implements InstructionInterface
      */
     public function raise(RuntimeInterface $runtime, int $vector, int $returnIp, ?int $errorCode = null): void
     {
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $this->protectedModeInterrupt($runtime, $vector, $returnIp, $errorCode, false);
             return;
         }
@@ -45,12 +45,12 @@ class Int_ implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $operand = BIOSInterrupt::from(
-            $runtime
-                ->streamReader()
-                ->byte()
-        );
+        $vector = $runtime
+            ->streamReader()
+            ->byte();
         $returnIp = $runtime->streamReader()->offset();
+
+        $operand = BIOSInterrupt::tryFrom($vector);
 
         match ($operand) {
             BIOSInterrupt::VIDEO_INTERRUPT => ($this->interruptInstances[Video::class] ??= new Video($runtime))
@@ -61,7 +61,7 @@ class Int_ implements InstructionInterface
                 ->process($runtime),
             BIOSInterrupt::SYSTEM_INTERRUPT => ($this->interruptInstances[System::class] ??= new System())->process($runtime),
             BIOSInterrupt::DOS_INTERRUPT => ($this->interruptInstances[Dos::class] ??= new Dos($this->instructionList))->process($runtime, $opcode),
-            default => $this->vectorInterrupt($runtime, $operand->value, $returnIp),
+            default => $this->vectorInterrupt($runtime, $vector, $returnIp),
         };
 
         return ExecutionStatus::SUCCESS;
@@ -73,7 +73,7 @@ class Int_ implements InstructionInterface
     private function vectorInterrupt(RuntimeInterface $runtime, int $vector, int $returnIp): void
     {
         // Nesting guard: allow re-entry but cap to avoid runaway.
-        $key = $runtime->runtimeOption()->context()->isProtectedMode() ? 'pm' : 'rm';
+        $key = $runtime->context()->cpu()->isProtectedMode() ? 'pm' : 'rm';
         $this->nestedCount[$key] = ($this->nestedCount[$key] ?? 0) + 1;
         if ($this->nestedCount[$key] > 8) {
             $this->nestedCount[$key]--;
@@ -81,7 +81,7 @@ class Int_ implements InstructionInterface
         }
 
         // Protected mode: try IDT lookup
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $this->protectedModeInterrupt($runtime, $vector, $returnIp, null, true);
             $this->nestedCount[$key]--;
             return;
@@ -138,7 +138,7 @@ class Int_ implements InstructionInterface
             $this->nestedCount[$key]--;
             return;
         }
-        $idtr = $runtime->runtimeOption()->context()->idtr();
+        $idtr = $runtime->context()->cpu()->idtr();
         $base = $idtr['base'] ?? 0;
         $limit = $idtr['limit'] ?? 0;
         $entryOffset = $vector * 8;
@@ -170,7 +170,7 @@ class Int_ implements InstructionInterface
         }
 
         $gateDpl = ($typeAttr >> 13) & 0x3;
-        if ($isSoftware && $runtime->runtimeOption()->context()->cpl() > $gateDpl) {
+        if ($isSoftware && $runtime->context()->cpu()->cpl() > $gateDpl) {
             throw new FaultException(0x0D, $selector, sprintf('INT %02X DPL check failed', $vector));
         }
 
@@ -193,8 +193,8 @@ class Int_ implements InstructionInterface
             throw new FaultException(0x0D, $selector, sprintf('IDT target selector 0x%04X is not executable', $selector));
         }
 
-        $operandSize = $runtime->runtimeOption()->context()->operandSize();
-        $currentCpl = $runtime->runtimeOption()->context()->cpl();
+        $operandSize = $runtime->context()->cpu()->operandSize();
+        $currentCpl = $runtime->context()->cpu()->cpl();
         $targetCpl = $targetDesc['dpl'];
         $privilegeChange = $targetCpl < $currentCpl;
 
@@ -203,7 +203,7 @@ class Int_ implements InstructionInterface
         $mask = $operandSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
         if ($privilegeChange) {
-            $tss = $runtime->runtimeOption()->context()->taskRegister();
+            $tss = $runtime->context()->cpu()->taskRegister();
             $tssSelector = $tss['selector'] ?? 0;
             $tssBase = $tss['base'] ?? 0;
             $tssLimit = $tss['limit'] ?? 0;
@@ -220,8 +220,8 @@ class Int_ implements InstructionInterface
             }
 
             // Use target privilege for paging checks
-            $runtime->runtimeOption()->context()->setCpl($targetCpl);
-            $runtime->runtimeOption()->context()->setUserMode($targetCpl === 3);
+            $runtime->context()->cpu()->setCpl($targetCpl);
+            $runtime->context()->cpu()->setUserMode($targetCpl === 3);
 
             $newEsp = $this->readMemory32($runtime, $tssBase + $espOffset);
             $newSs = $this->readMemory16($runtime, $tssBase + $ssOffset);

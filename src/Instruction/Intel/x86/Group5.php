@@ -39,7 +39,7 @@ class Group5 implements InstructionInterface
 
     protected function inc(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $value = $this->readRm($runtime, $reader, $modRegRM, $size);
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value + 1) & $mask;
@@ -51,7 +51,7 @@ class Group5 implements InstructionInterface
 
     protected function dec(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $value = $this->readRm($runtime, $reader, $modRegRM, $size);
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value - 1) & $mask;
@@ -62,11 +62,11 @@ class Group5 implements InstructionInterface
 
     protected function callNearRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $target = $this->readRm($runtime, $reader, $modRegRM, $size);
         $pos = $runtime->streamReader()->offset();
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $pos, $runtime->runtimeOption()->context()->operandSize());
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $pos, $runtime->context()->cpu()->operandSize());
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime->streamReader()->setOffset($target);
@@ -77,7 +77,7 @@ class Group5 implements InstructionInterface
 
     protected function jmpNearRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $target = $this->readRm($runtime, $reader, $modRegRM, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {
@@ -90,18 +90,18 @@ class Group5 implements InstructionInterface
     protected function callFarRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $addr = $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
         $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
 
         $pos = $runtime->streamReader()->offset();
 
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
 
         $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
         $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $pos, $size);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $gate = $this->readCallGateDescriptor($runtime, $segment);
             if ($gate !== null) {
                 $this->callThroughGate($runtime, $gate, $returnOffset, $currentCs, $size);
@@ -114,7 +114,7 @@ class Group5 implements InstructionInterface
         $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $returnOffset, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {
-            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            if ($runtime->context()->cpu()->isProtectedMode()) {
                 $descriptor = $this->resolveCodeDescriptor($runtime, $segment);
                 $newCpl = $this->computeCplForTransfer($runtime, $segment, $descriptor);
                 $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
@@ -133,12 +133,12 @@ class Group5 implements InstructionInterface
     protected function jmpFarRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $addr = $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
         $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
 
         if ($runtime->option()->shouldChangeOffset()) {
-            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            if ($runtime->context()->cpu()->isProtectedMode()) {
                 $gate = $this->readCallGateDescriptor($runtime, $segment);
                 if ($gate !== null) {
                     $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
@@ -163,7 +163,7 @@ class Group5 implements InstructionInterface
 
     protected function push(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $value = $this->readRm($runtime, $reader, $modRegRM, $size);
         $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $value, $size);
         return ExecutionStatus::SUCCESS;

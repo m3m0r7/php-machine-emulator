@@ -22,7 +22,7 @@ class OperandSizePrefix implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         // Flag the runtime context for this instruction to prefer 32-bit operands.
-        $runtime->runtimeOption()->context()->setOperandSizeOverride(true);
+        $runtime->context()->cpu()->setOperandSizeOverride(true);
         $nextOpcode = $runtime->streamReader()->byte();
         return $runtime->execute($nextOpcode);
     }

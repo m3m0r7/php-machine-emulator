@@ -20,7 +20,7 @@ class Popf implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $flags = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
         $ma->setCarryFlag(($flags & 0x1) !== 0);
@@ -30,9 +30,9 @@ class Popf implements InstructionInterface
         $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
         $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
-            $cpl = $runtime->runtimeOption()->context()->cpl();
-            $iopl = $runtime->runtimeOption()->context()->iopl();
+        if ($runtime->context()->cpu()->isProtectedMode()) {
+            $cpl = $runtime->context()->cpu()->cpl();
+            $iopl = $runtime->context()->cpu()->iopl();
 
             // IF change allowed only if CPL <= IOPL; otherwise preserve current IF.
             $newIf = ($flags & (1 << 9)) !== 0;
@@ -42,12 +42,12 @@ class Popf implements InstructionInterface
 
             // IOPL change only at CPL==0.
             if ($cpl === 0) {
-                $runtime->runtimeOption()->context()->setIopl(($flags >> 12) & 0x3);
+                $runtime->context()->cpu()->setIopl(($flags >> 12) & 0x3);
             }
 
             // NT change allowed only at CPL==0, otherwise preserve.
             if ($cpl === 0) {
-                $runtime->runtimeOption()->context()->setNt(($flags & (1 << 14)) !== 0);
+                $runtime->context()->cpu()->setNt(($flags & (1 << 14)) !== 0);
             }
         } else {
             $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);

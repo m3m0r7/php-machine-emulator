@@ -22,7 +22,7 @@ class MovImmToRm implements InstructionInterface
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
 
         if ($modRegRM->registerOrOPCode() !== 0) {
             throw new ExecutionException('Invalid MOV immediate to r/m digit');

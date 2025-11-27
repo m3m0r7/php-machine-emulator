@@ -103,7 +103,7 @@ class TwoBytePrefix implements InstructionInterface
         }
         $cr = $modrm->registerOrOPCode() & 0b111;
         $val = $runtime->memoryAccessor()->readControlRegister($cr);
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($modrm->registerOrMemoryAddress(), $val, $size);
         return ExecutionStatus::SUCCESS;
     }
@@ -115,7 +115,7 @@ class TwoBytePrefix implements InstructionInterface
             throw new ExecutionException('MOV to CR requires register addressing');
         }
         $cr = $modrm->registerOrOPCode() & 0b111;
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $val = $runtime->memoryAccessor()->fetch($modrm->registerOrMemoryAddress())->asBytesBySize($size);
         if ($cr === 0) {
             $val |= 0x22; // MP + NE set so kernel assumes FPU present
@@ -124,15 +124,15 @@ class TwoBytePrefix implements InstructionInterface
 
         if ($cr === 0) {
             // update protected mode flag from CR0.PE
-            $runtime->runtimeOption()->context()->setProtectedMode((bool) ($val & 0x1));
-            $runtime->runtimeOption()->context()->setPagingEnabled((bool) ($val & 0x80000000));
+            $runtime->context()->cpu()->setProtectedMode((bool) ($val & 0x1));
+            $runtime->context()->cpu()->setPagingEnabled((bool) ($val & 0x80000000));
         }
-        if ($cr === 3 && $runtime->runtimeOption()->context()->isPagingEnabled()) {
+        if ($cr === 3 && $runtime->context()->cpu()->isPagingEnabled()) {
             // refresh paging flag; CR0 might have been set earlier
-            $runtime->runtimeOption()->context()->setPagingEnabled(true);
+            $runtime->context()->cpu()->setPagingEnabled(true);
         }
-        if ($cr === 4 && $runtime->runtimeOption()->context()->isPagingEnabled()) {
-            $runtime->runtimeOption()->context()->setPagingEnabled(true);
+        if ($cr === 4 && $runtime->context()->cpu()->isPagingEnabled()) {
+            $runtime->context()->cpu()->setPagingEnabled(true);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -249,7 +249,7 @@ class TwoBytePrefix implements InstructionInterface
     {
         $modrm = $reader->byteAsModRegRM();
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
-        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : (($opSize === 16) ? 0xFFFF : 0xFF);
 
         $acc = $isByte
@@ -284,7 +284,7 @@ class TwoBytePrefix implements InstructionInterface
     {
         $modrm = $reader->byteAsModRegRM();
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
-        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : (($opSize === 16) ? 0xFFFF : 0xFF);
 
         $dest = $isByte ? $this->readRm8($runtime, $reader, $modrm) : $this->readRm($runtime, $reader, $modrm, $opSize);
@@ -313,7 +313,7 @@ class TwoBytePrefix implements InstructionInterface
     private function bswap(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $reg = $opcode & 0x7;
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         if ($opSize !== 32) {
             return ExecutionStatus::SUCCESS;
         }
@@ -349,7 +349,7 @@ class TwoBytePrefix implements InstructionInterface
     private function shld(RuntimeInterface $runtime, EnhanceStreamReader $reader, bool $imm): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $count = $imm ? ($reader->streamReader()->byte() & 0x1F) : ($runtime->memoryAccessor()->fetch(RegisterType::ECX)->asLowBit() & 0x1F);
         if ($count === 0) {
@@ -377,7 +377,7 @@ class TwoBytePrefix implements InstructionInterface
     private function shrd(RuntimeInterface $runtime, EnhanceStreamReader $reader, bool $imm): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $count = $imm ? ($reader->streamReader()->byte() & 0x1F) : ($runtime->memoryAccessor()->fetch(RegisterType::ECX)->asLowBit() & 0x1F);
         if ($count === 0) {
@@ -405,7 +405,7 @@ class TwoBytePrefix implements InstructionInterface
 
     private function rdmsr(RuntimeInterface $runtime): ExecutionStatus
     {
-        if ($runtime->runtimeOption()->context()->cpl() !== 0) {
+        if ($runtime->context()->cpu()->cpl() !== 0) {
             throw new FaultException(0x0D, 0, 'RDMSR privilege check failed');
         }
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
@@ -414,7 +414,7 @@ class TwoBytePrefix implements InstructionInterface
         if ($ecx === 0x10) { // TSC MSR
             $value = ((int) (microtime(true) * 1_000_000)) & 0xFFFFFFFFFFFFFFFF;
         } elseif ($ecx === 0x1B) { // APIC_BASE
-            $value = $runtime->runtimeOption()->context()->apicState()->readMsrApicBase();
+            $value = $runtime->context()->cpu()->apicState()->readMsrApicBase();
         } elseif ($ecx === 0xC0000080) { // EFER
             $value = $runtime->memoryAccessor()->readEfer();
         } elseif (in_array($ecx, [0x174, 0x175, 0x176], true)) { // SYSENTER_CS/ESP/EIP
@@ -427,7 +427,7 @@ class TwoBytePrefix implements InstructionInterface
 
     private function wrmsr(RuntimeInterface $runtime): ExecutionStatus
     {
-        if ($runtime->runtimeOption()->context()->cpl() !== 0) {
+        if ($runtime->context()->cpu()->cpl() !== 0) {
             throw new FaultException(0x0D, 0, 'WRMSR privilege check failed');
         }
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
@@ -438,7 +438,7 @@ class TwoBytePrefix implements InstructionInterface
         self::$msr[$ecx] = $value & 0xFFFFFFFFFFFFFFFF;
         if ($ecx === 0x1B) { // APIC_BASE
             $enable = ($value & (1 << 11)) !== 0;
-            $runtime->runtimeOption()->context()->apicState()->setApicBase($value & 0xFFFFF000, $enable);
+            $runtime->context()->cpu()->apicState()->setApicBase($value & 0xFFFFF000, $enable);
         } elseif ($ecx === 0xC0000080) { // EFER
             // Allow NXE (bit 11) and PAT/other flags to be stored.
             $runtime->memoryAccessor()->writeEfer($value);
@@ -450,7 +450,7 @@ class TwoBytePrefix implements InstructionInterface
 
     private function sysenter(RuntimeInterface $runtime): ExecutionStatus
     {
-        if ($runtime->runtimeOption()->context()->cpl() > 0) {
+        if ($runtime->context()->cpu()->cpl() > 0) {
             throw new FaultException(0x0D, 0, 'SYSENTER CPL check failed');
         }
         $cs = self::$msr[0x174] ?? 0;
@@ -464,8 +464,8 @@ class TwoBytePrefix implements InstructionInterface
         $ma->write16Bit(RegisterType::CS, $cs & 0xFFFF);
         $ma->write16Bit(RegisterType::SS, $ss);
         $ma->writeBySize(RegisterType::ESP, $esp & 0xFFFFFFFF, 32);
-        $runtime->runtimeOption()->context()->setCpl(0);
-        $runtime->runtimeOption()->context()->setUserMode(false);
+        $runtime->context()->cpu()->setCpl(0);
+        $runtime->context()->cpu()->setUserMode(false);
         $target = $this->linearCodeAddress($runtime, $cs, $eip & 0xFFFFFFFF, 32);
         $runtime->streamReader()->setOffset($target);
         return ExecutionStatus::SUCCESS;
@@ -473,7 +473,7 @@ class TwoBytePrefix implements InstructionInterface
 
     private function sysexit(RuntimeInterface $runtime): ExecutionStatus
     {
-        if ($runtime->runtimeOption()->context()->cpl() !== 0) {
+        if ($runtime->context()->cpu()->cpl() !== 0) {
             throw new FaultException(0x0D, 0, 'SYSEXIT CPL check failed');
         }
         $csBase = self::$msr[0x174] ?? 0;
@@ -485,8 +485,8 @@ class TwoBytePrefix implements InstructionInterface
         $ma->write16Bit(RegisterType::CS, $cs);
         $ma->write16Bit(RegisterType::SS, $ss);
         $ma->writeBySize(RegisterType::ESP, $esp & 0xFFFFFFFF, 32);
-        $runtime->runtimeOption()->context()->setCpl(3);
-        $runtime->runtimeOption()->context()->setUserMode(true);
+        $runtime->context()->cpu()->setCpl(3);
+        $runtime->context()->cpu()->setUserMode(true);
         $target = $this->linearCodeAddress($runtime, $cs, $eip & 0xFFFFFFFF, 32);
         $runtime->streamReader()->setOffset($target);
         return ExecutionStatus::SUCCESS;
@@ -529,7 +529,7 @@ class TwoBytePrefix implements InstructionInterface
     private function movzx(RuntimeInterface $runtime, EnhanceStreamReader $reader, bool $isByte): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $value = $isByte
             ? $this->readRm8($runtime, $reader, $modrm)
             : $this->readRm16($runtime, $reader, $modrm);
@@ -541,7 +541,7 @@ class TwoBytePrefix implements InstructionInterface
     private function imulRegRm(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $src = $this->readRm($runtime, $reader, $modrm, $opSize);
         $dst = $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), $opSize);
 
@@ -562,7 +562,7 @@ class TwoBytePrefix implements InstructionInterface
     private function bsf(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $src = $this->readRm($runtime, $reader, $modrm, $opSize);
         if ($src === 0) {
             $runtime->memoryAccessor()->setZeroFlag(true);
@@ -580,7 +580,7 @@ class TwoBytePrefix implements InstructionInterface
     private function bsr(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $src = $this->readRm($runtime, $reader, $modrm, $opSize);
         if ($src === 0) {
             $runtime->memoryAccessor()->setZeroFlag(true);
@@ -598,7 +598,7 @@ class TwoBytePrefix implements InstructionInterface
     private function cmovcc(RuntimeInterface $runtime, EnhanceStreamReader $reader, int $opcode): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $cc = $opcode & 0x0F;
 
         if (!$this->conditionMet($runtime, $cc)) {
@@ -632,7 +632,7 @@ class TwoBytePrefix implements InstructionInterface
     private function bitOp(RuntimeInterface $runtime, EnhanceStreamReader $reader, ?string $op, bool $immediate, ?int $forcedBit = null): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $maskBits = $opSize === 32 ? 0x1F : 0x0F;
 
         if ($immediate) {
@@ -701,7 +701,7 @@ class TwoBytePrefix implements InstructionInterface
     private function jccNear(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $cc = $opcode & 0x0F;
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $disp = $opSize === 32
             ? $runtime->streamReader()->dword()
             : $runtime->streamReader()->short();
@@ -820,7 +820,7 @@ class TwoBytePrefix implements InstructionInterface
 
     private function pushFsGs(RuntimeInterface $runtime, RegisterType $seg): ExecutionStatus
     {
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $val = $runtime->memoryAccessor()->fetch($seg)->asByte() & 0xFFFF;
         $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $val, $opSize);
         return ExecutionStatus::SUCCESS;
@@ -828,7 +828,7 @@ class TwoBytePrefix implements InstructionInterface
 
     private function popFsGs(RuntimeInterface $runtime, RegisterType $seg): ExecutionStatus
     {
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $val = $runtime->memoryAccessor()->enableUpdateFlags(false)->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize) & 0xFFFF;
         $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($seg, $val);
         return ExecutionStatus::SUCCESS;
@@ -948,7 +948,7 @@ class TwoBytePrefix implements InstructionInterface
         $limit = $this->readMemory16($runtime, $address);
         $base = $this->readMemory16($runtime, $address + 2);
         $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
-        $runtime->runtimeOption()->context()->setGdtr($base, $limit);
+        $runtime->context()->cpu()->setGdtr($base, $limit);
         return ExecutionStatus::SUCCESS;
     }
 
@@ -958,14 +958,14 @@ class TwoBytePrefix implements InstructionInterface
         $limit = $this->readMemory16($runtime, $address);
         $base = $this->readMemory16($runtime, $address + 2);
         $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
-        $runtime->runtimeOption()->context()->setIdtr($base, $limit);
+        $runtime->context()->cpu()->setIdtr($base, $limit);
         return ExecutionStatus::SUCCESS;
     }
 
     private function sgdt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $reader, $modrm);
-        $gdtr = $runtime->runtimeOption()->context()->gdtr();
+        $gdtr = $runtime->context()->cpu()->gdtr();
         $this->writeMemory16($runtime, $address, $gdtr['limit'] ?? 0);
         $base = $gdtr['base'] ?? 0;
         $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
@@ -976,7 +976,7 @@ class TwoBytePrefix implements InstructionInterface
     private function sidt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $reader, $modrm);
-        $idtr = $runtime->runtimeOption()->context()->idtr();
+        $idtr = $runtime->context()->cpu()->idtr();
         $this->writeMemory16($runtime, $address, $idtr['limit'] ?? 0);
         $base = $idtr['base'] ?? 0;
         $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
@@ -991,8 +991,8 @@ class TwoBytePrefix implements InstructionInterface
         $cr0 = $runtime->memoryAccessor()->readControlRegister(0);
         $cr0 = ($cr0 & 0xFFFFFFF0) | ($value & 0xF);
         $runtime->memoryAccessor()->writeControlRegister(0, $cr0);
-        $runtime->runtimeOption()->context()->setProtectedMode((bool) ($cr0 & 0x1));
-        $runtime->runtimeOption()->context()->setPagingEnabled((bool) ($cr0 & 0x80000000));
+        $runtime->context()->cpu()->setProtectedMode((bool) ($cr0 & 0x1));
+        $runtime->context()->cpu()->setPagingEnabled((bool) ($cr0 & 0x80000000));
         return ExecutionStatus::SUCCESS;
     }
 
@@ -1006,7 +1006,7 @@ class TwoBytePrefix implements InstructionInterface
     private function ltr(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
     {
         $selector = $this->readRm16($runtime, $reader, $modrm);
-        if (!$runtime->runtimeOption()->context()->isProtectedMode()) {
+        if (!$runtime->context()->cpu()->isProtectedMode()) {
             return ExecutionStatus::SUCCESS;
         }
 
@@ -1024,11 +1024,11 @@ class TwoBytePrefix implements InstructionInterface
             throw new FaultException(0x0D, $selector, sprintf('Selector 0x%04X is not a TSS', $selector));
         }
 
-        $runtime->runtimeOption()->context()->setTaskRegister($selector, $descriptor['base'], $descriptor['limit']);
+        $runtime->context()->cpu()->setTaskRegister($selector, $descriptor['base'], $descriptor['limit']);
 
         // Mark TSS busy when loading if descriptor is "available".
         if ($type === 0x1 || $type === 0x9) {
-            $gdtr = $runtime->runtimeOption()->context()->gdtr();
+            $gdtr = $runtime->context()->cpu()->gdtr();
             $base = $gdtr['base'] ?? 0;
             $index = ($selector >> 3) & 0x1FFF;
             $descAddr = $base + ($index * 8);
@@ -1048,7 +1048,7 @@ class TwoBytePrefix implements InstructionInterface
     {
         $selector = $this->readRm16($runtime, $reader, $modrm);
 
-        if (!$runtime->runtimeOption()->context()->isProtectedMode()) {
+        if (!$runtime->context()->cpu()->isProtectedMode()) {
             return ExecutionStatus::SUCCESS;
         }
 
@@ -1058,7 +1058,7 @@ class TwoBytePrefix implements InstructionInterface
 
         if (($selector & 0xFFFC) === 0) {
             // Null selector disables LDTR.
-            $runtime->runtimeOption()->context()->setLdtr(0, 0, 0);
+            $runtime->context()->cpu()->setLdtr(0, 0, 0);
             return ExecutionStatus::SUCCESS;
         }
 
@@ -1073,20 +1073,20 @@ class TwoBytePrefix implements InstructionInterface
             throw new FaultException(0x0D, $selector, sprintf('Selector 0x%04X is not an LDT descriptor', $selector));
         }
 
-        $runtime->runtimeOption()->context()->setLdtr($selector, $descriptor['base'], $descriptor['limit']);
+        $runtime->context()->cpu()->setLdtr($selector, $descriptor['base'], $descriptor['limit']);
         return ExecutionStatus::SUCCESS;
     }
 
     private function sldt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $selector = $runtime->runtimeOption()->context()->ldtr()['selector'] ?? 0;
+        $selector = $runtime->context()->cpu()->ldtr()['selector'] ?? 0;
         $this->writeRm16($runtime, $reader, $modrm, $selector);
         return ExecutionStatus::SUCCESS;
     }
 
     private function str(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $selector = $runtime->runtimeOption()->context()->taskRegister()['selector'] ?? 0;
+        $selector = $runtime->context()->cpu()->taskRegister()['selector'] ?? 0;
         $this->writeRm16($runtime, $reader, $modrm, $selector);
         return ExecutionStatus::SUCCESS;
     }

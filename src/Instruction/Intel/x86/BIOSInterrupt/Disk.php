@@ -71,7 +71,7 @@ class Disk implements InterruptInterface
             return;
         }
 
-        $addressSize = $runtime->runtimeOption()->context()->addressSize();
+        $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
         $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize($addressSize) & $offsetMask;
@@ -148,7 +148,7 @@ class Disk implements InterruptInterface
 
     private function readSectorsLBA(RuntimeInterface $runtime): void
     {
-        $addressSize = $runtime->runtimeOption()->context()->addressSize();
+        $addressSize = $runtime->context()->cpu()->addressSize();
         $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
         $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($addressSize);
         $dapLinear = $this->segmentLinearAddress($runtime, $ds, $si, $addressSize);
@@ -202,7 +202,7 @@ class Disk implements InterruptInterface
 
     private function getDriveParametersExtended(RuntimeInterface $runtime): void
     {
-        $addressSize = $runtime->runtimeOption()->context()->addressSize();
+        $addressSize = $runtime->context()->cpu()->addressSize();
         $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
         $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($addressSize);
         $buffer = $this->segmentLinearAddress($runtime, $ds, $si, $addressSize);
@@ -242,10 +242,10 @@ class Disk implements InterruptInterface
     private function segmentLinearAddress(RuntimeInterface $runtime, int $selector, int $offset, int $addressSize): int
     {
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $linearMask = $runtime->runtimeOption()->context()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $linearMask = $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
-            $gdtr = $runtime->runtimeOption()->context()->gdtr();
+        if ($runtime->context()->cpu()->isProtectedMode()) {
+            $gdtr = $runtime->context()->cpu()->gdtr();
             $base = $gdtr['base'] ?? 0;
             $limit = $gdtr['limit'] ?? 0;
             $index = ($selector >> 3) & 0x1FFF;

@@ -187,7 +187,7 @@ class Ata
             $this->bmStatus |= 0x02 | 0x04; // error + interrupt
             $this->status = 0x41;
             $this->error = 0x04;
-            $this->runtime->runtimeOption()->context()->picState()->raiseIrq(14);
+            $this->runtime->context()->cpu()->picState()->raiseIrq(14);
             return;
         }
 
@@ -306,7 +306,7 @@ class Ata
         if ($this->irqDisabled) {
             return;
         }
-        $this->runtime->runtimeOption()->context()->picState()->raiseIrq(14);
+        $this->runtime->context()->cpu()->picState()->raiseIrq(14);
     }
 
     private function resetDevice(): void

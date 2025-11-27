@@ -28,9 +28,9 @@ class In_ implements InstructionInterface
             0xEC, 0xED => $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asByte() & 0xFFFF,
         };
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
-            $cpl = $runtime->runtimeOption()->context()->cpl();
-            $iopl = $runtime->runtimeOption()->context()->iopl();
+        if ($runtime->context()->cpu()->isProtectedMode()) {
+            $cpl = $runtime->context()->cpu()->cpl();
+            $iopl = $runtime->context()->cpu()->iopl();
             if ($cpl > $iopl) {
                 throw new FaultException(0x0D, 0, 'IN privilege check failed');
             }

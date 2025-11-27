@@ -15,9 +15,9 @@ class Cli extends Nop
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
-            $cpl = $runtime->runtimeOption()->context()->cpl();
-            $iopl = $runtime->runtimeOption()->context()->iopl();
+        if ($runtime->context()->cpu()->isProtectedMode()) {
+            $cpl = $runtime->context()->cpu()->cpl();
+            $iopl = $runtime->context()->cpu()->iopl();
             if ($cpl > $iopl) {
                 throw new \PHPMachineEmulator\Exception\FaultException(0x0D, 0, 'CLI privilege check failed');
             }
@@ -25,7 +25,7 @@ class Cli extends Nop
 
         $runtime->memoryAccessor()->setInterruptFlag(false);
         // Clear any pending STI deferral.
-        $runtime->runtimeOption()->context()->blockInterruptDelivery(0);
+        $runtime->context()->cpu()->blockInterruptDelivery(0);
         return ExecutionStatus::SUCCESS;
     }
 }

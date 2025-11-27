@@ -14,6 +14,7 @@ use PHPMachineEmulator\Video\VideoInterface;
 interface RuntimeInterface
 {
     public function runtimeOption(): RuntimeOptionInterface;
+    public function context(): RuntimeContextInterface;
     public function start(): void;
     public function addressMap(): AddressMapInterface;
     public function memoryAccessor(): MemoryAccessorInterface;

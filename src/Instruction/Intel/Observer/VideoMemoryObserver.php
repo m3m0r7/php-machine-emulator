@@ -6,7 +6,6 @@ namespace PHPMachineEmulator\Instruction\Intel\Observer;
 
 use PHPMachineEmulator\Display\Pixel\Color;
 use PHPMachineEmulator\Display\Writer\ScreenWriterInterface;
-use PHPMachineEmulator\Display\Writer\TerminalScreenWriter;
 use PHPMachineEmulator\Instruction\Intel\Service\VideoMemoryService;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\MemoryAccessorObserverInterface;
@@ -66,7 +65,10 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
 
         $width = $width === 0 ? $videoTypeInfo->width : $width;
 
-        $this->writer ??= new TerminalScreenWriter($runtime, $videoTypeInfo);
+        $this->writer ??= $runtime
+            ->option()
+            ->screenWriterFactory()
+            ->create($runtime, $videoTypeInfo);
 
         $textColor = $nextValue & 0b00001111;
         $backgroundColor = ($nextValue & 0b11110000) >> 4;

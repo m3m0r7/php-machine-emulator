@@ -23,7 +23,7 @@ class OrRegRm implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x08, 0x0A], true);
-        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
         $destIsRm = in_array($opcode, [0x08, 0x09], true);
 
         $src = $isByte

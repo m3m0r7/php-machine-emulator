@@ -29,6 +29,7 @@ class Runtime implements RuntimeInterface
     protected FrameInterface $frame;
     protected MemoryAccessorInterface $memoryAccessor;
     protected AddressMapInterface $addressMap;
+    protected RuntimeContextInterface $context;
     protected array $shutdown = [];
     protected ?RegisterType $segmentOverride = null;
     protected int $instructionCount = 0;
@@ -50,6 +51,17 @@ class Runtime implements RuntimeInterface
             $this,
             $this->architectureProvider
                 ->observers(),
+        );
+
+        // Initialize RuntimeContext with CPU and Screen contexts
+        $screenContext = new RuntimeScreenContext(
+            $this->machine->option()->screenWriterFactory(),
+            $this,
+            $this->architectureProvider->video(),
+        );
+        $this->context = new RuntimeContext(
+            $this->runtimeOption->cpuContext(),
+            $screenContext,
         );
 
         if ($this->option()->shouldShowHeader()) {
@@ -116,15 +128,15 @@ class Runtime implements RuntimeInterface
         // Minimal PIT/LAPIC tick every N instructions to simulate timer.
         if ($this->instructionCount % 10 === 0) {
             $pit = \PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit::shared();
-            $picState = $this->runtimeOption->context()->picState();
+            $picState = $this->context->cpu()->picState();
             $pit->tick(function () use ($picState) {
                 $picState->raiseIrq0();
             });
 
-            $apic = $this->runtimeOption->context()->apicState();
+            $apic = $this->context->cpu()->apicState();
             $apic->tick(null); // queue LAPIC timer deliveries when enabled
 
-            $deliveryBlocked = $this->runtimeOption->context()->consumeInterruptDeliveryBlock();
+            $deliveryBlocked = $this->context->cpu()->consumeInterruptDeliveryBlock();
 
             // Deliver any pending APIC vectors directly when allowed.
             if (!$deliveryBlocked && $apic->apicEnabled() && $this->memoryAccessor()->shouldInterruptFlag()) {
@@ -170,6 +182,11 @@ class Runtime implements RuntimeInterface
     public function runtimeOption(): RuntimeOptionInterface
     {
         return $this->runtimeOption;
+    }
+
+    public function context(): RuntimeContextInterface
+    {
+        return $this->context;
     }
 
     public function option(): OptionInterface
@@ -244,24 +261,12 @@ class Runtime implements RuntimeInterface
             throw $e;
         } catch (ExecutionException $e) {
             $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
-            try {
-                $handler = $this
-                    ->architectureProvider
-                    ->instructionList()
-                    ->getInstructionByOperationCode(0xCD);
-            } catch (\Throwable) {
-                $handler = null;
-            }
-            if ($handler instanceof X86Int) {
-                $handler->raise($this, 0x0D, $this->streamReader->offset(), 0);
-                return ExecutionStatus::SUCCESS;
-            }
             throw $e;
         } finally {
             $this->memoryAccessor
                 ->enableUpdateFlags(true);
             $this->segmentOverride = null;
-            $this->runtimeOption->context()->clearTransientOverrides();
+            $this->context->cpu()->clearTransientOverrides();
         }
     }
 

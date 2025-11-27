@@ -23,7 +23,7 @@ class TestRegRm implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = $opcode === 0x84;
-        $opSize = $isByte ? 8 : $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
 
         if ($isByte) {
             $left = $this->readRm8($runtime, $reader, $modRegRM);

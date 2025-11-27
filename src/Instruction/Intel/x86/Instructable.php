@@ -67,15 +67,15 @@ trait Instructable
     {
         $selector = $runtime->memoryAccessor()->fetch($segment)->asByte();
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Segment not present for selector 0x%04X', $selector));
             }
 
             if ($segment === RegisterType::CS) {
-                $runtime->runtimeOption()->context()->setCpl($descriptor['dpl']);
-                $runtime->runtimeOption()->context()->setUserMode($descriptor['dpl'] === 3);
+                $runtime->context()->cpu()->setCpl($descriptor['dpl']);
+                $runtime->context()->cpu()->setUserMode($descriptor['dpl'] === 3);
             }
 
             return $descriptor['base'];
@@ -86,11 +86,11 @@ trait Instructable
 
     protected function segmentOffsetAddress(RuntimeInterface $runtime, RegisterType $segment, int $offset): int
     {
-        $addressSize = $runtime->runtimeOption()->context()->addressSize();
+        $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $linearMask = $this->linearMask($runtime);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $selector = $runtime->memoryAccessor()->fetch($segment)->asByte();
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor !== null && $descriptor['present']) {
@@ -107,7 +107,7 @@ trait Instructable
 
     protected function linearMask(RuntimeInterface $runtime): int
     {
-        return $runtime->runtimeOption()->context()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        return $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
     }
 
     protected function linearCodeAddress(RuntimeInterface $runtime, int $selector, int $offset, int $opSize): int
@@ -115,7 +115,7 @@ trait Instructable
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $linearMask = $this->linearMask($runtime);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
@@ -129,7 +129,7 @@ trait Instructable
             if (!($descriptor['system'] ?? false)) {
                 $dpl = $descriptor['dpl'];
                 $rpl = $selector & 0x3;
-                $cpl = $runtime->runtimeOption()->context()->cpl();
+                $cpl = $runtime->context()->cpu()->cpl();
                 $conforming = ($descriptor['type'] & 0x4) !== 0;
                 if ($conforming) {
                     if ($cpl < $dpl) {
@@ -155,7 +155,7 @@ trait Instructable
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $linearMask = $this->linearMask($runtime);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
@@ -175,13 +175,13 @@ trait Instructable
 
     protected function readIndex(RuntimeInterface $runtime, RegisterType $register): int
     {
-        $addressSize = $runtime->runtimeOption()->context()->addressSize();
+        $addressSize = $runtime->context()->cpu()->addressSize();
         return $runtime->memoryAccessor()->fetch($register)->asBytesBySize($addressSize);
     }
 
     protected function writeIndex(RuntimeInterface $runtime, RegisterType $register, int $value): void
     {
-        $addressSize = $runtime->runtimeOption()->context()->addressSize();
+        $addressSize = $runtime->context()->cpu()->addressSize();
         $mask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value & $mask, $addressSize);
     }
@@ -224,7 +224,7 @@ trait Instructable
 
     protected function effectiveAddressInfo(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): array
     {
-        if ($runtime->runtimeOption()->context()->addressSize() === 32) {
+        if ($runtime->context()->cpu()->addressSize() === 32) {
             return $this->effectiveAddressAndSegment32($runtime, $reader, $modRegRM);
         }
 
@@ -331,7 +331,7 @@ trait Instructable
             }
         }
 
-        $mask = $runtime->runtimeOption()->context()->isProtectedMode() ? 0xFFFFFFFF : 0xFFFFF;
+        $mask = $runtime->context()->cpu()->isProtectedMode() ? 0xFFFFFFFF : 0xFFFFF;
         $offset = ($baseVal + $indexVal * $scale + $disp) & $mask;
 
         return [$offset, $defaultSegment];
@@ -465,7 +465,7 @@ trait Instructable
     {
         $ti = ($selector >> 2) & 0x1;
         if ($ti === 1) {
-            $ldtr = $runtime->runtimeOption()->context()->ldtr();
+            $ldtr = $runtime->context()->cpu()->ldtr();
             $base = $ldtr['base'] ?? 0;
             $limit = $ldtr['limit'] ?? 0;
             // If LDTR not loaded (selector 0), treat as invalid.
@@ -473,7 +473,7 @@ trait Instructable
                 return null;
             }
         } else {
-            $gdtr = $runtime->runtimeOption()->context()->gdtr();
+            $gdtr = $runtime->context()->cpu()->gdtr();
             $base = $gdtr['base'] ?? 0;
             $limit = $gdtr['limit'] ?? 0;
         }
@@ -521,14 +521,14 @@ trait Instructable
     {
         $ti = ($selector >> 2) & 0x1;
         if ($ti === 1) {
-            $ldtr = $runtime->runtimeOption()->context()->ldtr();
+            $ldtr = $runtime->context()->cpu()->ldtr();
             $base = $ldtr['base'] ?? 0;
             $limit = $ldtr['limit'] ?? 0;
             if (($ldtr['selector'] ?? 0) === 0) {
                 return null;
             }
         } else {
-            $gdtr = $runtime->runtimeOption()->context()->gdtr();
+            $gdtr = $runtime->context()->cpu()->gdtr();
             $base = $gdtr['base'] ?? 0;
             $limit = $gdtr['limit'] ?? 0;
         }
@@ -571,7 +571,7 @@ trait Instructable
 
     protected function callThroughGate(RuntimeInterface $runtime, array $gate, int $returnOffset, int $returnCs, int $opSize, bool $pushReturn = true, bool $copyParams = true): void
     {
-        $cpl = $runtime->runtimeOption()->context()->cpl();
+        $cpl = $runtime->context()->cpu()->cpl();
         $rpl = $gate['gateSelector'] & 0x3;
         if (max($cpl, $rpl) > $gate['dpl']) {
             throw new FaultException(0x0D, $gate['gateSelector'], sprintf('Call gate 0x%04X privilege check failed', $gate['gateSelector']));
@@ -613,7 +613,7 @@ trait Instructable
         }
 
         if ($privilegeChange) {
-            $tss = $runtime->runtimeOption()->context()->taskRegister();
+            $tss = $runtime->context()->cpu()->taskRegister();
             $tssSelector = $tss['selector'] ?? 0;
             $tssBase = $tss['base'] ?? 0;
             $tssLimit = $tss['limit'] ?? 0;
@@ -630,8 +630,8 @@ trait Instructable
 
             $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
             $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $opSize);
-            $runtime->runtimeOption()->context()->setCpl($newCpl);
-            $runtime->runtimeOption()->context()->setUserMode($newCpl === 3);
+            $runtime->context()->cpu()->setCpl($newCpl);
+            $runtime->context()->cpu()->setUserMode($newCpl === 3);
 
             // Copy parameters from old stack to new stack (deepest first) when requested.
             if ($copyParams) {
@@ -659,7 +659,7 @@ trait Instructable
 
     protected function taskSwitch(RuntimeInterface $runtime, int $tssSelector, bool $setBusy = true, ?int $gateSelector = null, bool $isJump = false): void
     {
-        $oldTr = $runtime->runtimeOption()->context()->taskRegister();
+        $oldTr = $runtime->context()->cpu()->taskRegister();
         $oldSelector = $oldTr['selector'] ?? 0;
         $oldBase = $oldTr['base'] ?? 0;
         $oldLimit = $oldTr['limit'] ?? 0;
@@ -716,7 +716,7 @@ trait Instructable
             $this->writeMemory16($runtime, $oldBase + $tss32['ds'], $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte());
             $this->writeMemory16($runtime, $oldBase + $tss32['fs'], $runtime->memoryAccessor()->fetch(RegisterType::FS)->asByte());
             $this->writeMemory16($runtime, $oldBase + $tss32['gs'], $runtime->memoryAccessor()->fetch(RegisterType::GS)->asByte());
-            $this->writeMemory16($runtime, $oldBase + $tss32['ldtr'], $runtime->runtimeOption()->context()->ldtr()['selector'] ?? 0);
+            $this->writeMemory16($runtime, $oldBase + $tss32['ldtr'], $runtime->context()->cpu()->ldtr()['selector'] ?? 0);
         }
 
         // Load new TSS state (basic parts).
@@ -740,13 +740,13 @@ trait Instructable
         $ma->write16Bit(RegisterType::FS, $this->readMemory16($runtime, $newBase + $tss32['fs']));
         $ma->write16Bit(RegisterType::GS, $this->readMemory16($runtime, $newBase + $tss32['gs']));
 
-        $runtime->runtimeOption()->context()->setTaskRegister($tssSelector, $newBase, $newDesc['limit']);
-        $runtime->runtimeOption()->context()->setCpl($this->readMemory16($runtime, $newBase + $tss32['cs']) & 0x3);
-        $runtime->runtimeOption()->context()->setUserMode($runtime->runtimeOption()->context()->cpl() === 3);
+        $runtime->context()->cpu()->setTaskRegister($tssSelector, $newBase, $newDesc['limit']);
+        $runtime->context()->cpu()->setCpl($this->readMemory16($runtime, $newBase + $tss32['cs']) & 0x3);
+        $runtime->context()->cpu()->setUserMode($runtime->context()->cpu()->cpl() === 3);
 
         if ($setBusy && ($type === 0x1 || $type === 0x9)) {
             // Mark new TSS busy
-            $gdtr = $runtime->runtimeOption()->context()->gdtr();
+            $gdtr = $runtime->context()->cpu()->gdtr();
             $base = $gdtr['base'] ?? 0;
             $index = ($tssSelector >> 3) & 0x1FFF;
             $descAddr = $base + ($index * 8);
@@ -759,7 +759,7 @@ trait Instructable
 
         if ($oldTssDesc !== null && ($oldTssDesc['type'] ?? 0) === 0xB) {
             // Clear busy bit of old TSS if it was busy (for task gate switches).
-            $gdtr = $runtime->runtimeOption()->context()->gdtr();
+            $gdtr = $runtime->context()->cpu()->gdtr();
             $base = $gdtr['base'] ?? 0;
             $index = ($oldSelector >> 3) & 0x1FFF;
             $descAddr = $base + ($index * 8);
@@ -790,11 +790,11 @@ trait Instructable
         $mask = $this->linearMask($runtime);
         $linear &= $mask;
 
-        if (!$runtime->runtimeOption()->context()->isPagingEnabled()) {
+        if (!$runtime->context()->cpu()->isPagingEnabled()) {
             return $linear;
         }
 
-        $user = $runtime->runtimeOption()->context()->cpl() === 3;
+        $user = $runtime->context()->cpu()->cpl() === 3;
         $cr4 = $runtime->memoryAccessor()->readControlRegister(4);
         $pse = ($cr4 & (1 << 4)) !== 0;
         $pae = ($cr4 & (1 << 5)) !== 0;
@@ -974,7 +974,7 @@ trait Instructable
 
     protected function updateCplFromSelector(RuntimeInterface $runtime, int $selector, ?int $overrideCpl = null, ?array $descriptor = null): void
     {
-        $ctx = $runtime->runtimeOption()->context();
+        $ctx = $runtime->context()->cpu();
         $normalized = $selector & 0xFFFF;
 
         if ($ctx->isProtectedMode()) {
@@ -996,7 +996,7 @@ trait Instructable
     {
         $normalized = $selector & 0xFFFF;
         $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $normalized);
-        $ctx = $runtime->runtimeOption()->context();
+        $ctx = $runtime->context()->cpu();
         if ($ctx->isProtectedMode()) {
             $descriptor ??= $this->readSegmentDescriptor($runtime, $normalized);
         }
@@ -1026,7 +1026,7 @@ trait Instructable
 
     protected function computeCplForTransfer(RuntimeInterface $runtime, int $selector, array $descriptor): int
     {
-        $cpl = $runtime->runtimeOption()->context()->cpl();
+        $cpl = $runtime->context()->cpu()->cpl();
         $rpl = $selector & 0x3;
         $dpl = $descriptor['dpl'] ?? 0;
         $conforming = ($descriptor['type'] & 0x4) !== 0;
@@ -1057,8 +1057,8 @@ trait Instructable
             ($ma->shouldInterruptFlag() ? (1 << 9) : 0) |
             ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
             ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
-        $flags |= ($runtime->runtimeOption()->context()->iopl() & 0x3) << 12;
-        if ($runtime->runtimeOption()->context()->nt()) {
+        $flags |= ($runtime->context()->cpu()->iopl() & 0x3) << 12;
+        if ($runtime->context()->cpu()->nt()) {
             $flags |= (1 << 14);
         }
         return $flags & 0xFFFFFFFF;
@@ -1074,8 +1074,8 @@ trait Instructable
         $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
         $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);
         $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);
-        $runtime->runtimeOption()->context()->setIopl(($flags >> 12) & 0x3);
-        $runtime->runtimeOption()->context()->setNt(($flags & (1 << 14)) !== 0);
+        $runtime->context()->cpu()->setIopl(($flags >> 12) & 0x3);
+        $runtime->context()->cpu()->setNt(($flags & (1 << 14)) !== 0);
     }
 
     protected function tss32Offsets(): array
@@ -1112,11 +1112,11 @@ trait Instructable
 
     protected function assertIoPermission(RuntimeInterface $runtime, int $port, int $width): void
     {
-        if (!$runtime->runtimeOption()->context()->isProtectedMode()) {
+        if (!$runtime->context()->cpu()->isProtectedMode()) {
             return;
         }
 
-        $tr = $runtime->runtimeOption()->context()->taskRegister();
+        $tr = $runtime->context()->cpu()->taskRegister();
         $trSelector = $tr['selector'] ?? 0;
         $trBase = $tr['base'] ?? 0;
         $trLimit = $tr['limit'] ?? 0;
@@ -1155,7 +1155,7 @@ trait Instructable
 
         static $ata;
         $ata ??= new Ata($runtime);
-        $ctx = $runtime->runtimeOption()->context();
+        $ctx = $runtime->context()->cpu();
         $kbd = $ctx->keyboardController();
         $cmos = $ctx->cmos();
         $picState = $ctx->picState();
@@ -1217,7 +1217,7 @@ trait Instructable
         }
 
         if ($port === 0x92) {
-            return $runtime->runtimeOption()->context()->isA20Enabled() ? 0x02 : 0x00;
+            return $runtime->context()->cpu()->isA20Enabled() ? 0x02 : 0x00;
         }
 
         if ($port === 0xCF8) {
@@ -1355,7 +1355,7 @@ trait Instructable
         $value &= $mask;
         $runtime->option()->logger()->debug(sprintf('OUT to port 0x%04X value 0x%X (%d-bit)', $port, $value, $width));
 
-        $ctx = $runtime->runtimeOption()->context();
+        $ctx = $runtime->context()->cpu();
         $picState = $ctx->picState();
         static $ata;
         $ata ??= new Ata($runtime);
@@ -1386,7 +1386,7 @@ trait Instructable
         }
 
         if ($port === 0x92) {
-            $runtime->runtimeOption()->context()->enableA20(($value & 0x02) !== 0);
+            $runtime->context()->cpu()->enableA20(($value & 0x02) !== 0);
             return;
         }
 
@@ -1616,7 +1616,7 @@ trait Instructable
 
     private function readMmio(RuntimeInterface $runtime, int $address, int $width): ?int
     {
-        $apic = $runtime->runtimeOption()->context()->apicState();
+        $apic = $runtime->context()->cpu()->apicState();
         if ($address >= 0xFEE00000 && $address < 0xFEE01000) {
             $offset = $address - 0xFEE00000;
             return $apic->readLapic($offset, $width);
@@ -1637,7 +1637,7 @@ trait Instructable
 
     private function writeMmio(RuntimeInterface $runtime, int $address, int $value, int $width): bool
     {
-        $apic = $runtime?->runtimeOption()->context()->apicState() ?? null;
+        $apic = $runtime?->context()->cpu()->apicState() ?? null;
         if ($apic === null) {
             return false;
         }

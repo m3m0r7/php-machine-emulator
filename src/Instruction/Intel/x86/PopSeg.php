@@ -29,7 +29,7 @@ class PopSeg implements InstructionInterface
             0x1F => RegisterType::DS,
         };
 
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
 
         $value = $runtime->memoryAccessor()->enableUpdateFlags(false)->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($seg, $value);

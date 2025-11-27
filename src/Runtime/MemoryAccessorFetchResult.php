@@ -8,8 +8,10 @@ use PHPMachineEmulator\Util\BinaryInteger;
 
 class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
 {
-    public function __construct(protected int|null $value)
-    {
+    public function __construct(
+        protected int|null $value,
+        protected int $storedSizeValue = 16,
+    ) {
     }
 
     public function asChar(): string
@@ -46,24 +48,41 @@ class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
         if ($this->value === null) {
             return 0;
         }
-        return BinaryInteger::asLittleEndian(
-            $this->value,
-            $size,
-        );
+
+        // For GPRs (storedSize=32), decode from 32-bit format then mask
+        // For non-GPRs (storedSize=16), use the requested size for decoding (legacy behavior)
+        $decodeSize = $this->storedSizeValue === 32 ? 32 : $size;
+        $decoded = BinaryInteger::asLittleEndian($this->value, $decodeSize);
+
+        return match ($size) {
+            8 => $decoded & 0xFF,
+            16 => $decoded & 0xFFFF,
+            32 => $decoded & 0xFFFFFFFF,
+            default => $decoded & ((1 << $size) - 1),
+        };
     }
 
     public function asLowBit(): int
     {
-        return ($this->value >> 8) & 0b11111111;
+        // Decode first, then get low byte
+        $decoded = BinaryInteger::asLittleEndian($this->value ?? 0, $this->storedSizeValue);
+        return $decoded & 0xFF;
     }
 
     public function asHighBit(): int
     {
-        return $this->value & 0b11111111;
+        // Decode first, then get high byte (bits 8-15)
+        $decoded = BinaryInteger::asLittleEndian($this->value ?? 0, $this->storedSizeValue);
+        return ($decoded >> 8) & 0xFF;
     }
 
     public function valueOf(): int|null
     {
         return $this->value;
+    }
+
+    public function storedSize(): int
+    {
+        return $this->storedSizeValue;
     }
 }

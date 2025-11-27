@@ -27,18 +27,18 @@ class System implements InterruptInterface
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
 
         if ($al === 0x01) {
-            $runtime->runtimeOption()->context()->enableA20(true);
+            $runtime->context()->cpu()->enableA20(true);
         }
 
         $ma->writeToHighBit(RegisterType::EAX, 0x00);
-        $ma->writeToLowBit(RegisterType::EAX, $runtime->runtimeOption()->context()->isA20Enabled() ? 1 : 0);
+        $ma->writeToLowBit(RegisterType::EAX, $runtime->context()->cpu()->isA20Enabled() ? 1 : 0);
         $ma->setCarryFlag(false);
     }
 
     private function memoryE820(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
-        $addressSize = $runtime->runtimeOption()->context()->addressSize();
+        $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
         $ebx = $ma->fetch(RegisterType::EBX)->asBytesBySize(32);

@@ -21,7 +21,7 @@ class PushImm implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $reader = new EnhanceStreamReader($runtime->streamReader());
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
 
         $value = $opcode === 0x68
             ? ($size === 32

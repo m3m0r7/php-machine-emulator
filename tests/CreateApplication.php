@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace Tests;
 
+use PHPMachineEmulator\Display\Writer\TerminalScreenWriterFactory;
 use PHPMachineEmulator\IO\Buffer;
 use PHPMachineEmulator\IO\IO;
 use PHPMachineEmulator\IO\StdIn;
@@ -27,6 +28,7 @@ trait CreateApplication
                 output: new Buffer(),
                 errorOutput: new Buffer(),
             ),
+            screenWriterFactory: new TerminalScreenWriterFactory(),
         );
     }
 }

@@ -21,7 +21,7 @@ class CallFar implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $reader = new EnhanceStreamReader($runtime->streamReader());
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $offset = $size === 32 ? $reader->dword() : $reader->short();
         $segment = $reader->short();
 
@@ -30,7 +30,7 @@ class CallFar implements InstructionInterface
         $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
         $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $pos, $size);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $gate = $this->readCallGateDescriptor($runtime, $segment);
             if ($gate !== null) {
                 $this->callThroughGate($runtime, $gate, $returnOffset, $currentCs, $size);
@@ -43,7 +43,7 @@ class CallFar implements InstructionInterface
         $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $returnOffset, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {
-            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            if ($runtime->context()->cpu()->isProtectedMode()) {
                 $descriptor = $this->resolveCodeDescriptor($runtime, $segment);
                 $newCpl = $this->computeCplForTransfer($runtime, $segment, $descriptor);
                 $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $size);

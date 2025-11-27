@@ -22,7 +22,7 @@ class ImulImmediate implements InstructionInterface
     {
         $reader = new EnhanceStreamReader($runtime->streamReader());
         $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $isImm8 = $opcode === 0x6B;
 
         $imm = $isImm8

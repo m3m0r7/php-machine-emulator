@@ -19,7 +19,7 @@ class Inc implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
         $reg = ($this->registersAndOPCodes())[$opcode];
         $ma = $runtime->memoryAccessor();
         $value = $ma->fetch($reg)->asBytesBySize($size);

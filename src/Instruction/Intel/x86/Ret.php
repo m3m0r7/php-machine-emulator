@@ -23,13 +23,13 @@ class Ret implements InstructionInterface
             ? $runtime->streamReader()->short()
             : 0;
 
-        $size = $runtime->runtimeOption()->context()->operandSize();
+        $size = $runtime->context()->cpu()->operandSize();
 
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $returnIp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
         $targetCs = $ma->fetch(RegisterType::CS)->asByte();
-        $currentCpl = $runtime->runtimeOption()->context()->cpl();
+        $currentCpl = $runtime->context()->cpu()->cpl();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $descriptor = null;
         $nextCpl = null;
@@ -37,13 +37,13 @@ class Ret implements InstructionInterface
         if ($opcode === 0xCB || $opcode === 0xCA) {
             // FAR ret: pop CS as well
             $targetCs = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
-            if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+            if ($runtime->context()->cpu()->isProtectedMode()) {
                 $descriptor = $this->resolveCodeDescriptor($runtime, $targetCs);
                 $nextCpl = $this->computeCplForTransfer($runtime, $targetCs, $descriptor);
             }
             $newCpl = $targetCs & 0x3;
 
-            if ($runtime->runtimeOption()->context()->isProtectedMode() && $newCpl > $currentCpl) {
+            if ($runtime->context()->cpu()->isProtectedMode() && $newCpl > $currentCpl) {
                 // Returning to outer privilege: pop new ESP/SS from current stack before switching.
                 $newEsp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
                 $newSs = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);

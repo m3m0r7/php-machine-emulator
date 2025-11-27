@@ -22,7 +22,7 @@ class Call implements InstructionInterface
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
-        $offset = $runtime->runtimeOption()->context()->operandSize() === 32
+        $offset = $runtime->context()->cpu()->operandSize() === 32
             ? $enhancedStreamReader->signedDword()
             : $enhancedStreamReader->signedShort();
 
@@ -32,7 +32,7 @@ class Call implements InstructionInterface
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->push(RegisterType::ESP, $pos, $runtime->runtimeOption()->context()->operandSize());
+            ->push(RegisterType::ESP, $pos, $runtime->context()->cpu()->operandSize());
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime

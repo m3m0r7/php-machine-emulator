@@ -19,16 +19,16 @@ class Iret implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $opSize = $runtime->runtimeOption()->context()->operandSize();
+        $opSize = $runtime->context()->cpu()->operandSize();
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
 
         $ip = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
         $cs = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
         $flags = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode() && (($flags & (1 << 14)) !== 0)) {
+        if ($runtime->context()->cpu()->isProtectedMode() && (($flags & (1 << 14)) !== 0)) {
             // Task switch via IRET when NT set: use backlink from current TSS.
-            $tr = $runtime->runtimeOption()->context()->taskRegister();
+            $tr = $runtime->context()->cpu()->taskRegister();
             $tssSelector = $tr['selector'] ?? 0;
             if ($tssSelector !== 0) {
                 $backlink = $this->readMemory16($runtime, $tr['base']);
@@ -39,15 +39,15 @@ class Iret implements InstructionInterface
 
         $descriptor = null;
         $nextCpl = null;
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->resolveCodeDescriptor($runtime, $cs);
             $nextCpl = $this->computeCplForTransfer($runtime, $cs, $descriptor);
         }
 
         $newCpl = $cs & 0x3;
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $returningToOuter = $runtime->runtimeOption()->context()->isProtectedMode()
-            && ($newCpl > $runtime->runtimeOption()->context()->cpl());
+        $returningToOuter = $runtime->context()->cpu()->isProtectedMode()
+            && ($newCpl > $runtime->context()->cpu()->cpl());
 
         if ($returningToOuter) {
             $newEsp = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
@@ -70,8 +70,8 @@ class Iret implements InstructionInterface
         $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);
         $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);
         // IOPL and NT bits
-        $runtime->runtimeOption()->context()->setIopl(($flags >> 12) & 0x3);
-        $runtime->runtimeOption()->context()->setNt(($flags & (1 << 14)) !== 0);
+        $runtime->context()->cpu()->setIopl(($flags >> 12) & 0x3);
+        $runtime->context()->cpu()->setNt(($flags & (1 << 14)) !== 0);
 
         return ExecutionStatus::SUCCESS;
     }

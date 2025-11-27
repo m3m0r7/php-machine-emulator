@@ -7,14 +7,11 @@ namespace PHPMachineEmulator\Instruction\Intel\Observer;
 use PHPMachineEmulator\Display\Cursor;
 use PHPMachineEmulator\Display\CursorInterface;
 use PHPMachineEmulator\Display\Pixel\Color;
-use PHPMachineEmulator\Display\Writer\ScreenWriterInterface;
-use PHPMachineEmulator\Display\Writer\TerminalScreenWriter;
 use PHPMachineEmulator\Runtime\MemoryAccessorObserverInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class VideoInitializerObserver implements MemoryAccessorObserverInterface
 {
-    protected ?ScreenWriterInterface $writer = null;
     protected ?CursorInterface $cursor = null;
 
     public function shouldMatch(RuntimeInterface $runtime, int $address, ?int $previousValue, ?int $nextValue): bool
@@ -49,17 +46,13 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
         $clearWidth = $bootstrapVideoType->width;
         $clearHeight = $bootstrapVideoType->height;
 
-        $this->writer ??= new TerminalScreenWriter(
-            $runtime,
-            $videoTypeInfo,
-        );
-
-        $this->cursor ??= new Cursor($this->writer);
+        $screenWriter = $runtime->context()->screen()->screenWriter();
+        $this->cursor ??= new Cursor($screenWriter);
 
         for ($i = 0; $i < $clearWidth * $clearHeight; $i++) {
-            $this->writer->dot(Color::asBlack());
+            $screenWriter->dot(Color::asBlack());
             if (($i % $clearWidth) === 0) {
-                $this->writer->newline();
+                $screenWriter->newline();
             }
         }
 

@@ -36,7 +36,7 @@ class Movsg implements InstructionInterface
         $selector = $runtime->memoryAccessor()->fetch($modRegRM->source())->asByte();
         $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($segment, $selector);
 
-        if ($runtime->runtimeOption()->context()->isProtectedMode()) {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Segment not present for selector 0x%04X', $selector));
