@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
@@ -49,67 +50,65 @@ class ApicState
     public function readLapic(int $offset, int $width): int
     {
         $reg = $this->lapicRegs[$offset] ?? 0;
-        switch ($offset) {
-            case 0x20:
-                $reg = $this->id;
-                break;
-            case 0x30:
-                $reg = $this->version;
-                break;
-            case 0xF0:
-                $reg = $this->svr;
-                break;
-            case 0x320:
-                $reg = $this->lvtTimer;
-                break;
-            case 0x380:
-                $reg = $this->initialCount;
-                break;
-            case 0x390:
-                $reg = $this->currentCount;
-                break;
-            case 0x3E0:
-                $reg = $this->divide;
-                break;
-            default:
-                break;
+
+        $register = LapicRegister::tryFrom($offset);
+        if ($register !== null) {
+            $reg = match ($register) {
+                LapicRegister::ID => $this->id,
+                LapicRegister::Version => $this->version,
+                LapicRegister::SpuriousInterruptVector => $this->svr,
+                LapicRegister::LvtTimer => $this->lvtTimer,
+                LapicRegister::TimerInitialCount => $this->initialCount,
+                LapicRegister::TimerCurrentCount => $this->currentCount,
+                LapicRegister::TimerDivideConfiguration => $this->divide,
+                default => $reg,
+            };
         }
+
         return $width === 8 ? $reg & 0xFF : ($width === 16 ? $reg & 0xFFFF : $reg);
     }
 
     public function writeLapic(int $offset, int $value, int $width): void
     {
         $val = $width === 8 ? $value & 0xFF : ($width === 16 ? $value & 0xFFFF : $value & 0xFFFFFFFF);
-        switch ($offset) {
-            case 0xB0: // EOI
-                if ($this->inService !== null) {
-                    $this->setBit($this->isr, $this->inService, false);
-                }
-                $this->inService = null;
-                // Clear level-triggered asserted flags to allow re-delivery.
-                $this->levelAsserted = [];
-                break;
-            case 0xF0:
-                $this->svr = $val;
-                $this->apicEnabled = ($val & 0x100) !== 0;
-                break;
-            case 0x320:
-                $this->lvtTimer = $val;
-                break;
-            case 0x380:
-                $this->initialCount = $val;
-                $this->currentCount = $val;
-                break;
-            case 0x390:
-                $this->currentCount = $val;
-                break;
-            case 0x3E0:
-                $this->divide = $val & 0xF;
-                break;
-            default:
-                $this->lapicRegs[$offset] = $val;
-                break;
+
+        $register = LapicRegister::tryFrom($offset);
+        if ($register === null) {
+            $this->lapicRegs[$offset] = $val;
+            return;
         }
+
+        match ($register) {
+            LapicRegister::EndOfInterrupt => $this->handleEndOfInterrupt(),
+            LapicRegister::SpuriousInterruptVector => $this->handleSpuriousInterruptVectorWrite($val),
+            LapicRegister::LvtTimer => $this->lvtTimer = $val,
+            LapicRegister::TimerInitialCount => $this->handleTimerInitialCountWrite($val),
+            LapicRegister::TimerCurrentCount => $this->currentCount = $val,
+            LapicRegister::TimerDivideConfiguration => $this->divide = $val & 0xF,
+            default => $this->lapicRegs[$offset] = $val,
+        };
+    }
+
+    private function handleEndOfInterrupt(): void
+    {
+        if ($this->inService !== null) {
+            $this->setBit($this->isr, $this->inService, false);
+        }
+        $this->inService = null;
+        // Clear level-triggered asserted flags to allow re-delivery.
+        $this->levelAsserted = [];
+    }
+
+    private function handleSpuriousInterruptVectorWrite(int $val): void
+    {
+        $this->svr = $val;
+        $this->apicEnabled = ($val & 0x100) !== 0;
+    }
+
+    private function handleTimerInitialCountWrite(int $val): void
+    {
+        $this->initialCount = $val;
+        $this->currentCount = $val;
     }
 
     public function tick(?callable $deliverInterrupt): void

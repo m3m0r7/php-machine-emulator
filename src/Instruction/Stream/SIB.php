@@ -8,8 +8,19 @@ use PHPMachineEmulator\Stream\StreamReaderInterface;
 
 class SIB implements SIBInterface
 {
+    /** @var array<int, SIB> */
+    private static array $cache = [];
+
     public function __construct(protected int $value)
     {
+    }
+
+    /**
+     * Get a cached SIB instance for the given byte value.
+     */
+    public static function fromByte(int $byte): self
+    {
+        return self::$cache[$byte] ??= new self($byte);
     }
 
     public function scale(): int

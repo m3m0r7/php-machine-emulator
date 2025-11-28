@@ -20,4 +20,5 @@ enum VideoServiceFunction: int
     case WRITE_PIXEL = 0x0D;
     case TELETYPE_OUTPUT = 0x0E;
     case GET_CURRENT_VIDEO_MODE = 0x0F;
+    case PALETTE_ATTRIBUTE_CONTROL = 0x10;
 }

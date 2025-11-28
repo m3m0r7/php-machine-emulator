@@ -22,7 +22,7 @@ class Jmp implements InstructionInterface
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
-        $offset = $runtime->context()->cpu()->operandSize() === 32
+        $relOffset = $runtime->context()->cpu()->operandSize() === 32
             ? $enhancedStreamReader->signedDword()
             : $enhancedStreamReader->signedShort();
 
@@ -30,61 +30,40 @@ class Jmp implements InstructionInterface
             ->streamReader()
             ->offset();
 
-        // In protected mode, don't add origin - use linear addresses directly
-        if (!$runtime->context()->cpu()->isProtectedMode()) {
-            // NOTE: Add current origin only in real mode
-            $offset += $runtime->addressMap()->getOrigin();
+        // Check if we're in memory mode (executing code loaded into memory via INT 13h)
+        $inMemoryMode = false;
+        if ($runtime->streamReader() instanceof \PHPMachineEmulator\Stream\ISO\ISOStream) {
+            $inMemoryMode = $runtime->streamReader()->isMemoryMode();
         }
 
-        $target = $pos + $offset;
+        if ($inMemoryMode || $runtime->context()->cpu()->isProtectedMode()) {
+            // In memory mode or protected mode, use linear addresses directly
+            // pos is already a linear address, relOffset is the signed displacement
+            $target = $pos + $relOffset;
+            $runtime->option()->logger()->debug(sprintf('JMP near (memory mode): pos=0x%05X + rel=0x%04X = target=0x%05X', $pos, $relOffset & 0xFFFF, $target));
 
-        $runtime->option()->logger()->debug(sprintf(
-            'JMP: IP before=0x%05X, offset=0x%08X, target=0x%05X, operandSize=%d, protectedMode=%d',
-            $pos, $offset, $target, $runtime->context()->cpu()->operandSize(), $runtime->context()->cpu()->isProtectedMode() ? 1 : 0
-        ));
+            if ($runtime->option()->shouldChangeOffset()) {
+                $runtime->streamReader()->setOffset($target);
+            }
+            return ExecutionStatus::SUCCESS;
+        }
+
+        // Real mode with boot sector: add origin to convert to logical address
+        $origin = $runtime->addressMap()->getOrigin();
+        $target = $pos + $relOffset + $origin;
+        $streamTarget = $target - $origin;
+
+        // Debug JMP near
+        $runtime->option()->logger()->debug(sprintf('JMP near: pos=0x%04X + rel=0x%04X + origin=0x%04X = target=0x%04X (streamTarget=0x%04X)', $pos, $relOffset & 0xFFFF, $origin, $target, $streamTarget));
 
         if (!$runtime->option()->shouldChangeOffset()) {
             return ExecutionStatus::SUCCESS;
         }
 
-        // In protected mode, use linear addresses directly
-        if ($runtime->context()->cpu()->isProtectedMode()) {
-            $runtime->option()->logger()->debug(sprintf(
-                'JMP: protected mode, setting offset to 0x%05X',
-                $target
-            ));
-            $runtime
-                ->streamReader()
-                ->setOffset($target);
-            return ExecutionStatus::SUCCESS;
-        }
-
-        $disk = $runtime
-            ->addressMap()
-            ->getDiskByAddress(
-                // NOTE: Adjustment offset that is to negate entrypoint
-                //       because the instruction is including sector size when embedding operands.
-                $target - $runtime->addressMap()->getDisk()->entrypointOffset(),
-            );
-
-        if ($disk !== null) {
-            $runtime->option()->logger()->debug(sprintf(
-                'JMP: using disk offset=0x%05X',
-                $disk->offset()
-            ));
-            $runtime
-                ->streamReader()
-                ->setOffset($disk->offset());
-            return ExecutionStatus::SUCCESS;
-        }
-
-        $runtime->option()->logger()->debug(sprintf(
-            'JMP: no disk, setting offset to 0x%05X',
-            $target
-        ));
+        // In real mode for ISO boot, use stream-relative offset directly
         $runtime
             ->streamReader()
-            ->setOffset($target);
+            ->setOffset($streamTarget);
 
         return ExecutionStatus::SUCCESS;
     }

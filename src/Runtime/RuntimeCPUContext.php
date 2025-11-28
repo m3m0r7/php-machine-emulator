@@ -28,6 +28,7 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     private int $iopl = 0;
     private bool $nt = false;
     private int $interruptDeliveryBlock = 0;
+    private bool $memoryMode = false;
     private PicState $picState;
     private ApicState $apicState;
     private KeyboardController $keyboardController;
@@ -289,5 +290,27 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function cmos(): Cmos
     {
         return $this->cmos;
+    }
+
+    public function setMemoryMode(bool $enabled): void
+    {
+        $this->memoryMode = $enabled;
+    }
+
+    public function isMemoryMode(): bool
+    {
+        return $this->memoryMode;
+    }
+
+    public function memoryModeThreshold(): int
+    {
+        return 0x10000;
+    }
+
+    public function activateMemoryModeIfNeeded(int $address): void
+    {
+        if ($address >= $this->memoryModeThreshold()) {
+            $this->memoryMode = true;
+        }
     }
 }

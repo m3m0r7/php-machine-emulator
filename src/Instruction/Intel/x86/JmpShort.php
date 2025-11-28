@@ -26,10 +26,13 @@ class JmpShort implements InstructionInterface
             ->streamReader()
             ->offset();
 
+        $target = $pos + $operand;
+        $runtime->option()->logger()->debug(sprintf('JMP short: pos=0x%04X + operand=0x%02X = target=0x%04X', $pos, $operand & 0xFF, $target));
+
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime
                 ->streamReader()
-                ->setOffset($pos + $operand);
+                ->setOffset($target);
         }
 
         return ExecutionStatus::SUCCESS;

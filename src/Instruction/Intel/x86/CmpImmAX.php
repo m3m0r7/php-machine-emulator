@@ -39,10 +39,22 @@ class CmpImmAX implements InstructionInterface
             0x3D => $fetchResult->asByte() & 0b11111111_11111111,
         };
 
+        $normalizedOperand = $opcode === 0x3D ? ($operand & 0xFFFF) : $operand;
+        $newCF = $leftHand < $normalizedOperand;
+
+        // Debug FAT chain reading
+        if ($opcode === 0x3D && $normalizedOperand === 0x0FF8) {
+            $runtime->option()->logger()->debug(sprintf(
+                'CMP AX, 0xFF8: AX=0x%04X < 0xFF8 ? CF=%s',
+                $leftHand,
+                $newCF ? 'true' : 'false'
+            ));
+        }
+
         $runtime
             ->memoryAccessor()
-            ->updateFlags($leftHand - ($opcode === 0x3D ? ($operand & 0b11111111_11111111) : $operand), $opcode === 0x3D ? 16 : 8)
-            ->setCarryFlag($leftHand < ($opcode === 0x3D ? ($operand & 0b11111111_11111111) : $operand));
+            ->updateFlags($leftHand - $normalizedOperand, $opcode === 0x3D ? 16 : 8)
+            ->setCarryFlag($newCF);
 
 
         return ExecutionStatus::SUCCESS;

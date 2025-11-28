@@ -29,12 +29,6 @@ class MovMoffset implements InstructionInterface
         $linearOffset = $this->segmentOffsetAddress($runtime, $segment, $offset);
 
         $ip = $runtime->streamReader()->offset();
-        if ($ip >= 0x8300 && $ip <= 0x8313) {
-            $runtime->option()->logger()->debug(sprintf(
-                'MovMoffset: IP=0x%05X, opcode=0x%02X, offset=0x%08X, linear=0x%08X, opSize=%d',
-                $ip, $opcode, $offset, $linearOffset, $opSize
-            ));
-        }
 
         switch ($opcode) {
             case 0xA0: // AL <- moffs8
@@ -46,10 +40,15 @@ class MovMoffset implements InstructionInterface
             $value = $opSize === 32
                 ? $this->readMemory32($runtime, $linearOffset)
                 : $this->readMemory16($runtime, $linearOffset);
-            if ($linearOffset === 0x1FF0) {
+            // Debug: track cluster number reading
+            if ($offset === 0x1F8) {
+                $rawByte0 = $runtime->memoryAccessor()->readRawByte($linearOffset);
+                $rawByte1 = $runtime->memoryAccessor()->readRawByte($linearOffset + 1);
                 $runtime->option()->logger()->debug(sprintf(
-                    'MovMoffset READ 0x1FF0: linear=0x%08X, phys=0x%08X, value=0x%08X',
-                    $linearOffset, $phys, $value
+                    'MOV AX, [0x1F8]: read value 0x%04X (raw bytes: %s, %s)',
+                    $value,
+                    $rawByte0 !== null ? sprintf('0x%02X', $rawByte0) : 'null',
+                    $rawByte1 !== null ? sprintf('0x%02X', $rawByte1) : 'null'
                 ));
             }
             $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $value, $opSize);
@@ -65,10 +64,11 @@ class MovMoffset implements InstructionInterface
             break;
         case 0xA3: // moffs16 <- AX
             $valueToWrite = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
-            if ($linearOffset === 0x1FF0) {
+            // Debug: track cluster number storage
+            if ($offset === 0x1F8) {
                 $runtime->option()->logger()->debug(sprintf(
-                    'MovMoffset WRITE 0x1FF0: linear=0x%08X, value=0x%08X, opSize=%d',
-                    $linearOffset, $valueToWrite, $opSize
+                    'MOV [0x1F8], AX: writing cluster 0x%04X (linear=0x%05X)',
+                    $valueToWrite, $linearOffset
                 ));
             }
             // Write using appropriate size

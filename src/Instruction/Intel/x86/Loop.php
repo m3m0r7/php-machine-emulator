@@ -34,11 +34,24 @@ class Loop implements InstructionInterface
             ->fetch(RegisterType::ECX)
             ->asBytesBySize($size);
 
+        // Optimization: Empty loop detection (LOOP to itself or very small backward jump)
+        // If operand is -2 (jump back to the LOOP instruction itself), skip entire loop
+        if ($operand === -2 && $counter > 1) {
+            // This is a delay loop - skip it entirely
+            $runtime->memoryAccessor()
+                ->enableUpdateFlags(false)
+                ->writeBySize(RegisterType::ECX, 0, $size);
+            return ExecutionStatus::SUCCESS;
+        }
+
         $counter = ($counter - 1) & ($size === 32 ? 0xFFFFFFFF : 0xFFFF);
 
         // Write decremented value back
         $runtime->memoryAccessor()
             ->writeBySize(RegisterType::ECX, $counter, $size);
+
+        $runtime->option()->logger()->debug(sprintf('LOOP: counter=%d, operand=%d, pos=0x%X, target=0x%X',
+            $counter, $operand, $pos, $pos + $operand));
 
         // Jump if counter is non-zero
         if ($counter === 0) {

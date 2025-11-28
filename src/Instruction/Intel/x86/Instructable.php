@@ -70,16 +70,6 @@ trait Instructable
         if ($runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
-                // In protected mode with null/invalid selector:
-                // - Selector 0 is the null selector; allow with base 0 for flat model compatibility
-                // - Other invalid selectors should fault, but for boot compatibility
-                //   we log and use base 0 to allow early setup code to work
-                if ($selector !== 0) {
-                    $runtime->option()->logger()->debug(sprintf(
-                        'Segment selector 0x%04X not present in GDT, using base 0',
-                        $selector
-                    ));
-                }
                 return 0;
             }
 

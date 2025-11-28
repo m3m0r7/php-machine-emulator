@@ -54,7 +54,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         // Determine stored size: GPRs (addresses 0-7) are stored as 32-bit
         $storedSize = ($address >= 0 && $address <= 7) ? 32 : 16;
 
-        return new MemoryAccessorFetchResult($this->memory[$address], $storedSize);
+        return MemoryAccessorFetchResult::fromCache($this->memory[$address], $storedSize);
     }
 
     public function tryToFetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface|null
@@ -68,7 +68,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         // Determine stored size: GPRs (addresses 0-7) are stored as 32-bit
         $storedSize = ($address >= 0 && $address <= 7) ? 32 : 16;
 
-        return new MemoryAccessorFetchResult($this->memory[$address], $storedSize);
+        return MemoryAccessorFetchResult::fromCache($this->memory[$address], $storedSize);
     }
 
     public function write16Bit(int|RegisterType $registerType, int|null $value): self
@@ -372,17 +372,9 @@ class MemoryAccessor implements MemoryAccessorInterface
             }
             $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
             $newSp = ($sp + $bytes) & $mask;
-            $this->runtime->option()->logger()->debug(sprintf(
-                'POP: SP=%05X linearAddr=%05X rawValue=%05X newSP=%05X',
-                $sp, $address, $value, $newSp
-            ));
 
             $this->writeBySize(RegisterType::ESP, $newSp, $size);
             $verifyEsp = $this->fetch(RegisterType::ESP)->asBytesBySize($size);
-            $this->runtime->option()->logger()->debug(sprintf(
-                'POP verify: wrote ESP=%05X, verified ESP=%05X',
-                $newSp, $verifyEsp
-            ));
 
             // Value is already in correct little-endian format from memory read
             // Pass alreadyDecoded=true to skip byte swap in asBytesBySize()
@@ -420,10 +412,6 @@ class MemoryAccessor implements MemoryAccessorInterface
             $this->allocate($address, $bytes, safe: false);
 
             $masked = $value & ((1 << $size) - 1);
-            $this->runtime->option()->logger()->debug(sprintf(
-                'PUSH: SP=%05X newSP=%05X linearAddr=%05X value=%05X',
-                $sp, $newSp, $address, $masked
-            ));
             for ($i = 0; $i < $bytes; $i++) {
                 $this->writeBySize($address + $i, ($masked >> ($i * 8)) & 0xFF, 8);
             }
@@ -514,23 +502,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         }
 
         // Lazily back common VRAM/MMIO ranges so guest mappings do not fault.
-        // Legacy VGA memory window.
-        if ($address >= 0xA0000 && $address < 0xC0000) {
-            $this->allocate($address, safe: false);
-            return;
-        }
-        // PCI VGA BAR (e.g., 0xE0000000 region).
-        if ($address >= 0xE0000000 && $address < 0xE1000000) {
-            $this->allocate($address, safe: false);
-            return;
-        }
-        // LAPIC MMIO page.
-        if ($address >= 0xFEE00000 && $address < 0xFEE01000) {
-            $this->allocate($address, safe: false);
-            return;
-        }
-        // IOAPIC MMIO page.
-        if ($address >= 0xFEC00000 && $address < 0xFEC01000) {
+        if (MemoryRegion::isKnownRegion($address)) {
             $this->allocate($address, safe: false);
             return;
         }
@@ -566,11 +538,6 @@ class MemoryAccessor implements MemoryAccessorInterface
             $isWritable = ($descriptor['type'] & 0x2) !== 0;
             $isExecutable = $descriptor['executable'] ?? false;
             if ($isExecutable || !$isWritable || $dpl !== $cpl || $rpl !== $cpl) {
-                // For boot compatibility, allow invalid stack segment with warning
-                $this->runtime->option()->logger()->debug(sprintf(
-                    'Stack segment 0x%04X validation failed, using flat model',
-                    $ssSelector
-                ));
                 $linear = ($sp & $mask) & $linearMask;
                 return $this->translateLinear($linear, $isWrite);
             }
@@ -617,178 +584,216 @@ class MemoryAccessor implements MemoryAccessorInterface
         }
 
         $cr4 = $this->readControlRegister(4);
-        $pse = ($cr4 & (1 << 4)) !== 0;
         $pae = ($cr4 & (1 << 5)) !== 0;
-        $user = $this->runtime->context()->cpu()->cpl() === 3;
 
         if ($pae) {
-            $cr3 = $this->readControlRegister(3) & 0xFFFFF000;
-            $pdpIndex = ($linear >> 30) & 0x3;
-            $dirIndex = ($linear >> 21) & 0x1FF;
-            $tableIndex = ($linear >> 12) & 0x1FF;
-            $offset = $linear & 0xFFF;
-            $nxe = ($this->efer & (1 << 11)) !== 0;
-
-            $pdpteAddr = ($cr3 + ($pdpIndex * 8)) & 0xFFFFFFFF;
-            $pdpte = $this->readPhysical64($pdpteAddr);
-            if (($pdpte & 0x1) === 0) {
-                $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0));
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'PDPT entry not present');
-            }
-            if ($user && (($pdpte & 0x4) === 0)) {
-                $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | 0b100 | 0b1);
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'PDPT entry not user accessible');
-            }
-            if ($isWrite && (($pdpte & 0x2) === 0)) {
-                $err = $this->errorCodeWithFetch(0b10 | ($user ? 0b100 : 0) | 0b1);
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'PDPT entry not writable');
-            }
-            $pdpte |= 0x20;
-            $this->writePhysical64($pdpteAddr, $pdpte);
-
-            $pdeAddr = (($pdpte & 0xFFFFFF000) + ($dirIndex * 8)) & 0xFFFFFFFF;
-            $pde = $this->readPhysical64($pdeAddr);
-            if (($pde & 0x1) === 0) {
-                $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0));
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Page directory entry not present');
-            }
-            $isLarge = ($pde & (1 << 7)) !== 0;
-            if ($user && (($pde & 0x4) === 0)) {
-                $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | 0b100 | 0b1);
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Page directory entry not user accessible');
-            }
-            if ($isWrite && (($pde & 0x2) === 0)) {
-                $err = $this->errorCodeWithFetch(0b10 | ($user ? 0b100 : 0) | 0b1);
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Page directory entry not writable');
-            }
-
-            if ($isLarge) {
-                $prevFlag = $this->enableUpdateFlags;
-                $this->enableUpdateFlags = false;
-                $pde |= 0x20;
-                if ($isWrite) {
-                    $pde |= 0x40;
-                }
-                $this->writePhysical64($pdeAddr, $pde);
-                $this->enableUpdateFlags = $prevFlag;
-                if ($this->shouldInstructionFetch() && $nxe && (($pde >> 63) & 0x1)) {
-                    $err = 0x01 | ($user ? 0b100 : 0) | 0x10;
-                    $this->setCr2($linear);
-                    throw new FaultException(0x0E, $err, 'Execute-disable large page');
-                }
-                $phys = ($pde & 0xFFE00000) + ($linear & 0x1FFFFF);
-                return $phys & 0xFFFFFFFF;
-            }
-
-            $pteAddr = (($pde & 0xFFFFFF000) + ($tableIndex * 8)) & 0xFFFFFFFF;
-            $pte = $this->readPhysical64($pteAddr);
-            if (($pte & 0x1) === 0) {
-                $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0));
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Page table entry not present');
-            }
-            if ($user && (($pte & 0x4) === 0)) {
-                $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | 0b100 | 0b1);
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Page table entry not user accessible');
-            }
-            if ($isWrite && (($pte & 0x2) === 0)) {
-                $err = $this->errorCodeWithFetch(0b10 | ($user ? 0b100 : 0) | 0b1);
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Page table entry not writable');
-            }
-
-            $prevFlag = $this->enableUpdateFlags;
-            $this->enableUpdateFlags = false;
-            $pde |= 0x20;
-            $this->writePhysical64($pdeAddr, $pde);
-            $pte |= 0x20;
-            if ($isWrite) {
-                $pte |= 0x40;
-            }
-            $this->writePhysical64($pteAddr, $pte);
-            $this->enableUpdateFlags = $prevFlag;
-            if ($this->shouldInstructionFetch() && $nxe && (($pte >> 63) & 0x1)) {
-                $err = 0x01 | ($user ? 0b100 : 0) | 0x10;
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Execute-disable page');
-            }
-
-            $phys = ($pte & 0xFFFFFF000) + $offset;
-            return $phys & 0xFFFFFFFF;
+            return $this->translateLinearPae($linear, $isWrite, $cr4);
         }
 
+        return $this->translateLinear32bit($linear, $isWrite, $cr4);
+    }
+
+    /**
+     * PAE (Physical Address Extension) paging translation.
+     */
+    private function translateLinearPae(int $linear, bool $isWrite, int $cr4): int
+    {
+        $user = $this->runtime->context()->cpu()->cpl() === 3;
+        $cr3 = $this->readControlRegister(3) & 0xFFFFF000;
+        $pdpIndex = ($linear >> 30) & 0x3;
+        $dirIndex = ($linear >> 21) & 0x1FF;
+        $tableIndex = ($linear >> 12) & 0x1FF;
+        $offset = $linear & 0xFFF;
+        $nxe = ($this->efer & (1 << 11)) !== 0;
+
+        // Check PDPT entry
+        $pdpteAddr = ($cr3 + ($pdpIndex * 8)) & 0xFFFFFFFF;
+        $pdpte = $this->readPhysical64($pdpteAddr);
+        $this->checkPageEntryPresent($pdpte, $linear, $isWrite, $user, 'PDPT entry');
+        $this->checkPageEntryUserAccess($pdpte, $linear, $isWrite, $user, 'PDPT entry');
+        $this->checkPageEntryWriteAccess($pdpte, $linear, $isWrite, $user, 'PDPT entry');
+        $pdpte |= 0x20;
+        $this->writePhysical64($pdpteAddr, $pdpte);
+
+        // Check page directory entry
+        $pdeAddr = (($pdpte & 0xFFFFFF000) + ($dirIndex * 8)) & 0xFFFFFFFF;
+        $pde = $this->readPhysical64($pdeAddr);
+        $this->checkPageEntryPresent($pde, $linear, $isWrite, $user, 'Page directory entry');
+        $this->checkPageEntryUserAccess($pde, $linear, $isWrite, $user, 'Page directory entry');
+        $this->checkPageEntryWriteAccess($pde, $linear, $isWrite, $user, 'Page directory entry');
+
+        // Handle 2MB large page
+        $isLarge = ($pde & (1 << 7)) !== 0;
+        if ($isLarge) {
+            return $this->handlePaeLargePage($pde, $pdeAddr, $linear, $isWrite, $user, $nxe);
+        }
+
+        // Check page table entry
+        $pteAddr = (($pde & 0xFFFFFF000) + ($tableIndex * 8)) & 0xFFFFFFFF;
+        $pte = $this->readPhysical64($pteAddr);
+        $this->checkPageEntryPresent($pte, $linear, $isWrite, $user, 'Page table entry');
+        $this->checkPageEntryUserAccess($pte, $linear, $isWrite, $user, 'Page table entry');
+        $this->checkPageEntryWriteAccess($pte, $linear, $isWrite, $user, 'Page table entry');
+
+        // Update accessed/dirty bits
+        $this->updateAccessedDirtyBits64($pdeAddr, $pde, $pteAddr, $pte, $isWrite);
+
+        // Check NX bit
+        $this->checkExecuteDisable64($pte, $linear, $user, $nxe);
+
+        $phys = ($pte & 0xFFFFFF000) + $offset;
+        return $phys & 0xFFFFFFFF;
+    }
+
+    /**
+     * 32-bit paging translation.
+     */
+    private function translateLinear32bit(int $linear, bool $isWrite, int $cr4): int
+    {
+        $user = $this->runtime->context()->cpu()->cpl() === 3;
+        $pse = ($cr4 & (1 << 4)) !== 0;
         $cr3 = $this->readControlRegister(3) & 0xFFFFF000;
         $dirIndex = ($linear >> 22) & 0x3FF;
         $tableIndex = ($linear >> 12) & 0x3FF;
         $offset = $linear & 0xFFF;
 
+        // Check page directory entry
         $pdeAddr = ($cr3 + ($dirIndex * 4)) & 0xFFFFFFFF;
         $pde = $this->readPhysical32($pdeAddr);
-        if (($pde & 0x1) === 0) {
-            $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0));
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, 'Page directory entry not present');
-        }
+        $this->checkPageEntryPresent32($pde, $linear, $isWrite, $user, 'Page directory entry');
+
+        // Handle 4MB large page
         $is4M = $pse && (($pde & (1 << 7)) !== 0);
         if ($is4M) {
-            if ($user && (($pde & 0x4) === 0)) {
-                $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | 0b100 | 0b1);
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Page directory entry not user accessible');
-            }
-            if ($isWrite && (($pde & 0x2) === 0)) {
-                $err = $this->errorCodeWithFetch(0b10 | ($user ? 0b100 : 0) | 0b1);
-                $this->setCr2($linear);
-                throw new FaultException(0x0E, $err, 'Page directory entry not writable');
-            }
-            $prevFlag = $this->enableUpdateFlags;
-            $this->enableUpdateFlags = false;
-            $pde |= 0x20;
-            if ($isWrite) {
-                $pde |= 0x40;
-            }
-            $this->writePhysical32($pdeAddr, $pde);
-            $this->enableUpdateFlags = $prevFlag;
-            $phys = ($pde & 0xFFC00000) + ($linear & 0x3FFFFF);
-            return $phys & 0xFFFFFFFF;
-        }
-        if ($user && (($pde & 0x4) === 0)) {
-            $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, 'Page directory entry not user accessible');
-        }
-        if ($isWrite && (($pde & 0x2) === 0)) {
-            $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, 'Page directory entry not writable');
+            return $this->handle32bitLargePage($pde, $pdeAddr, $linear, $isWrite, $user);
         }
 
+        $this->checkPageEntryUserAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
+        $this->checkPageEntryWriteAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
+
+        // Check page table entry
         $pteAddr = ($pde & 0xFFFFF000) + ($tableIndex * 4);
         $pte = $this->readPhysical32($pteAddr);
-        if (($pte & 0x1) === 0) {
+        $this->checkPageEntryPresent32($pte, $linear, $isWrite, $user, 'Page table entry');
+        $this->checkPageEntryUserAccess32($pte, $linear, $isWrite, $user, 'Page table entry');
+        $this->checkPageEntryWriteAccess32($pte, $linear, $isWrite, $user, 'Page table entry');
+
+        // Update accessed/dirty bits
+        $this->updateAccessedDirtyBits32($pdeAddr, $pde, $pteAddr, $pte, $isWrite);
+
+        $phys = ($pte & 0xFFFFF000) + $offset;
+        return $phys & 0xFFFFFFFF;
+    }
+
+    private function checkPageEntryPresent(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
+    {
+        if (($entry & 0x1) === 0) {
             $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0));
             $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, 'Page table entry not present');
+            throw new FaultException(0x0E, $err, "{$entryName} not present");
         }
-        if ($user && (($pte & 0x4) === 0)) {
+    }
+
+    private function checkPageEntryUserAccess(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
+    {
+        if ($user && (($entry & 0x4) === 0)) {
             $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | 0b100 | 0b1);
             $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, 'Page table entry not user accessible');
+            throw new FaultException(0x0E, $err, "{$entryName} not user accessible");
         }
-        if ($isWrite && (($pte & 0x2) === 0)) {
+    }
+
+    private function checkPageEntryWriteAccess(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
+    {
+        if ($isWrite && (($entry & 0x2) === 0)) {
             $err = $this->errorCodeWithFetch(0b10 | ($user ? 0b100 : 0) | 0b1);
             $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, 'Page table entry not writable');
+            throw new FaultException(0x0E, $err, "{$entryName} not writable");
+        }
+    }
+
+    private function checkPageEntryPresent32(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
+    {
+        if (($entry & 0x1) === 0) {
+            $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0));
+            $this->setCr2($linear);
+            throw new FaultException(0x0E, $err, "{$entryName} not present");
+        }
+    }
+
+    private function checkPageEntryUserAccess32(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
+    {
+        if ($user && (($entry & 0x4) === 0)) {
+            $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
+            $this->setCr2($linear);
+            throw new FaultException(0x0E, $err, "{$entryName} not user accessible");
+        }
+    }
+
+    private function checkPageEntryWriteAccess32(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
+    {
+        if ($isWrite && (($entry & 0x2) === 0)) {
+            $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
+            $this->setCr2($linear);
+            throw new FaultException(0x0E, $err, "{$entryName} not writable");
+        }
+    }
+
+    private function handlePaeLargePage(int $pde, int $pdeAddr, int $linear, bool $isWrite, bool $user, bool $nxe): int
+    {
+        $prevFlag = $this->enableUpdateFlags;
+        $this->enableUpdateFlags = false;
+        $pde |= 0x20;
+        if ($isWrite) {
+            $pde |= 0x40;
+        }
+        $this->writePhysical64($pdeAddr, $pde);
+        $this->enableUpdateFlags = $prevFlag;
+
+        if ($this->shouldInstructionFetch() && $nxe && (($pde >> 63) & 0x1)) {
+            $err = 0x01 | ($user ? 0b100 : 0) | 0x10;
+            $this->setCr2($linear);
+            throw new FaultException(0x0E, $err, 'Execute-disable large page');
         }
 
-        // Set accessed/dirty bits.
+        $phys = ($pde & 0xFFE00000) + ($linear & 0x1FFFFF);
+        return $phys & 0xFFFFFFFF;
+    }
+
+    private function handle32bitLargePage(int $pde, int $pdeAddr, int $linear, bool $isWrite, bool $user): int
+    {
+        $this->checkPageEntryUserAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
+        $this->checkPageEntryWriteAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
+
+        $prevFlag = $this->enableUpdateFlags;
+        $this->enableUpdateFlags = false;
+        $pde |= 0x20;
+        if ($isWrite) {
+            $pde |= 0x40;
+        }
+        $this->writePhysical32($pdeAddr, $pde);
+        $this->enableUpdateFlags = $prevFlag;
+
+        $phys = ($pde & 0xFFC00000) + ($linear & 0x3FFFFF);
+        return $phys & 0xFFFFFFFF;
+    }
+
+    private function updateAccessedDirtyBits64(int $pdeAddr, int $pde, int $pteAddr, int $pte, bool $isWrite): void
+    {
+        $prevFlag = $this->enableUpdateFlags;
+        $this->enableUpdateFlags = false;
+        $pde |= 0x20;
+        $this->writePhysical64($pdeAddr, $pde);
+        $pte |= 0x20;
+        if ($isWrite) {
+            $pte |= 0x40;
+        }
+        $this->writePhysical64($pteAddr, $pte);
+        $this->enableUpdateFlags = $prevFlag;
+    }
+
+    private function updateAccessedDirtyBits32(int $pdeAddr, int $pde, int $pteAddr, int $pte, bool $isWrite): void
+    {
         $prevFlag = $this->enableUpdateFlags;
         $this->enableUpdateFlags = false;
         $pde |= 0x20;
@@ -799,9 +804,15 @@ class MemoryAccessor implements MemoryAccessorInterface
         }
         $this->writePhysical32($pteAddr, $pte);
         $this->enableUpdateFlags = $prevFlag;
+    }
 
-        $phys = ($pte & 0xFFFFF000) + $offset;
-        return $phys & 0xFFFFFFFF;
+    private function checkExecuteDisable64(int $pte, int $linear, bool $user, bool $nxe): void
+    {
+        if ($this->shouldInstructionFetch() && $nxe && (($pte >> 63) & 0x1)) {
+            $err = 0x01 | ($user ? 0b100 : 0) | 0x10;
+            $this->setCr2($linear);
+            throw new FaultException(0x0E, $err, 'Execute-disable page');
+        }
     }
 
     private function readPhysical32(int $address): int

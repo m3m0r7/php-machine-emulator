@@ -6,22 +6,29 @@ namespace PHPMachineEmulator\Runtime;
 
 use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Disk\Bootloader;
-use PHPMachineEmulator\Disk\HardDisk;
 use PHPMachineEmulator\Exception\ExecutionException;
-use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\ExitException;
+use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Frame\Frame;
 use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\ServiceInterface;
-use PHPMachineEmulator\Instruction\Intel\x86\Int_ as X86Int;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
-use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
+use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandler;
+use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandlerInterface;
+use PHPMachineEmulator\Runtime\Ticker\ApicTicker;
+use PHPMachineEmulator\Runtime\Ticker\PitTicker;
+use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
+use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
+use PHPMachineEmulator\Stream\CompositeStreamReader;
 use PHPMachineEmulator\Stream\ISO\ISOStream;
+use PHPMachineEmulator\Stream\MemoryStreamReader;
+use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
 use PHPMachineEmulator\Video\VideoInterface;
 
 class Runtime implements RuntimeInterface
@@ -31,6 +38,8 @@ class Runtime implements RuntimeInterface
     protected MemoryAccessorInterface $memoryAccessor;
     protected AddressMapInterface $addressMap;
     protected RuntimeContextInterface $context;
+    protected TickerRegistryInterface $tickerRegistry;
+    protected InterruptDeliveryHandlerInterface $interruptDeliveryHandler;
     protected array $shutdown = [];
     protected ?RegisterType $segmentOverride = null;
     protected int $instructionCount = 0;
@@ -65,24 +74,38 @@ class Runtime implements RuntimeInterface
             $screenContext,
         );
 
+        // Initialize ticker registry with default tickers
+        $this->tickerRegistry = new TickerRegistry();
+        $this->tickerRegistry->register(new PitTicker(Pit::shared()));
+        $this->tickerRegistry->register(new ApicTicker());
+
+        // Initialize interrupt delivery handler
+        $this->interruptDeliveryHandler = new InterruptDeliveryHandler($this->architectureProvider);
+
         if ($this->option()->shouldShowHeader()) {
             $this->showHeader();
         }
 
-        // Set up memory reader for ISOStream to enable executing code loaded via INT 13h
-        if ($this->streamReader instanceof \PHPMachineEmulator\Stream\ISO\ISOStream) {
-            $ma = $this->memoryAccessor;
-            $this->streamReader->setMemoryReader(function (int $address) use ($ma): int {
-                // Read byte from memory at the given linear address
-                $result = $ma->tryToFetch($address);
-                if ($result === null) {
-                    // Memory not allocated - return 0 (like uninitialized RAM)
-                    return 0;
-                }
-                // Return low byte of the value
-                return $result->asHighBit();
-            });
+        // Wrap boot stream with composite reader for memory mode support
+        $this->streamReader = $this->wrapWithCompositeStreamReader($this->streamReader);
+    }
+
+    /**
+     * Wrap boot stream with composite reader if needed.
+     */
+    private function wrapWithCompositeStreamReader(StreamReaderIsProxyableInterface $bootStream): StreamReaderIsProxyableInterface
+    {
+        // Only wrap ISOStream (or other boot streams that need memory mode)
+        if (!$bootStream instanceof ISOStream) {
+            return $bootStream;
         }
+
+        return new CompositeStreamReader(
+            $this,
+            $bootStream,
+            new MemoryStreamReader($this->memoryAccessor),
+            $bootStream->fileSize(),
+        );
     }
 
     public function start(): void
@@ -96,7 +119,7 @@ class Runtime implements RuntimeInterface
             $ip = $this->streamReader->offset();
             $opcode = $this->streamReader->byte();
             $this->memoryAccessor->setInstructionFetch(false);
-            $this->machine->option()->logger()->debug(sprintf('IP=0x%05X opcode=0x%02X', $ip, $opcode));
+            // $this->machine->option()->logger()->debug(sprintf('IP=0x%05X opcode=0x%02X', $ip, $opcode));
             $result = $this->execute($opcode);
             if ($result === ExecutionStatus::EXIT) {
                 $this->machine->option()->logger()->info('Exited program');
@@ -143,52 +166,12 @@ class Runtime implements RuntimeInterface
 
     private function tickTimers(): void
     {
-        // Minimal PIT/LAPIC tick every N instructions to simulate timer.
+        // Execute registered tickers
+        $this->tickerRegistry->tick($this, $this->instructionCount);
+
+        // Deliver pending interrupts (only on tick intervals)
         if ($this->instructionCount % 10 === 0) {
-            $pit = \PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit::shared();
-            $picState = $this->context->cpu()->picState();
-            $pit->tick(function () use ($picState) {
-                $picState->raiseIrq0();
-            });
-
-            $apic = $this->context->cpu()->apicState();
-            $apic->tick(null); // queue LAPIC timer deliveries when enabled
-
-            $deliveryBlocked = $this->context->cpu()->consumeInterruptDeliveryBlock();
-
-            // Deliver any pending APIC vectors directly when allowed.
-            if (!$deliveryBlocked && $apic->apicEnabled() && $this->memoryAccessor()->shouldInterruptFlag()) {
-                while (($apicVector = $apic->pendingVector()) !== null) {
-                    try {
-                        $handler = $this
-                            ->architectureProvider
-                            ->instructionList()
-                            ->getInstructionByOperationCode(0xCD);
-                    } catch (\Throwable) {
-                        break;
-                    }
-                    if ($handler instanceof \PHPMachineEmulator\Instruction\Intel\x86\Int_) {
-                        $handler->raise($this, $apicVector, $this->streamReader->offset(), null);
-                        return;
-                    }
-                }
-            }
-
-            $vector = $picState->pendingVector();
-            if (!$deliveryBlocked && $vector !== null && $this->memoryAccessor()->shouldInterruptFlag()) {
-                try {
-                    $handler = $this
-                        ->architectureProvider
-                        ->instructionList()
-                        ->getInstructionByOperationCode(0xCD);
-                } catch (\Throwable) {
-                    return;
-                }
-                if ($handler instanceof \PHPMachineEmulator\Instruction\Intel\x86\Int_) {
-                    $handler->raise($this, $vector, $this->streamReader->offset(), null);
-                    return;
-                }
-            }
+            $this->interruptDeliveryHandler->deliverPendingInterrupts($this);
         }
     }
 
@@ -250,30 +233,21 @@ class Runtime implements RuntimeInterface
 
     public function execute(int $opcode): ExecutionStatus
     {
-        $this->machine->option()->logger()->debug(sprintf('Reached the opcode is 0x%04X', $opcode));
+        // $this->machine->option()->logger()->debug(sprintf('Reached the opcode is 0x%04X', $opcode));
 
         $instruction = $this
             ->architectureProvider
             ->instructionList()
             ->getInstructionByOperationCode($opcode);
 
-        $this->machine->option()->logger()->info(sprintf('Process the instruction %s', get_class($instruction)));
+        // $this->machine->option()->logger()->info(sprintf('Process the instruction %s', get_class($instruction)));
 
         try {
             return $instruction
                 ->process($this, $opcode);
         } catch (FaultException $e) {
             $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
-            try {
-                $handler = $this
-                    ->architectureProvider
-                    ->instructionList()
-                    ->getInstructionByOperationCode(0xCD);
-            } catch (\Throwable) {
-                $handler = null;
-            }
-            if ($handler instanceof X86Int) {
-                $handler->raise($this, $e->vector(), $this->streamReader->offset(), $e->errorCode());
+            if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->streamReader->offset(), $e->errorCode())) {
                 return ExecutionStatus::SUCCESS;
             }
             throw $e;
@@ -304,16 +278,9 @@ class Runtime implements RuntimeInterface
             $this->machine->option()->logger()->debug(sprintf('Address allocated 0x%03s', decbin($address)));
         }
 
-        // Initialize CS register for El Torito ISO boot
+        // Initialize CS register for bootable streams (e.g., El Torito ISO boot)
         // The boot code expects CS to be the load segment (e.g., 0x07C0 for 0x7C00)
-        if ($this->streamReader instanceof ISOStream) {
-            $bootImage = $this->streamReader->bootImage();
-            if ($bootImage !== null) {
-                $loadSegment = $bootImage->loadSegment();
-                $this->memoryAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $loadSegment);
-                $this->machine->option()->logger()->debug(sprintf('Initialized CS to 0x%04X for El Torito boot', $loadSegment));
-            }
-        }
+        $this->initializeBootSegment();
 
         foreach ($this->architectureProvider->services() as $service) {
             assert($service instanceof ServiceInterface);
@@ -321,6 +288,39 @@ class Runtime implements RuntimeInterface
             $service->initialize($this);
             $this->machine->option()->logger()->debug(sprintf('Initialize %s service', get_class($service)));
         }
+    }
+
+    /**
+     * Initialize CS register for bootable streams.
+     */
+    private function initializeBootSegment(): void
+    {
+        $bootStream = $this->getBootStream();
+        if (!$bootStream instanceof ISOStream) {
+            return;
+        }
+
+        $bootImage = $bootStream->bootImage();
+        if ($bootImage === null) {
+            return;
+        }
+
+        $loadSegment = $bootImage->loadSegment();
+        $this->memoryAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $loadSegment);
+        $this->machine->option()->logger()->debug(
+            sprintf('Initialized CS to 0x%04X for bootable stream', $loadSegment)
+        );
+    }
+
+    /**
+     * Get the underlying boot stream.
+     */
+    private function getBootStream(): StreamReaderIsProxyableInterface
+    {
+        if ($this->streamReader instanceof CompositeStreamReader) {
+            return $this->streamReader->bootStream();
+        }
+        return $this->streamReader;
     }
 
     private function showHeader(): void

@@ -94,6 +94,15 @@ class Group5 implements InstructionInterface
         $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
         $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
 
+        // Debug
+        $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asByte();
+        $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
+        $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
+        $runtime->option()->logger()->debug(sprintf(
+            'CALL FAR: DS=0x%X BX=0x%X SI=0x%X addr=0x%X offset=0x%X segment=0x%X',
+            $ds, $bx, $si, $addr, $offset, $segment
+        ));
+
         $pos = $runtime->streamReader()->offset();
 
         $size = $runtime->context()->cpu()->operandSize();

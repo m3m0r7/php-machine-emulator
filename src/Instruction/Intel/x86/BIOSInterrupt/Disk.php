@@ -29,8 +29,6 @@ class Disk implements InterruptInterface
         $ah = $ax->asHighBit();    // AH
         $al = $ax->asLowBit();   // AL
 
-        $runtime->option()->logger()->debug(sprintf('Disk interrupt: AH=0x%02X, AL=0x%02X', $ah, $al));
-
         match ($ah) {
             0x00 => $this->reset($runtime),
             0x02 => $this->readSectorsCHS($runtime, $al),
@@ -55,19 +53,30 @@ class Disk implements InterruptInterface
 
     private function getDriveParameters(RuntimeInterface $runtime): void
     {
-        $heads = self::HEADS_PER_CYLINDER;
-        $sectors = self::SECTORS_PER_TRACK;
-        $cylinders = 1024; // generic fallback geometry
+        $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
+
+        // Use appropriate geometry based on drive type
+        if ($dl < 0x80) {
+            // 1.44MB floppy geometry
+            $heads = 2;
+            $sectors = 18;
+            $cylinders = 80;
+        } else {
+            // Hard disk geometry
+            $heads = self::HEADS_PER_CYLINDER;
+            $sectors = self::SECTORS_PER_TRACK;
+            $cylinders = 1024;
+        }
 
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00); // AH = 0 (success)
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectors); // AL = sectors per track (approx)
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectors); // AL = sectors per track
 
         $cl = ($sectors & 0x3F) | ((($cylinders >> 8) & 0x03) << 6);
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::ECX, $cl);           // CL
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::ECX, $cylinders);    // CH
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::ECX, $cylinders - 1);    // CH (max cylinder number)
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EDX, $heads - 1);    // DH
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EDX, 0x01);         // DL
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EDX, $heads - 1);    // DH (max head number)
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EDX, $dl < 0x80 ? 0x01 : 0x01);  // DL = number of drives
 
         $runtime->memoryAccessor()->setCarryFlag(false);
     }
@@ -93,8 +102,12 @@ class Disk implements InterruptInterface
         $dh = $dx->asHighBit();  // head
         $dl = $dx->asLowBit(); // drive
 
-        if ($dl < 0x80) {
-            $this->fail($runtime, 0x01); // invalid function for drive
+        // For ISO streams with El Torito floppy emulation, allow floppy drive access (DL < 0x80)
+        $reader = $runtime->streamReader()->proxy();
+        $isIsoWithFloppyEmulation = $reader instanceof ISOStreamProxy;
+
+        if ($dl < 0x80 && !$isIsoWithFloppyEmulation) {
+            $this->fail($runtime, 0x01); // invalid function for drive (only for non-ISO)
             return;
         }
 
@@ -108,11 +121,22 @@ class Disk implements InterruptInterface
             return;
         }
 
-        $lba = ($cylinder * self::HEADS_PER_CYLINDER + $head) * self::SECTORS_PER_TRACK + ($sector - 1);
+        // For floppy emulation (DL < 0x80), use 1.44MB floppy geometry
+        if ($dl < 0x80) {
+            $sectorsPerTrack = 18;
+            $headsPerCylinder = 2;
+        } else {
+            $sectorsPerTrack = self::SECTORS_PER_TRACK;
+            $headsPerCylinder = self::HEADS_PER_CYLINDER;
+        }
+
+        $lba = ($cylinder * $headsPerCylinder + $head) * $sectorsPerTrack + ($sector - 1);
         $bytes = $sectorsToRead * self::SECTOR_SIZE;
         $bufferAddress = $this->segmentLinearAddress($runtime, $es, $bx, $addressSize);
 
-        $reader = $runtime->streamReader()->proxy();
+        // Also debug the [0x01FA] value for MikeOS
+        $bufPtr = $this->readMemory16($runtime, 0x01FA + $runtime->addressMap()->getOrigin());
+        $runtime->option()->logger()->debug(sprintf('INT 13h READ: ES:BX=%04X:%04X linear=0x%05X LBA=%d sectors=%d (bufPtr[0x1FA]=0x%04X)', $es, $bx, $bufferAddress, $lba, $sectorsToRead, $bufPtr));
 
         try {
             $reader->setOffset($lba * self::SECTOR_SIZE);
@@ -165,20 +189,10 @@ class Disk implements InterruptInterface
         // We use SI directly as the linear DAP address to match common bootloader behavior.
         $dapLinear = $si;
 
-        $runtime->option()->logger()->debug(sprintf(
-            'LBA: DS=0x%04X, SI=0x%04X, DAP linear=0x%05X (using SI directly)',
-            $ds, $si, $dapLinear
-        ));
-
-
         // Read DAP size using byte-addressable memory
         $size = $this->readMemory8($runtime, $dapLinear);
 
         if ($size < 16) {
-            $runtime->option()->logger()->debug(sprintf(
-                'LBA: DAP size too small (%d) at 0x%05X, failing',
-                $size, $dapLinear
-            ));
             $this->fail($runtime, 0x01);
             return;
         }
@@ -196,26 +210,12 @@ class Disk implements InterruptInterface
         $bufferSegment = $this->readMemory16($runtime, $dapLinear + 6);
         $lba = $this->readMemory32($runtime, $dapLinear + 8); // Only use lower 32 bits
 
-        $runtime->option()->logger()->debug(sprintf(
-            'LBA raw: sectorCount=0x%04X, bufOff=0x%04X, bufSeg=0x%04X, lba=0x%08X',
-            $sectorCount, $bufferOffset, $bufferSegment, $lba
-        ));
-
         // Sanity check: sector count should be reasonable (max 127 sectors is standard for BIOS)
         // Also check if DAP looks corrupted by verifying sectorCount is reasonable
         if ($sectorCount === 0 || $sectorCount > 127) {
-            $runtime->option()->logger()->debug(sprintf(
-                'LBA: invalid DAP - sectorCount=%d (expected 1-127), failing with error',
-                $sectorCount
-            ));
             $this->fail($runtime, 0x01); // Invalid function/parameter
             return;
         }
-
-        $runtime->option()->logger()->debug(sprintf(
-            'LBA: sectorCount=%d, bufferSeg:Off=0x%04X:0x%04X, LBA=%d',
-            $sectorCount, $bufferSegment, $bufferOffset, $lba
-        ));
 
         if ($sectorCount === 0) {
             $runtime->option()->logger()->debug('LBA: sectorCount is 0, failing');
@@ -227,18 +227,8 @@ class Disk implements InterruptInterface
 
         $reader = $runtime->streamReader()->proxy();
 
-        $runtime->option()->logger()->debug(sprintf(
-            'LBA read: proxy type=%s',
-            get_class($reader)
-        ));
-
         // Check if this is an ISO stream - use CD sector size (2048 bytes)
         if ($reader instanceof ISOStreamProxy) {
-            $runtime->option()->logger()->debug(sprintf(
-                'LBA read from ISO: sector=%d, count=%d, buffer=0x%05X',
-                $lba, $sectorCount, $bufferAddress
-            ));
-
             // CD-ROM uses 2048-byte sectors
             $data = $reader->readCDSectors($lba, $sectorCount);
             $bytes = strlen($data);
@@ -369,7 +359,11 @@ class Disk implements InterruptInterface
         $dh = $dx->asHighBit();
         $dl = $dx->asLowBit();
 
-        if ($dl < 0x80) {
+        // For ISO streams with El Torito floppy emulation, allow floppy drive access (DL < 0x80)
+        $reader = $runtime->streamReader()->proxy();
+        $isIsoWithFloppyEmulation = $reader instanceof ISOStreamProxy;
+
+        if ($dl < 0x80 && !$isIsoWithFloppyEmulation) {
             $this->fail($runtime, 0x01);
             return;
         }
@@ -384,7 +378,16 @@ class Disk implements InterruptInterface
             return;
         }
 
-        $lba = ($cylinder * self::HEADS_PER_CYLINDER + $head) * self::SECTORS_PER_TRACK + ($sector - 1);
+        // Use appropriate geometry based on drive type
+        if ($dl < 0x80) {
+            $sectorsPerTrack = 18;
+            $headsPerCylinder = 2;
+        } else {
+            $sectorsPerTrack = self::SECTORS_PER_TRACK;
+            $headsPerCylinder = self::HEADS_PER_CYLINDER;
+        }
+
+        $lba = ($cylinder * $headsPerCylinder + $head) * $sectorsPerTrack + ($sector - 1);
         $bufferAddress = $this->segmentLinearAddress($runtime, $es, $bx, $addressSize);
 
         // Write is a no-op for read-only media, but we accept the data

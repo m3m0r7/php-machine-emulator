@@ -28,10 +28,6 @@ class Ret implements InstructionInterface
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $espBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize($size);
         $returnIp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
-        $runtime->option()->logger()->debug(sprintf(
-            'RET: ESP before=0x%05X, returnIP=0x%05X',
-            $espBefore, $returnIp
-        ));
 
         $targetCs = $ma->fetch(RegisterType::CS)->asByte();
         $currentCpl = $runtime->context()->cpu()->cpl();
@@ -66,9 +62,19 @@ class Ret implements InstructionInterface
         }
 
         if ($runtime->option()->shouldChangeOffset()) {
-            $linear = ($opcode === 0xCB || $opcode === 0xCA)
-                ? $this->linearCodeAddress($runtime, $targetCs, $returnIp, $size)
-                : $returnIp;
+            $inMemoryMode = $runtime->context()->cpu()->isMemoryMode();
+
+            if ($opcode === 0xCB || $opcode === 0xCA) {
+                // Far return - use linearCodeAddress
+                $linear = $this->linearCodeAddress($runtime, $targetCs, $returnIp, $size);
+            } elseif ($inMemoryMode && !$runtime->context()->cpu()->isProtectedMode()) {
+                // Near return in memory mode: convert CS:IP to linear address
+                $cs = $ma->fetch(RegisterType::CS)->asByte();
+                $linear = ($cs << 4) + ($returnIp & 0xFFFF);
+            } else {
+                $linear = $returnIp;
+            }
+            $runtime->option()->logger()->debug(sprintf('RET: popped returnIp=0x%05X ESP before=0x%08X, setOffset to 0x%05X (memMode=%d)', $returnIp, $espBefore, $linear, $inMemoryMode ? 1 : 0));
             $runtime->streamReader()->setOffset($linear);
         }
 

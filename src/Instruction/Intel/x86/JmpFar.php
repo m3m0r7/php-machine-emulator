@@ -25,6 +25,8 @@ class JmpFar implements InstructionInterface
         $offset = $opSize === 32 ? $reader->dword() : $reader->short();
         $segment = $reader->short();
 
+        $runtime->option()->logger()->debug(sprintf('JMP FAR: segment=0x%04X offset=0x%04X', $segment, $offset));
+
         if ($runtime->option()->shouldChangeOffset()) {
             if ($runtime->context()->cpu()->isProtectedMode()) {
                 $gate = $this->readCallGateDescriptor($runtime, $segment);
@@ -44,6 +46,7 @@ class JmpFar implements InstructionInterface
             }
 
             $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
+            $runtime->option()->logger()->debug(sprintf('JMP FAR: linearTarget=0x%05X', $linearTarget));
             $runtime->streamReader()->setOffset($linearTarget);
             $this->writeCodeSegment($runtime, $segment);
         }

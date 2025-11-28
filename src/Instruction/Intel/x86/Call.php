@@ -32,19 +32,20 @@ class Call implements InstructionInterface
         $espBefore = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(
             $runtime->context()->cpu()->operandSize()
         );
+
+        $opSize = $runtime->context()->cpu()->operandSize();
+        $target = $pos + $offset;
+        $runtime->option()->logger()->debug(sprintf('CALL near: pos=0x%05X offset=0x%04X target=0x%05X (push return=0x%05X, ESP before=0x%08X)', $pos, $offset & 0xFFFF, $target, $pos, $espBefore));
+
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->push(RegisterType::ESP, $pos, $runtime->context()->cpu()->operandSize());
-        $runtime->option()->logger()->debug(sprintf(
-            'CALL: ESP before=0x%05X, pushing returnIP=0x%05X, target=0x%05X, operandSize=%d',
-            $espBefore, $pos, $pos + $offset, $runtime->context()->cpu()->operandSize()
-        ));
+            ->push(RegisterType::ESP, $pos, $opSize);
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime
                 ->streamReader()
-                ->setOffset($pos + $offset);
+                ->setOffset($target);
         }
 
         return ExecutionStatus::SUCCESS;

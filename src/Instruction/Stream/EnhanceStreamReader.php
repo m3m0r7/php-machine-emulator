@@ -20,13 +20,13 @@ class EnhanceStreamReader
 
     public function byteAsSIB(): SIBInterface
     {
-        return new SIB($this->streamReader->byte());
+        return SIB::fromByte($this->streamReader->byte());
     }
 
 
     public function byteAsModRegRM(): ModRegRMInterface
     {
-        return new ModRegRM($this->streamReader->byte());
+        return ModRegRM::fromByte($this->streamReader->byte());
     }
 
     /**
@@ -34,7 +34,7 @@ class EnhanceStreamReader
      */
     public function modRegRM(int $byte): ModRegRMInterface
     {
-        return new ModRegRM($byte);
+        return ModRegRM::fromByte($byte);
     }
 
     public function signedShort(): int

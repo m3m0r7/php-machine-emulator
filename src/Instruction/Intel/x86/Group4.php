@@ -37,6 +37,7 @@ class Group4 implements InstructionInterface
         $result = ($value + 1) & 0xFF;
         $this->writeRm8($runtime, $reader, $modRegRM, $result);
         $runtime->memoryAccessor()->updateFlags($result, 8); // CF unaffected in INC
+        $runtime->option()->logger()->debug(sprintf('INC r/m8: %d -> %d (rm=%d)', $value, $result, $modRegRM->registerOrMemoryAddress()));
         return ExecutionStatus::SUCCESS;
     }
 

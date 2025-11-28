@@ -113,6 +113,14 @@ class Group3 implements InstructionInterface
                 ->write16Bit(RegisterType::EAX, $product & 0xFFFF)
                 ->write16Bit(RegisterType::EDX, ($product >> 16) & 0xFFFF);
 
+            // Debug MUL for FAT calculation
+            if ($operand === 3) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'MUL: AX=%d × %d = %d (AX=%d, DX=%d)',
+                    $acc, $operand, $product, $product & 0xFFFF, ($product >> 16) & 0xFFFF
+                ));
+            }
+
             $flag = ($product >> 16) !== 0;
         } else {
             $product = ($acc & 0xFFFFFFFF) * ($operand & 0xFFFFFFFF);
@@ -199,6 +207,14 @@ class Group3 implements InstructionInterface
 
             $quotient = (int) ($dividee / $divider);
             $remainder = $dividee % $divider;
+
+            // Debug DIV for FAT calculation
+            if ($divider === 2) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'DIV: DX:AX=%d / %d = %d remainder %d (DX before=%d)',
+                    $dividee, $divider, $quotient, $remainder, $dx
+                ));
+            }
 
             $ma
                 ->write16Bit(

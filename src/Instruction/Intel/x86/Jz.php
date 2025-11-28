@@ -26,10 +26,14 @@ class Jz implements InstructionInterface
             ->streamReader()
             ->offset();
 
-        if ($runtime->option()->shouldChangeOffset() && $runtime->memoryAccessor()->shouldZeroFlag()) {
+        $zf = $runtime->memoryAccessor()->shouldZeroFlag();
+        $target = $pos + $operand;
+        $runtime->option()->logger()->debug(sprintf('JZ: pos=0x%04X operand=0x%02X target=0x%04X ZF=%s taken=%s', $pos, $operand & 0xFF, $target, $zf ? '1' : '0', $zf ? 'YES' : 'NO'));
+
+        if ($runtime->option()->shouldChangeOffset() && $zf) {
             $runtime
                 ->streamReader()
-                ->setOffset($pos + $operand);
+                ->setOffset($target);
         }
 
         return ExecutionStatus::SUCCESS;

@@ -8,8 +8,20 @@ use PHPMachineEmulator\Stream\StreamReaderInterface;
 
 class ModRegRM implements ModRegRMInterface
 {
+    /** @var array<int, ModRegRM> */
+    private static array $cache = [];
+
     public function __construct(protected int $value)
     {
+    }
+
+    /**
+     * Get a cached ModRegRM instance for the given byte value.
+     * This avoids creating new objects for each instruction.
+     */
+    public static function fromByte(int $byte): self
+    {
+        return self::$cache[$byte] ??= new self($byte);
     }
 
     public function mode(): int

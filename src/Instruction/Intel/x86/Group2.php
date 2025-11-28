@@ -30,12 +30,6 @@ class Group2 implements InstructionInterface
 
         // Debug: trace Group2 operations in problem region
         $ip = $runtime->streamReader()->offset();
-        if ($ip >= 0x08A58 && $ip <= 0x08A60) {
-            $runtime->option()->logger()->debug(sprintf(
-                'Group2 at IP=0x%05X: opcode=0x%02X, digit=%d, opSize=%d',
-                $ip, $opcode, $modRegRM->digit(), $opSize
-            ));
-        }
 
         return match ($modRegRM->digit()) {
             0x0 => $this->rotateLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),

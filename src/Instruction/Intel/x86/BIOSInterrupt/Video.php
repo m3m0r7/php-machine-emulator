@@ -34,21 +34,21 @@ class Video implements InterruptInterface
         match ($serviceFunction = VideoServiceFunction::from($ah)) {
             VideoServiceFunction::SET_VIDEO_MODE => $this->setVideoMode($runtime, $fetchResult),
             VideoServiceFunction::TELETYPE_OUTPUT => $this->teletypeOutput($runtime, $fetchResult),
-
-            VideoServiceFunction::SET_CURSOR_SHAPE,
+            VideoServiceFunction::SET_CURSOR_SHAPE => null, // stub
             VideoServiceFunction::SET_CURSOR_POSITION => $this->setCursorPosition($runtime),
             VideoServiceFunction::GET_CURSOR_POSITION => $this->getCursorPosition($runtime),
-            VideoServiceFunction::SELECT_ACTIVE_DISPLAY_PAGE,
-            VideoServiceFunction::SET_ACTIVE_DISPLAY_PAGE,
-            VideoServiceFunction::SCROLL_UP_WINDOW,
-            VideoServiceFunction::SCROLL_DOWN_WINDOW,
-            VideoServiceFunction::READ_CHARACTER_AND_ATTRIBUTE_AT_CURSOR_POSITION,
-            VideoServiceFunction::WRITE_CHARACTER_AND_ATTRIBUTE_AT_CURSOR_POSITION,
-            VideoServiceFunction::WRITE_CHARACTER_ONLY_AT_CURSOR_POSITION,
-            VideoServiceFunction::SET_COLOR_PALETTE,
-            VideoServiceFunction::READ_PIXEL,
-            VideoServiceFunction::WRITE_PIXEL,
+            VideoServiceFunction::SELECT_ACTIVE_DISPLAY_PAGE => null, // stub
+            VideoServiceFunction::SET_ACTIVE_DISPLAY_PAGE => null, // stub
+            VideoServiceFunction::SCROLL_UP_WINDOW => $this->scrollUpWindow($runtime),
+            VideoServiceFunction::SCROLL_DOWN_WINDOW => null, // stub
+            VideoServiceFunction::READ_CHARACTER_AND_ATTRIBUTE_AT_CURSOR_POSITION => null, // stub
+            VideoServiceFunction::WRITE_CHARACTER_AND_ATTRIBUTE_AT_CURSOR_POSITION => $this->writeCharAndAttr($runtime, $fetchResult),
+            VideoServiceFunction::WRITE_CHARACTER_ONLY_AT_CURSOR_POSITION => $this->writeCharOnly($runtime, $fetchResult),
+            VideoServiceFunction::SET_COLOR_PALETTE => null, // stub
+            VideoServiceFunction::READ_PIXEL => null, // stub
+            VideoServiceFunction::WRITE_PIXEL => null, // stub
             VideoServiceFunction::GET_CURRENT_VIDEO_MODE => $this->getCurrentVideoMode($runtime),
+            VideoServiceFunction::PALETTE_ATTRIBUTE_CONTROL => $this->handlePaletteControl($runtime, $fetchResult),
             // VBE extensions (0x4Fxx)
             default => $this->handleVbe($runtime, $fetchResult),
         };
@@ -56,9 +56,8 @@ class Video implements InterruptInterface
 
     protected function setVideoMode(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
     {
-        $runtime->option()->logger()->debug('Set Video Mode');
-
         $videoType = $fetchResult->asLowBit();
+        $runtime->option()->logger()->debug(sprintf('Set Video Mode: 0x%02X', $videoType));
 
         // NOTE: validate video type
         $video = $runtime->video()->supportedVideoModes()[$videoType] ?? null;
@@ -67,14 +66,6 @@ class Video implements InterruptInterface
             return;
         }
         $this->currentMode = $videoType;
-
-        $runtime->option()->logger()->debug(
-            sprintf(
-                'Render video size %dx%d',
-                $video->width,
-                $video->height,
-            )
-        );
 
         $runtime
             ->memoryAccessor()
@@ -102,23 +93,107 @@ class Video implements InterruptInterface
 
     protected function setCursorPosition(RuntimeInterface $runtime): void
     {
+        // DH = row, DL = column
         $row = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asHighBit();
         $col = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
         $this->cursorRow = $row;
         $this->cursorCol = $col;
+        $runtime->option()->logger()->debug(sprintf('SET_CURSOR_POSITION: row=%d, col=%d', $row, $col));
+        // Update the screen writer's cursor position
+        $runtime->context()->screen()->setCursorPosition($row, $col);
     }
 
     protected function getCursorPosition(RuntimeInterface $runtime): void
     {
         $edx = ($this->cursorRow << 8) | ($this->cursorCol & 0xFF);
         $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EDX, $edx);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write8Bit(RegisterType::BH, 0); // page 0
+        // BH = page number (0), BL = attribute. Set BX to 0 for page 0
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EBX, 0);
     }
 
     protected function getCurrentVideoMode(RuntimeInterface $runtime): void
     {
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write8Bit(RegisterType::AL, $this->currentMode & 0xFF);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write8Bit(RegisterType::AH, 0x20); // text mode, 8x16 font
+        // Write AL (low byte of EAX) with current video mode
+        // Write AH (high byte of EAX low word) with 0x20 (text mode, 8x16 font)
+        // Combined: AH:AL = 0x2003 for mode 3
+        $axValue = (0x20 << 8) | ($this->currentMode & 0xFF);
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $axValue);
+    }
+
+    protected function handlePaletteControl(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
+    {
+        // INT 10h AH=10h - Palette/Attribute Control
+        // AL=00h: Set individual palette register
+        // AL=01h: Set overscan (border) color
+        // AL=02h: Set all palette registers
+        // AL=03h: Toggle intensity/blinking bit (BL=0 enable intensity, BL=1 enable blinking)
+        // We simply stub these operations for now
+        $al = $fetchResult->asLowBit();
+        $runtime->option()->logger()->debug(sprintf('Palette control: AL=0x%02X (stub)', $al));
+    }
+
+    protected function scrollUpWindow(RuntimeInterface $runtime): void
+    {
+        // INT 10h AH=06h - Scroll Up Window
+        // AL = number of lines to scroll (0 = clear entire window)
+        // BH = attribute for blank lines
+        // CH,CL = row,column of upper left corner
+        // DH,DL = row,column of lower right corner
+        $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
+        $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize(16);
+        $attribute = ($bx >> 8) & 0xFF; // BH = attribute for blank lines
+        $cx = $runtime->memoryAccessor()->fetch(RegisterType::ECX)->asBytesBySize(16);
+        $dx = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asBytesBySize(16);
+
+        $topRow = ($cx >> 8) & 0xFF;    // CH
+        $leftCol = $cx & 0xFF;           // CL
+        $bottomRow = ($dx >> 8) & 0xFF;  // DH
+        $rightCol = $dx & 0xFF;          // DL
+
+        $width = $rightCol - $leftCol + 1;
+        $height = $bottomRow - $topRow + 1;
+
+        $runtime->option()->logger()->debug(sprintf(
+            'SCROLL_UP: AL=%d, attr=0x%02X, top=%d, left=%d, bottom=%d, right=%d',
+            $al, $attribute, $topRow, $leftCol, $bottomRow, $rightCol
+        ));
+
+        if ($al === 0) {
+            // Clear entire window with the specified attribute
+            $runtime->context()->screen()->fillArea($topRow, $leftCol, $width, $height, $attribute);
+        }
+        // Otherwise, stub for now - actual scrolling would require screen buffer manipulation
+    }
+
+    protected function writeCharAndAttr(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
+    {
+        // INT 10h AH=09h - Write Character and Attribute at Cursor Position
+        // AL = character to write
+        // BH = page number
+        // BL = attribute (text mode) or color (graphics mode)
+        // CX = number of times to write character
+        $char = chr($fetchResult->asLowBit());
+        $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize(16);
+        $attribute = $bx & 0xFF; // BL = attribute
+        $count = $runtime->memoryAccessor()->fetch(RegisterType::ECX)->asBytesBySize(16);
+
+        $runtime->option()->logger()->debug(sprintf('WRITE_CHAR_ATTR: char=0x%02X attr=0x%02X count=%d', ord($char), $attribute, $count));
+
+        // Write character at current cursor position with attribute (doesn't advance cursor)
+        $runtime->context()->screen()->writeCharAtCursor($char, $count, $attribute);
+    }
+
+    protected function writeCharOnly(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
+    {
+        // INT 10h AH=0Ah - Write Character Only at Cursor Position
+        // AL = character to write
+        // BH = page number
+        // CX = number of times to write character
+        $char = chr($fetchResult->asLowBit());
+        $count = $runtime->memoryAccessor()->fetch(RegisterType::ECX)->asBytesBySize(16);
+
+        // Write character at current cursor position (doesn't advance cursor)
+        $runtime->context()->screen()->writeCharAtCursor($char, $count);
     }
 
     protected function handleVbe(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void

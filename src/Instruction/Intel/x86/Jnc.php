@@ -27,10 +27,14 @@ class Jnc implements InstructionInterface
             ->offset();
 
         // JNC: Jump if Not Carry (CF=0)
-        if ($runtime->option()->shouldChangeOffset() && !$runtime->memoryAccessor()->shouldCarryFlag()) {
+        $cf = $runtime->memoryAccessor()->shouldCarryFlag();
+        $target = $pos + $operand;
+        $runtime->option()->logger()->debug(sprintf('JNC: pos=0x%04X operand=0x%02X target=0x%04X CF=%s taken=%s', $pos, $operand & 0xFF, $target, $cf ? '1' : '0', !$cf ? 'YES' : 'NO'));
+
+        if ($runtime->option()->shouldChangeOffset() && !$cf) {
             $runtime
                 ->streamReader()
-                ->setOffset($pos + $operand);
+                ->setOffset($target);
         }
 
         return ExecutionStatus::SUCCESS;
