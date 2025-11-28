@@ -183,7 +183,9 @@ trait Instructable
     {
         $addressSize = $runtime->context()->cpu()->addressSize();
         $mask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value & $mask, $addressSize);
+        $maskedValue = $value & $mask;
+
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $maskedValue, $addressSize);
     }
 
     protected function stepForElement(RuntimeInterface $runtime, int $bytes): int
@@ -397,6 +399,15 @@ trait Instructable
         }
 
         $linearAddress = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        // Debug: log writeRm8 memory address when writing printable chars
+        if ($value >= 0x20 && $value < 0x7F) {
+            $runtime->option()->logger()->debug(sprintf(
+                'writeRm8: linear=0x%05X value=0x%02X (char=%s)',
+                $linearAddress,
+                $value,
+                chr($value)
+            ));
+        }
         $this->writeMemory8($runtime, $linearAddress, $value);
     }
 
@@ -424,7 +435,10 @@ trait Instructable
     protected function readMemory8(RuntimeInterface $runtime, int $address): int
     {
         $physical = $this->translateLinear($runtime, $address);
-        return $this->readPhysical8($runtime, $physical);
+        $value = $this->readPhysical8($runtime, $physical);
+
+
+        return $value;
     }
 
     protected function readMemory16(RuntimeInterface $runtime, int $address): int

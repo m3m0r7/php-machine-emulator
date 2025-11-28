@@ -23,6 +23,7 @@ class Dec implements InstructionInterface
         $reg = ($this->registersAndOPCodes())[$opcode];
         $ma = $runtime->memoryAccessor();
         $value = $ma->fetch($reg)->asBytesBySize($size);
+
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value - 1) & $mask;
         $ma->enableUpdateFlags(false)->writeBySize($reg, $result, $size);

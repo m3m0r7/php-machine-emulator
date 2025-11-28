@@ -24,12 +24,16 @@ class Movsx implements InstructionInterface
         $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
 
         $targetOffset = $this->registersAndOPCodes()[$opcode];
+
         $size = $runtime->context()->cpu()->operandSize();
+
 
         // Read immediate value based on operand size
         $value = $size === 32
             ? $enhancedStreamReader->dword()
             : $enhancedStreamReader->short();
+
+
 
         $runtime
             ->memoryAccessor()

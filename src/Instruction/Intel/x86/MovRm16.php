@@ -41,6 +41,16 @@ class MovRm16 implements InstructionInterface
             }
         }
 
+        // Debug: log MOV to SI register (reg code 6 = SI)
+        if ($regCode === 6) {
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV SI, r/m16: value=0x%04X mode=%d rm=%d',
+                $value,
+                $modRegRM->mode(),
+                $rm
+            ));
+        }
+
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)

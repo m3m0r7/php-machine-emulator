@@ -105,8 +105,13 @@ class RepPrefix implements InstructionInterface
                 $this->segmentOffsetAddress($runtime, RegisterType::ES, $di),
                 true
             );
+
             $ma->allocate($address, safe: false);
-            $ma->enableUpdateFlags(false)->writeBySize($address, $value, $size);
+            if ($size === 8) {
+                $ma->writeRawByte($address, $value);
+            } else {
+                $ma->enableUpdateFlags(false)->writeBySize($address, $value, $size);
+            }
             $di += $step;
         }
 
@@ -135,7 +140,11 @@ class RepPrefix implements InstructionInterface
                 true
             );
             $ma->allocate($destAddr, safe: false);
-            $ma->enableUpdateFlags(false)->writeBySize($destAddr, $value, $size);
+            if ($size === 8) {
+                $ma->writeRawByte($destAddr, $value);
+            } else {
+                $ma->enableUpdateFlags(false)->writeBySize($destAddr, $value, $size);
+            }
 
             $si += $step;
             $di += $step;

@@ -22,10 +22,20 @@ class Lodsb implements InstructionInterface
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $segment = $runtime->segmentOverride() ?? RegisterType::DS;
 
-        $value = $this->readMemory8(
-            $runtime,
-            $this->segmentOffsetAddress($runtime, $segment, $si),
-        );
+        $linearAddr = $this->segmentOffsetAddress($runtime, $segment, $si);
+        $value = $this->readMemory8($runtime, $linearAddr);
+
+        // Debug: log lodsb operations
+        $segValue = $runtime->memoryAccessor()->fetch($segment)->asByte();
+        $runtime->option()->logger()->debug(sprintf(
+            'LODSB: %s:SI=0x%04X:0x%04X linear=0x%05X value=0x%02X (char=%s)',
+            $segment->name,
+            $segValue,
+            $si,
+            $linearAddr,
+            $value,
+            $value >= 0x20 && $value < 0x7F ? chr($value) : '.'
+        ));
 
         $runtime->memoryAccessor()
             ->enableUpdateFlags(false)
@@ -34,8 +44,11 @@ class Lodsb implements InstructionInterface
                 $value,
             );
 
+
         $step = $this->stepForElement($runtime, 1);
-        $this->writeIndex($runtime, RegisterType::ESI, $si + $step);
+        $newSi = $si + $step;
+        $this->writeIndex($runtime, RegisterType::ESI, $newSi);
+
 
         return ExecutionStatus::SUCCESS;
     }

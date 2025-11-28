@@ -136,7 +136,10 @@ class Disk implements InterruptInterface
 
         // Also debug the [0x01FA] value for MikeOS
         $bufPtr = $this->readMemory16($runtime, 0x01FA + $runtime->addressMap()->getOrigin());
-        $runtime->option()->logger()->debug(sprintf('INT 13h READ: ES:BX=%04X:%04X linear=0x%05X LBA=%d sectors=%d (bufPtr[0x1FA]=0x%04X)', $es, $bx, $bufferAddress, $lba, $sectorsToRead, $bufPtr));
+        $runtime->option()->logger()->debug(sprintf(
+            'INT 13h READ CHS: C=%d H=%d S=%d => LBA=%d, sectors=%d, ES:BX=%04X:%04X linear=0x%05X',
+            $cylinder, $head, $sector, $lba, $sectorsToRead, $es, $bx, $bufferAddress
+        ));
 
         try {
             $reader->setOffset($lba * self::SECTOR_SIZE);
@@ -145,6 +148,7 @@ class Disk implements InterruptInterface
             return;
         }
 
+        $readData = '';
         for ($i = 0; $i < $bytes; $i++) {
             try {
                 $byte = $reader->byte();
@@ -153,10 +157,12 @@ class Disk implements InterruptInterface
                 return;
             }
 
+            $readData .= chr($byte);
             $address = $bufferAddress + $i;
             $runtime->memoryAccessor()->allocate($address, safe: false);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($address, $byte, 8);
+            $runtime->memoryAccessor()->writeRawByte($address, $byte);
         }
+
 
         // update AL with sectors read, AH = 0, clear CF
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
@@ -236,7 +242,7 @@ class Disk implements InterruptInterface
             for ($i = 0; $i < $bytes; $i++) {
                 $address = $bufferAddress + $i;
                 $runtime->memoryAccessor()->allocate($address, safe: false);
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($address, ord($data[$i]), 8);
+                $runtime->memoryAccessor()->writeRawByte($address, ord($data[$i]));
             }
 
             $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
@@ -265,7 +271,7 @@ class Disk implements InterruptInterface
 
             $address = $bufferAddress + $i;
             $runtime->memoryAccessor()->allocate($address, safe: false);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($address, $byte, 8);
+            $runtime->memoryAccessor()->writeRawByte($address, $byte);
         }
 
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);

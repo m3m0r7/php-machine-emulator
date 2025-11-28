@@ -27,6 +27,7 @@ class Scasb implements InstructionInterface
         );
         $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
 
+
         $runtime->memoryAccessor()->updateFlags($al - $value, 8)->setCarryFlag($al < $value);
 
         $step = $this->stepForElement($runtime, 1);

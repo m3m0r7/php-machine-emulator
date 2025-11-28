@@ -29,14 +29,24 @@ class Stosb implements InstructionInterface
 
         $address = $this->translateLinear($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
 
+
         $runtime
             ->memoryAccessor()
             ->allocate($address, safe: false);
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
-            ->writeBySize($address, $byte, 8);
+            ->writeRawByte($address, $byte);
+
+        // Debug: log stosb operations
+        $runtime->option()->logger()->debug(sprintf(
+            'STOSB: ES:DI=0x%04X:0x%04X linear=0x%05X value=0x%02X (char=%s)',
+            $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte(),
+            $di,
+            $address,
+            $byte,
+            $byte >= 0x20 && $byte < 0x7F ? chr($byte) : '.'
+        ));
 
         $step = $this->stepForElement($runtime, 1);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $step);

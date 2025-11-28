@@ -23,6 +23,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\ImulImmediate;
 use PHPMachineEmulator\Instruction\Intel\x86\Ins;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
 use PHPMachineEmulator\Instruction\Intel\x86\Int3;
+use PHPMachineEmulator\Instruction\Intel\x86\Ja;
 use PHPMachineEmulator\Instruction\Intel\x86\Jbe;
 use PHPMachineEmulator\Instruction\Intel\x86\Jc;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnc;
@@ -33,6 +34,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Jnz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jg;
 use PHPMachineEmulator\Instruction\Intel\x86\Jl;
+use PHPMachineEmulator\Instruction\Intel\x86\Jle;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsw;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
@@ -105,6 +107,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\PushReg;
 use PHPMachineEmulator\Instruction\Intel\x86\Ret;
 use PHPMachineEmulator\Instruction\Intel\x86\Sti;
 use PHPMachineEmulator\Instruction\Intel\x86\Stosb;
+use PHPMachineEmulator\Instruction\Intel\x86\TestImmAl;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 
@@ -140,6 +143,7 @@ class x86 implements InstructionListInterface
             Inc::class,
             Int_::class,
             Int3::class,
+            Ja::class,
             Jbe::class,
             Jc::class,
             Jnc::class,
@@ -150,6 +154,7 @@ class x86 implements InstructionListInterface
             Jz::class,
             Jg::class,
             Jl::class,
+            Jle::class,
             Lodsb::class,
             Lodsw::class,
             Loop::class,
@@ -223,6 +228,7 @@ class x86 implements InstructionListInterface
             Sti::class,
             Stosb::class,
             Stosw::class,
+            TestImmAl::class,
             Xor_::class,
             ImulImmediate::class,
             FpuStub::class,

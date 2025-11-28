@@ -30,6 +30,14 @@ class MovImmToRm implements InstructionInterface
 
         if ($opcode === 0xC6) {
             $value = $enhancedStreamReader->streamReader()->byte();
+            // Debug: log mov byte [rm], imm8 operations
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV byte [rm], imm8: mode=%d rm=%d value=0x%02X (char=%s)',
+                $modRegRM->mode(),
+                $modRegRM->registerOrMemoryAddress(),
+                $value,
+                $value >= 0x20 && $value < 0x7F ? chr($value) : '.'
+            ));
             $this->writeRm8($runtime, $enhancedStreamReader, $modRegRM, $value);
         } else {
             $value = $size === 32 ? $enhancedStreamReader->dword() : $enhancedStreamReader->short();

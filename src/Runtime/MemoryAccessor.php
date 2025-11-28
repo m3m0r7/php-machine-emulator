@@ -120,6 +120,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $address = $this->asAddress($registerType);
         $isGpr = $this->isGprAddress($address);
 
+
         // Read current value, update high byte (bits 8-15), preserve the rest
         $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
         $newValue = ($current & ~0xFF00) | (($value & 0xFF) << 8);
@@ -223,7 +224,14 @@ class MemoryAccessor implements MemoryAccessorInterface
 
         $this->zeroFlag = $masked === 0;
         $this->signFlag = ($masked & (1 << ($size - 1))) !== 0;
-        $this->overflowFlag = $value < 0 || $value > $mask;
+
+        // Overflow flag: set if the signed result is outside the representable range
+        // For subtraction/comparison: OF is set when the result overflows the signed range
+        // Signed range for N bits: -(2^(N-1)) to (2^(N-1) - 1)
+        $signedMin = -(1 << ($size - 1));        // e.g., -32768 for 16-bit
+        $signedMax = (1 << ($size - 1)) - 1;     // e.g., 32767 for 16-bit
+        $this->overflowFlag = $value < $signedMin || $value > $signedMax;
+
         $this->parityFlag = substr_count(decbin($masked & 0b11111111), '1') % 2 === 0;
 
         return $this;

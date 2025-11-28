@@ -29,7 +29,10 @@ class Video implements InterruptInterface
         $fetchResult = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
         $ah = $fetchResult->asHighBit();
         $al = $fetchResult->asLowBit();
-        $runtime->option()->logger()->debug(sprintf('Video INT: AH=0x%02X AL=0x%02X (char=%s)', $ah, $al, chr($al)));
+        // Only log visible ASCII characters for teletype output
+        if ($ah === 0x0E && $al >= 0x20 && $al < 0x7F) {
+            $runtime->option()->logger()->debug(sprintf('PRINT: %s (0x%02X)', chr($al), $al));
+        }
 
         match ($serviceFunction = VideoServiceFunction::from($ah)) {
             VideoServiceFunction::SET_VIDEO_MODE => $this->setVideoMode($runtime, $fetchResult),

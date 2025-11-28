@@ -100,8 +100,6 @@ class Group1 implements InstructionInterface
             } else {
                 $this->writeMemory16($runtime, $linearAddr, $result);
             }
-            // Debug: show memory write for ADD
-            $runtime->option()->logger()->debug(sprintf('ADD [0x%05X], 0x%04X: original=0x%04X result=0x%04X', $linearAddr, $operand, $original, $result & 0xFFFF));
         }
         $runtime->memoryAccessor()->setCarryFlag($result > $mask);
 

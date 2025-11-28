@@ -29,6 +29,16 @@ class MovImm8 implements InstructionInterface
             $value = $opSize === 32
                 ? $enhancedStreamReader->dword()
                 : $enhancedStreamReader->short();
+
+            // Debug: log MOV to SI register
+            if ($register === RegisterType::ESI) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'MOV SI, imm16: value=0x%04X (opcode=0x%02X)',
+                    $value,
+                    $opcode
+                ));
+            }
+
             $runtime
                 ->memoryAccessor()
                 ->enableUpdateFlags(false)

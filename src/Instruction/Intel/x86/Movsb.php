@@ -31,7 +31,7 @@ class Movsb implements InstructionInterface
 
         $destAddress = $this->translateLinear($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
         $runtime->memoryAccessor()->allocate($destAddress, safe: false);
-        $runtime->memoryAccessor()->writeBySize($destAddress, $value, 8);
+        $runtime->memoryAccessor()->writeRawByte($destAddress, $value);
 
         $step = $this->stepForElement($runtime, 1);
         $this->writeIndex($runtime, RegisterType::ESI, $si + $step);

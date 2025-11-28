@@ -33,7 +33,11 @@ class Group5 implements InstructionInterface
             0x4 => $this->jmpNearRm($runtime, $reader, $modRegRM),
             0x5 => $this->jmpFarRm($runtime, $reader, $modRegRM),
             0x6 => $this->push($runtime, $reader, $modRegRM),
-            default => throw new ExecutionException(sprintf('Group5 digit 0x%X not implemented', $modRegRM->digit())),
+            default => throw new ExecutionException(sprintf(
+                'Group5 digit 0x%X not implemented at IP=0x%05X',
+                $modRegRM->digit(),
+                $runtime->streamReader()->offset() - 2
+            )),
         };
     }
 

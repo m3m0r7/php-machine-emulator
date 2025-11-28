@@ -31,6 +31,12 @@ class Popa implements InstructionInterface
         $cx = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $ax = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
+        // Debug: log POPA SI value
+        $runtime->option()->logger()->debug(sprintf(
+            'POPA: SI=0x%04X DI=0x%04X AX=0x%04X BX=0x%04X',
+            $si, $di, $ax, $bx
+        ));
+
         $ma->writeBySize(RegisterType::EDI, $di, $size);
         $ma->writeBySize(RegisterType::ESI, $si, $size);
         $ma->writeBySize(RegisterType::EBP, $bp, $size);

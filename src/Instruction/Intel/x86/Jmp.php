@@ -31,10 +31,7 @@ class Jmp implements InstructionInterface
             ->offset();
 
         // Check if we're in memory mode (executing code loaded into memory via INT 13h)
-        $inMemoryMode = false;
-        if ($runtime->streamReader() instanceof \PHPMachineEmulator\Stream\ISO\ISOStream) {
-            $inMemoryMode = $runtime->streamReader()->isMemoryMode();
-        }
+        $inMemoryMode = $runtime->context()->cpu()->isMemoryMode();
 
         if ($inMemoryMode || $runtime->context()->cpu()->isProtectedMode()) {
             // In memory mode or protected mode, use linear addresses directly

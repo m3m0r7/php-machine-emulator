@@ -43,6 +43,7 @@ class CmpRegRm implements InstructionInterface
             $dest = $destIsRm
                 ? $this->readRm($runtime, $reader, $modRegRM, $opSize)
                 : $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
+
             $runtime->memoryAccessor()->updateFlags($dest - $src, $opSize)->setCarryFlag($dest < $src);
         }
 

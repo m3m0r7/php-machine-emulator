@@ -27,6 +27,14 @@ class Xchg implements InstructionInterface
             $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
             $rv = $runtime->memoryAccessor()->fetch($target)->asByte();
 
+            // Debug: log XCHG when SI is involved
+            if ($target === RegisterType::ESI) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'XCHG AX, SI: AX=0x%04X SI=0x%04X (opcode=0x%02X)',
+                    $ax, $rv, $opcode
+                ));
+            }
+
             $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $rv);
             $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($target, $ax);
             return ExecutionStatus::SUCCESS;
