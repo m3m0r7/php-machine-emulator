@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Display\Window\SDLKeyMapper;
+use PHPMachineEmulator\Display\Writer\WindowScreenWriter;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class KeyboardController
@@ -17,6 +19,11 @@ class KeyboardController
     private bool $expectingMouseCommand = false;
     private int $commandByte = 0x00;
     private bool $mouseAwaitingData = false;
+
+    // SDL key tracking
+    private ?int $lastSDLScancode = null;
+    private int $lastSDLKeyTime = 0;
+    private const SDL_KEY_REPEAT_DELAY_MS = 150;
 
     public function __construct(private PicState $picState)
     {
@@ -41,6 +48,12 @@ class KeyboardController
     public function readData(RuntimeInterface $runtime): int
     {
         if (empty($this->queue)) {
+            // Try SDL input first
+            $this->pollSDLInput($runtime);
+        }
+
+        if (empty($this->queue)) {
+            // Fallback to stdin
             try {
                 $byte = $runtime->option()->IO()->input()->byte();
                 if ($byte !== null) {
@@ -56,6 +69,66 @@ class KeyboardController
         }
         $item = array_shift($this->queue);
         return $item['data'];
+    }
+
+    /**
+     * Poll SDL for keyboard input and enqueue scancodes
+     */
+    private function pollSDLInput(RuntimeInterface $runtime): void
+    {
+        $screenWriter = $runtime->context()->screen()->screenWriter();
+        if (!($screenWriter instanceof WindowScreenWriter)) {
+            return;
+        }
+
+        // Process SDL events
+        $screenWriter->window()->processEvents();
+
+        // Get pressed keys
+        $pressed = $screenWriter->window()->getPressedKeys();
+        if (empty($pressed)) {
+            $this->lastSDLScancode = null;
+            return;
+        }
+
+        // Filter out modifier keys
+        $modifiers = [
+            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_LSHIFT,
+            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_RSHIFT,
+            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_LCTRL,
+            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_RCTRL,
+            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_LALT,
+            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_RALT,
+        ];
+
+        $currentTimeMs = (int)(microtime(true) * 1000);
+
+        foreach ($pressed as $sdlScancode) {
+            if (in_array($sdlScancode, $modifiers, true)) {
+                continue;
+            }
+
+            // Check for key repeat
+            if ($sdlScancode === $this->lastSDLScancode &&
+                ($currentTimeMs - $this->lastSDLKeyTime) < self::SDL_KEY_REPEAT_DELAY_MS) {
+                continue;
+            }
+
+            // Convert SDL scancode to BIOS scancode
+            $biosScancode = SDLKeyMapper::toBiosScancode($sdlScancode);
+            if ($biosScancode === null) {
+                continue;
+            }
+
+            $this->lastSDLScancode = $sdlScancode;
+            $this->lastSDLKeyTime = $currentTimeMs;
+
+            // Enqueue the BIOS scancode (make code)
+            $this->enqueueScancode($biosScancode);
+
+            // Only process one key at a time
+            return;
+        }
     }
 
     public function readStatus(): int
@@ -75,6 +148,19 @@ class KeyboardController
             $status |= 0x10; // keyboard inhibited
         }
         return $status;
+    }
+
+    /**
+     * Poll SDL and update queue before status check
+     * Call this from port 0x64 read to ensure SDL input is captured
+     */
+    public function pollAndReadStatus(RuntimeInterface $runtime): int
+    {
+        // Poll SDL input if queue is empty
+        if (empty($this->queue)) {
+            $this->pollSDLInput($runtime);
+        }
+        return $this->readStatus();
     }
 
     public function writeCommand(int $command, RuntimeInterface $runtime): void

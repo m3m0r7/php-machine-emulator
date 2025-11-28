@@ -28,6 +28,22 @@ trait GenericStream
         return unpack('c', $this->char())[1];
     }
 
+    public function short(): int
+    {
+        $low = $this->byte();
+        $high = $this->byte();
+        return $low | ($high << 8);
+    }
+
+    public function dword(): int
+    {
+        $b0 = $this->byte();
+        $b1 = $this->byte();
+        $b2 = $this->byte();
+        $b3 = $this->byte();
+        return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+    }
+
     public function offset(): int
     {
         $offset = ftell($this->resource);

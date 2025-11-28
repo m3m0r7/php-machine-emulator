@@ -56,6 +56,24 @@ class StreamReaderProxy implements StreamReaderIsProxyableInterface, Backtraceab
         return $byte;
     }
 
+    public function short(): int
+    {
+        $short = $this->streamReader->short();
+        $this->backtraces[$this->index][] = $short & 0xFF;
+        $this->backtraces[$this->index][] = ($short >> 8) & 0xFF;
+        return $short;
+    }
+
+    public function dword(): int
+    {
+        $dword = $this->streamReader->dword();
+        $this->backtraces[$this->index][] = $dword & 0xFF;
+        $this->backtraces[$this->index][] = ($dword >> 8) & 0xFF;
+        $this->backtraces[$this->index][] = ($dword >> 16) & 0xFF;
+        $this->backtraces[$this->index][] = ($dword >> 24) & 0xFF;
+        return $dword;
+    }
+
     public function proxy(): StreamReaderProxyInterface
     {
         return $this->streamReader->proxy();

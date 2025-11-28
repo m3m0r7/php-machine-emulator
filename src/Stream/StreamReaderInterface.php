@@ -14,5 +14,7 @@ interface StreamReaderInterface
     public function char(): string;
     public function byte(): int;
     public function signedByte(): int;
+    public function short(): int;
+    public function dword(): int;
 }
 

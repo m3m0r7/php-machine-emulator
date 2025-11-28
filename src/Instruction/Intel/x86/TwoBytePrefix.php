@@ -705,7 +705,16 @@ class TwoBytePrefix implements InstructionInterface
         $disp = $opSize === 32
             ? $runtime->streamReader()->dword()
             : $runtime->streamReader()->short();
-        $disp = $opSize === 32 ? (int) (pack('V', $disp) === false ? $disp : unpack('l', pack('V', $disp))[1]) : $disp;
+
+        // Sign-extend displacement
+        if ($opSize === 32) {
+            $disp = (int) (pack('V', $disp) === false ? $disp : unpack('l', pack('V', $disp))[1]);
+        } else {
+            // Sign-extend 16-bit to signed integer
+            if ($disp > 0x7FFF) {
+                $disp = $disp - 0x10000;
+            }
+        }
 
         if ($this->conditionMet($runtime, $cc)) {
             $current = $runtime->streamReader()->offset();

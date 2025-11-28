@@ -1195,7 +1195,7 @@ trait Instructable
         }
 
         if ($port === 0x64) {
-            return $kbd->readStatus();
+            return $kbd->pollAndReadStatus($runtime);
         }
 
         if ($port === 0x1F0 || $port === 0x170) {

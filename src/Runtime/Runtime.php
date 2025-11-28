@@ -116,10 +116,8 @@ class Runtime implements RuntimeInterface
             $this->instructionCount++;
             $this->tickTimers();
             $this->memoryAccessor->setInstructionFetch(true);
-            $ip = $this->streamReader->offset();
             $opcode = $this->streamReader->byte();
             $this->memoryAccessor->setInstructionFetch(false);
-            // $this->machine->option()->logger()->debug(sprintf('IP=0x%05X opcode=0x%02X', $ip, $opcode));
             $result = $this->execute($opcode);
             if ($result === ExecutionStatus::EXIT) {
                 $this->machine->option()->logger()->info('Exited program');

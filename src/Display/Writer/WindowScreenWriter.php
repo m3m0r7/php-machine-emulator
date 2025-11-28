@@ -262,6 +262,47 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->window->stop();
     }
 
+    /**
+     * Get current mouse position and button state
+     *
+     * @return array{x: int, y: int, buttons: int}
+     */
+    public function getMouseState(): array
+    {
+        return $this->window->getMouseState();
+    }
+
+    /**
+     * Check if a specific key is currently pressed
+     *
+     * @param int $scancode SDL scancode (use Window::SDL_SCANCODE_* constants)
+     * @return bool
+     */
+    public function isKeyPressed(int $scancode): bool
+    {
+        return $this->window->isKeyPressed($scancode);
+    }
+
+    /**
+     * Poll for a single key press and return BIOS key code
+     *
+     * @return int|null AX value (AH=scan code, AL=ASCII) or null if no key pressed
+     */
+    public function pollKeyPress(): ?int
+    {
+        return $this->window->pollKeyPress();
+    }
+
+    /**
+     * Check if shift key is currently pressed
+     *
+     * @return bool
+     */
+    public function isShiftPressed(): bool
+    {
+        return $this->window->isShiftPressed();
+    }
+
     public function showSplash(string $imagePath, int $durationMs = 5000): void
     {
         if (!file_exists($imagePath)) {

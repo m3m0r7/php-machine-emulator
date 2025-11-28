@@ -50,6 +50,8 @@ class Int_ implements InstructionInterface
             ->byte();
         $returnIp = $runtime->streamReader()->offset();
 
+        // $runtime->option()->logger()->debug(sprintf('INT 0x%02X called', $vector));
+
         $operand = BIOSInterrupt::tryFrom($vector);
 
         match ($operand) {
