@@ -32,6 +32,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\JmpShort;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jg;
+use PHPMachineEmulator\Instruction\Intel\x86\Jl;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsw;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
@@ -45,6 +46,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\MovRm16;
 use PHPMachineEmulator\Instruction\Intel\x86\MovImmToRm;
 use PHPMachineEmulator\Instruction\Intel\x86\MovMoffset;
 use PHPMachineEmulator\Instruction\Intel\x86\Lea;
+use PHPMachineEmulator\Instruction\Intel\x86\Lds;
 use PHPMachineEmulator\Instruction\Intel\x86\Xchg;
 use PHPMachineEmulator\Instruction\Intel\x86\Group5;
 use PHPMachineEmulator\Instruction\Intel\x86\PopRm;
@@ -147,6 +149,7 @@ class x86 implements InstructionListInterface
             Jnz::class,
             Jz::class,
             Jg::class,
+            Jl::class,
             Lodsb::class,
             Lodsw::class,
             Loop::class,
@@ -159,6 +162,7 @@ class x86 implements InstructionListInterface
             MovImmToRm::class,
             MovMoffset::class,
             Lea::class,
+            Lds::class,
             Xchg::class,
             Movsg::class,
             Movsx::class,

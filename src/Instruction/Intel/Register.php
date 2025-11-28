@@ -24,7 +24,7 @@ class Register implements RegisterInterface
     {
         foreach (self::map() as $name => $value) {
             if ($register === $value) {
-                return RegisterType::cases()[$name];
+                return constant(RegisterType::class . '::' . $name);
             }
         }
 

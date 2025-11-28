@@ -19,6 +19,9 @@ class WindowScreenWriter implements ScreenWriterInterface
     protected int $cursorY = 0;
     protected int $pixelSize;
 
+    /** @var array<int, array<int, string>> Text buffer [row][col] => char */
+    protected array $textBuffer = [];
+
     public function __construct(
         protected VideoTypeInfo $videoTypeInfo,
         ?WindowOption $windowOption = null,
@@ -35,6 +38,10 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->window = new Window('PHP Machine Emulator', $windowOption);
         $this->window->initialize();
         $this->canvas = $this->window->canvas();
+
+        // Clear the screen to black on initialization
+        $this->canvas->clear(Color::asBlack());
+        $this->canvas->present();
     }
 
     public function write(string $value): void
@@ -46,31 +53,44 @@ class WindowScreenWriter implements ScreenWriterInterface
         }
         if ($value === "\n") {
             $this->cursorX = 0;
-            $this->cursorY += 16; // Line height
+            $this->cursorY++;
             return;
         }
 
-        // Log printable characters
-        $byte = ord($value);
-        if ($byte >= 0x20 && $byte < 0x7F) {
-            static $screenText = '';
-            static $totalChars = 0;
-            $screenText .= $value;
-            $totalChars++;
-            if ($totalChars <= 200) {
-                fwrite(STDERR, $value);
-                if ($totalChars % 40 === 0) {
-                    fwrite(STDERR, "\n");
-                }
+        // Store character in text buffer
+        $row = $this->cursorY;
+        $col = $this->cursorX;
+
+        if (!isset($this->textBuffer[$row])) {
+            $this->textBuffer[$row] = [];
+        }
+        $this->textBuffer[$row][$col] = $value;
+
+        $this->cursorX++;
+
+        // Redraw entire screen
+        $this->redrawScreen();
+    }
+
+    protected function redrawScreen(): void
+    {
+        // Clear screen
+        $this->canvas->clear(Color::asBlack());
+
+        // Draw all characters from buffer
+        $charWidth = 8;
+        $charHeight = 16;
+
+        foreach ($this->textBuffer as $row => $cols) {
+            foreach ($cols as $col => $char) {
+                $x = $col * $charWidth;
+                $y = $row * $charHeight;
+                $this->canvas->text($x, $y, $char, Color::asWhite(), 1);
             }
         }
 
-        $x = $this->cursorX;
-        $y = $this->cursorY;
-        $this->canvas->add(function (WindowCanvas $canvas) use ($x, $y, $value) {
-            $canvas->text($x, $y, $value, Color::asWhite(), 1);
-        });
-        $this->cursorX += strlen($value) * 8;
+        // Present to screen
+        $this->canvas->present();
     }
 
     public function dot(ColorInterface $color): void
@@ -117,7 +137,10 @@ class WindowScreenWriter implements ScreenWriterInterface
     public function clear(): void
     {
         $this->canvas->clearChunks();
+        $this->textBuffer = [];
         $this->resetCursor();
+        $this->canvas->clear(Color::asBlack());
+        $this->canvas->present();
     }
 
     public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void

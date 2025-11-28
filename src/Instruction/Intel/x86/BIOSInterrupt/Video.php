@@ -26,11 +26,12 @@ class Video implements InterruptInterface
 
     public function process(RuntimeInterface $runtime): void
     {
-        $runtime->option()->logger()->debug('Reached to video interruption');
-
         $fetchResult = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
+        $ah = $fetchResult->asHighBit();
+        $al = $fetchResult->asLowBit();
+        $runtime->option()->logger()->debug(sprintf('Video INT: AH=0x%02X AL=0x%02X (char=%s)', $ah, $al, chr($al)));
 
-        match ($serviceFunction = VideoServiceFunction::from($fetchResult->asHighBit())) {
+        match ($serviceFunction = VideoServiceFunction::from($ah)) {
             VideoServiceFunction::SET_VIDEO_MODE => $this->setVideoMode($runtime, $fetchResult),
             VideoServiceFunction::TELETYPE_OUTPUT => $this->teletypeOutput($runtime, $fetchResult),
 
