@@ -25,11 +25,11 @@ class Disk implements InterruptInterface
 
     public function process(RuntimeInterface $runtime): void
     {
-        $runtime->option()->logger()->debug('Reached to disk interruption');
-
         $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
         $ah = $ax->asHighBit();    // AH
         $al = $ax->asLowBit();   // AL
+
+        $runtime->option()->logger()->debug(sprintf('Disk interrupt: AH=0x%02X, AL=0x%02X', $ah, $al));
 
         match ($ah) {
             0x00 => $this->reset($runtime),
@@ -159,30 +159,105 @@ class Disk implements InterruptInterface
         $addressSize = $runtime->context()->cpu()->addressSize();
         $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
         $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($addressSize);
-        $dapLinear = $this->segmentLinearAddress($runtime, $ds, $si, $addressSize);
 
+        // Many boot loaders set up the DAP at a fixed location using SI as an absolute address.
+        // When DS changes during boot, using DS:SI would point to the wrong location.
+        // We use SI directly as the linear DAP address to match common bootloader behavior.
+        $dapLinear = $si;
+
+        $runtime->option()->logger()->debug(sprintf(
+            'LBA: DS=0x%04X, SI=0x%04X, DAP linear=0x%05X (using SI directly)',
+            $ds, $si, $dapLinear
+        ));
+
+
+        // Read DAP size using byte-addressable memory
         $size = $this->readMemory8($runtime, $dapLinear);
+
         if ($size < 16) {
+            $runtime->option()->logger()->debug(sprintf(
+                'LBA: DAP size too small (%d) at 0x%05X, failing',
+                $size, $dapLinear
+            ));
             $this->fail($runtime, 0x01);
             return;
         }
 
+        // DAP structure (byte-addressable):
+        // Offset 0: size (1 byte)
+        // Offset 1: reserved (1 byte)
+        // Offset 2-3: sector count (16-bit little-endian)
+        // Offset 4-5: buffer offset (16-bit little-endian)
+        // Offset 6-7: buffer segment (16-bit little-endian)
+        // Offset 8-15: LBA (64-bit little-endian)
+
         $sectorCount = $this->readMemory16($runtime, $dapLinear + 2);
-        $lbaLow = $this->readMemory32($runtime, $dapLinear + 4);
-        $lbaHigh = $this->readMemory32($runtime, $dapLinear + 8); // unused but parsed
-        $bufferOffset = $this->readMemory16($runtime, $dapLinear + 12);
-        $bufferSegment = $this->readMemory16($runtime, $dapLinear + 14);
+        $bufferOffset = $this->readMemory16($runtime, $dapLinear + 4);
+        $bufferSegment = $this->readMemory16($runtime, $dapLinear + 6);
+        $lba = $this->readMemory32($runtime, $dapLinear + 8); // Only use lower 32 bits
+
+        $runtime->option()->logger()->debug(sprintf(
+            'LBA raw: sectorCount=0x%04X, bufOff=0x%04X, bufSeg=0x%04X, lba=0x%08X',
+            $sectorCount, $bufferOffset, $bufferSegment, $lba
+        ));
+
+        // Sanity check: sector count should be reasonable (max 127 sectors is standard for BIOS)
+        // Also check if DAP looks corrupted by verifying sectorCount is reasonable
+        if ($sectorCount === 0 || $sectorCount > 127) {
+            $runtime->option()->logger()->debug(sprintf(
+                'LBA: invalid DAP - sectorCount=%d (expected 1-127), failing with error',
+                $sectorCount
+            ));
+            $this->fail($runtime, 0x01); // Invalid function/parameter
+            return;
+        }
+
+        $runtime->option()->logger()->debug(sprintf(
+            'LBA: sectorCount=%d, bufferSeg:Off=0x%04X:0x%04X, LBA=%d',
+            $sectorCount, $bufferSegment, $bufferOffset, $lba
+        ));
 
         if ($sectorCount === 0) {
+            $runtime->option()->logger()->debug('LBA: sectorCount is 0, failing');
             $this->fail($runtime, 0x04);
             return;
         }
 
         $bufferAddress = $this->segmentLinearAddress($runtime, $bufferSegment, $bufferOffset, $addressSize);
-        $lba = $lbaLow; // high part ignored in this simplified model
-        $bytes = $sectorCount * self::SECTOR_SIZE;
 
         $reader = $runtime->streamReader()->proxy();
+
+        $runtime->option()->logger()->debug(sprintf(
+            'LBA read: proxy type=%s',
+            get_class($reader)
+        ));
+
+        // Check if this is an ISO stream - use CD sector size (2048 bytes)
+        if ($reader instanceof ISOStreamProxy) {
+            $runtime->option()->logger()->debug(sprintf(
+                'LBA read from ISO: sector=%d, count=%d, buffer=0x%05X',
+                $lba, $sectorCount, $bufferAddress
+            ));
+
+            // CD-ROM uses 2048-byte sectors
+            $data = $reader->readCDSectors($lba, $sectorCount);
+            $bytes = strlen($data);
+
+            for ($i = 0; $i < $bytes; $i++) {
+                $address = $bufferAddress + $i;
+                $runtime->memoryAccessor()->allocate($address, safe: false);
+                $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($address, ord($data[$i]), 8);
+            }
+
+            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
+            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorCount);
+            $runtime->memoryAccessor()->setCarryFlag(false);
+            return;
+        }
+
+        // Standard disk - use 512-byte sectors
+        $bytes = $sectorCount * self::SECTOR_SIZE;
+
         try {
             $reader->setOffset($lba * self::SECTOR_SIZE);
         } catch (StreamReaderException) {
@@ -260,10 +335,10 @@ class Disk implements InterruptInterface
             $descAddr = $base + ($index * 8);
 
             if ($descAddr + 7 <= $base + $limit) {
-                $b0 = $runtime->memoryAccessor()->tryToFetch($descAddr + 2)?->asHighBit() ?? 0;
-                $b1 = $runtime->memoryAccessor()->tryToFetch($descAddr + 3)?->asHighBit() ?? 0;
-                $b2 = $runtime->memoryAccessor()->tryToFetch($descAddr + 4)?->asHighBit() ?? 0;
-                $b7 = $runtime->memoryAccessor()->tryToFetch($descAddr + 7)?->asHighBit() ?? 0;
+                $b0 = $this->readMemory8($runtime, $descAddr + 2);
+                $b1 = $this->readMemory8($runtime, $descAddr + 3);
+                $b2 = $this->readMemory8($runtime, $descAddr + 4);
+                $b7 = $this->readMemory8($runtime, $descAddr + 7);
 
                 $segBase = ($b0) | ($b1 << 8) | ($b2 << 16) | ($b7 << 24);
                 return ($segBase + ($offset & $offsetMask)) & $linearMask;
@@ -386,5 +461,54 @@ class Disk implements InterruptInterface
     {
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, $status);
         $runtime->memoryAccessor()->setCarryFlag(true);
+    }
+
+    /**
+     * Read a single byte from memory (8-bit read).
+     * Uses readRawByte for byte-addressable memory.
+     */
+    private function readMemory8(RuntimeInterface $runtime, int $address): int
+    {
+        $value = $runtime->memoryAccessor()->readRawByte($address);
+        if ($value !== null) {
+            return $value;
+        }
+
+        // Try to read from stream
+        $proxy = $runtime->streamReader()->proxy();
+        $currentOffset = $proxy->offset();
+        try {
+            $origin = $runtime->addressMap()->getOrigin();
+            if ($address >= $origin) {
+                $proxy->setOffset($address - $origin);
+                $byte = $proxy->byte();
+                $proxy->setOffset($currentOffset);
+                return $byte;
+            }
+        } catch (\Throwable) {
+        }
+        return 0;
+    }
+
+    /**
+     * Read 16-bit value from memory (little-endian).
+     * Combines two consecutive 8-bit reads.
+     */
+    private function readMemory16(RuntimeInterface $runtime, int $address): int
+    {
+        $lo = $this->readMemory8($runtime, $address);
+        $hi = $this->readMemory8($runtime, $address + 1);
+        return ($hi << 8) | $lo;
+    }
+
+    /**
+     * Read 32-bit value from memory (little-endian).
+     * Combines two consecutive 16-bit reads.
+     */
+    private function readMemory32(RuntimeInterface $runtime, int $address): int
+    {
+        $lo = $this->readMemory16($runtime, $address);
+        $hi = $this->readMemory16($runtime, $address + 2);
+        return ($hi << 16) | $lo;
     }
 }

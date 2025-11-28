@@ -28,15 +28,30 @@ class MovMoffset implements InstructionInterface
         $segment = $runtime->segmentOverride() ?? RegisterType::DS;
         $linearOffset = $this->segmentOffsetAddress($runtime, $segment, $offset);
 
+        $ip = $runtime->streamReader()->offset();
+        if ($ip >= 0x8300 && $ip <= 0x8313) {
+            $runtime->option()->logger()->debug(sprintf(
+                'MovMoffset: IP=0x%05X, opcode=0x%02X, offset=0x%08X, linear=0x%08X, opSize=%d',
+                $ip, $opcode, $offset, $linearOffset, $opSize
+            ));
+        }
+
         switch ($opcode) {
             case 0xA0: // AL <- moffs8
             $value = $this->readMemory8($runtime, $linearOffset);
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $value);
             break;
         case 0xA1: // AX <- moffs16
+            $phys = $this->translateLinear($runtime, $linearOffset);
             $value = $opSize === 32
                 ? $this->readMemory32($runtime, $linearOffset)
                 : $this->readMemory16($runtime, $linearOffset);
+            if ($linearOffset === 0x1FF0) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'MovMoffset READ 0x1FF0: linear=0x%08X, phys=0x%08X, value=0x%08X',
+                    $linearOffset, $phys, $value
+                ));
+            }
             $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $value, $opSize);
             break;
         case 0xA2: // moffs8 <- AL
@@ -49,13 +64,19 @@ class MovMoffset implements InstructionInterface
             );
             break;
         case 0xA3: // moffs16 <- AX
-            $phys = $this->translateLinear($runtime, $linearOffset);
-            $runtime->memoryAccessor()->allocate($phys, safe: false);
-            $runtime->memoryAccessor()->writeBySize(
-                $phys,
-                $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize),
-                $opSize,
-            );
+            $valueToWrite = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
+            if ($linearOffset === 0x1FF0) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'MovMoffset WRITE 0x1FF0: linear=0x%08X, value=0x%08X, opSize=%d',
+                    $linearOffset, $valueToWrite, $opSize
+                ));
+            }
+            // Write using appropriate size
+            if ($opSize === 32) {
+                $this->writeMemory32($runtime, $linearOffset, $valueToWrite);
+            } else {
+                $this->writeMemory16($runtime, $linearOffset, $valueToWrite);
+            }
             break;
         }
 

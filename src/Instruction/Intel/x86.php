@@ -22,12 +22,16 @@ use PHPMachineEmulator\Instruction\Intel\x86\Inc;
 use PHPMachineEmulator\Instruction\Intel\x86\ImulImmediate;
 use PHPMachineEmulator\Instruction\Intel\x86\Ins;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
+use PHPMachineEmulator\Instruction\Intel\x86\Int3;
 use PHPMachineEmulator\Instruction\Intel\x86\Jbe;
 use PHPMachineEmulator\Instruction\Intel\x86\Jc;
+use PHPMachineEmulator\Instruction\Intel\x86\Jnc;
+use PHPMachineEmulator\Instruction\Intel\x86\Jno;
 use PHPMachineEmulator\Instruction\Intel\x86\Jmp;
 use PHPMachineEmulator\Instruction\Intel\x86\JmpShort;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jz;
+use PHPMachineEmulator\Instruction\Intel\x86\Jg;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsw;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
@@ -133,12 +137,16 @@ class x86 implements InstructionListInterface
             Hlt::class,
             Inc::class,
             Int_::class,
+            Int3::class,
             Jbe::class,
             Jc::class,
+            Jnc::class,
+            Jno::class,
             Jmp::class,
             JmpShort::class,
             Jnz::class,
             Jz::class,
+            Jg::class,
             Lodsb::class,
             Lodsw::class,
             Loop::class,

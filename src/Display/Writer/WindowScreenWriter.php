@@ -50,6 +50,21 @@ class WindowScreenWriter implements ScreenWriterInterface
             return;
         }
 
+        // Log printable characters
+        $byte = ord($value);
+        if ($byte >= 0x20 && $byte < 0x7F) {
+            static $screenText = '';
+            static $totalChars = 0;
+            $screenText .= $value;
+            $totalChars++;
+            if ($totalChars <= 200) {
+                fwrite(STDERR, $value);
+                if ($totalChars % 40 === 0) {
+                    fwrite(STDERR, "\n");
+                }
+            }
+        }
+
         $x = $this->cursorX;
         $y = $this->cursorY;
         $this->canvas->add(function (WindowCanvas $canvas) use ($x, $y, $value) {

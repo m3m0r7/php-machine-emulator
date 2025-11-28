@@ -230,11 +230,12 @@ class Group1 implements InstructionInterface
         }
 
         $leftHand = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+        $newCF = $leftHand < $operand;
 
         $runtime
             ->memoryAccessor()
             ->updateFlags($leftHand - $operand, $opSize)
-            ->setCarryFlag($leftHand < $operand);
+            ->setCarryFlag($newCF);
 
         return ExecutionStatus::SUCCESS;
     }

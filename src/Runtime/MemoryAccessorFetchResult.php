@@ -11,6 +11,7 @@ class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
     public function __construct(
         protected int|null $value,
         protected int $storedSizeValue = 16,
+        protected bool $alreadyDecoded = false,
     ) {
     }
 
@@ -47,6 +48,16 @@ class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
     {
         if ($this->value === null) {
             return 0;
+        }
+
+        // If the value is already decoded (e.g., from stack operations), skip byte swap
+        if ($this->alreadyDecoded) {
+            return match ($size) {
+                8 => $this->value & 0xFF,
+                16 => $this->value & 0xFFFF,
+                32 => $this->value & 0xFFFFFFFF,
+                default => $this->value & ((1 << $size) - 1),
+            };
         }
 
         // For GPRs (storedSize=32), decode from 32-bit format then mask

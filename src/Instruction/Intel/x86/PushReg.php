@@ -21,11 +21,11 @@ class PushReg implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
+        $regType = $this->registersAndOPCodes()[$opcode];
         $fetchResult = $runtime
             ->memoryAccessor()
-            ->fetch($this->registersAndOPCodes()[$opcode])
+            ->fetch($regType)
             ->asBytesBySize($size);
-        $size = $runtime->context()->cpu()->operandSize();
 
         $runtime
             ->memoryAccessor()

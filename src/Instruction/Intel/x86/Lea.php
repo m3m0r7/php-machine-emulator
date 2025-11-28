@@ -33,6 +33,7 @@ class Lea implements InstructionInterface
         $size = $runtime->context()->cpu()->operandSize();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
 
+
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)

@@ -19,6 +19,12 @@ class ISOStream implements StreamReaderIsProxyableInterface
     private int $fileSize;
     private string $bootData;
 
+    /**
+     * Callback to read bytes from memory when offset is beyond boot image.
+     * Signature: function(int $address): int - returns byte value at address.
+     */
+    private ?\Closure $memoryReader = null;
+
     public function __construct(private string $path)
     {
         $this->iso = new ISO9660($path);
@@ -55,16 +61,32 @@ class ISOStream implements StreamReaderIsProxyableInterface
         return $this->bootImage;
     }
 
+    /**
+     * Set a callback for reading from memory when offset exceeds boot image.
+     */
+    public function setMemoryReader(\Closure $reader): self
+    {
+        $this->memoryReader = $reader;
+        return $this;
+    }
+
     public function char(): string
     {
-        if ($this->offset >= $this->fileSize) {
-            throw new StreamReaderException('Cannot read from stream or reached EOF');
+        // If within boot image, read from boot data
+        if ($this->offset < $this->fileSize) {
+            $char = $this->bootData[$this->offset];
+            $this->offset++;
+            return $char;
         }
 
-        $char = $this->bootData[$this->offset];
-        $this->offset++;
+        // If we have a memory reader, use it for addresses beyond boot image
+        if ($this->memoryReader !== null) {
+            $byte = ($this->memoryReader)($this->offset);
+            $this->offset++;
+            return chr($byte & 0xFF);
+        }
 
-        return $char;
+        throw new StreamReaderException('Cannot read from stream or reached EOF');
     }
 
     public function byte(): int
@@ -78,6 +100,22 @@ class ISOStream implements StreamReaderIsProxyableInterface
         return $byte > 127 ? $byte - 256 : $byte;
     }
 
+    public function short(): int
+    {
+        $low = $this->byte();
+        $high = $this->byte();
+        return $low | ($high << 8);
+    }
+
+    public function dword(): int
+    {
+        $b0 = $this->byte();
+        $b1 = $this->byte();
+        $b2 = $this->byte();
+        $b3 = $this->byte();
+        return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+    }
+
     public function offset(): int
     {
         return $this->offset;
@@ -85,7 +123,8 @@ class ISOStream implements StreamReaderIsProxyableInterface
 
     public function setOffset(int $newOffset): self
     {
-        if ($newOffset > $this->fileSize) {
+        // Allow setting offset beyond boot image if we have a memory reader
+        if ($newOffset > $this->fileSize && $this->memoryReader === null) {
             throw new StreamReaderException('Cannot set the offset beyond file size');
         }
 
@@ -96,6 +135,10 @@ class ISOStream implements StreamReaderIsProxyableInterface
 
     public function isEOF(): bool
     {
+        // If we have a memory reader, we're never truly at EOF (memory is always readable)
+        if ($this->memoryReader !== null) {
+            return false;
+        }
         return $this->offset >= $this->fileSize;
     }
 

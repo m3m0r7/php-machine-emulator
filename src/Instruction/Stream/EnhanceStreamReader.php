@@ -29,6 +29,14 @@ class EnhanceStreamReader
         return new ModRegRM($this->streamReader->byte());
     }
 
+    /**
+     * Create ModRegRM from an already read byte value.
+     */
+    public function modRegRM(int $byte): ModRegRMInterface
+    {
+        return new ModRegRM($byte);
+    }
+
     public function signedShort(): int
     {
         $value = $this->short();

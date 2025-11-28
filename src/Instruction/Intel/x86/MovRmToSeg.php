@@ -29,6 +29,27 @@ class MovRmToSeg implements InstructionInterface
 
         $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($seg, $value);
 
+        // Debug: track DS/SS changes
+        if ($seg === RegisterType::DS) {
+            $runtime->option()->logger()->debug(sprintf(
+                'DS changed to 0x%04X at offset 0x%05X',
+                $value,
+                $runtime->streamReader()->offset()
+            ));
+        }
+        if ($seg === RegisterType::SS) {
+            $esp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(
+                $runtime->context()->cpu()->operandSize()
+            );
+            $runtime->option()->logger()->debug(sprintf(
+                'SS changed to 0x%04X at offset 0x%05X (ESP=0x%05X, new stack linear=0x%05X)',
+                $value,
+                $runtime->streamReader()->offset(),
+                $esp,
+                ($value << 4) + $esp
+            ));
+        }
+
         return ExecutionStatus::SUCCESS;
     }
 

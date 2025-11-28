@@ -21,6 +21,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Int_ as X86Int;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
+use PHPMachineEmulator\Stream\ISO\ISOStream;
 use PHPMachineEmulator\Video\VideoInterface;
 
 class Runtime implements RuntimeInterface
@@ -67,6 +68,21 @@ class Runtime implements RuntimeInterface
         if ($this->option()->shouldShowHeader()) {
             $this->showHeader();
         }
+
+        // Set up memory reader for ISOStream to enable executing code loaded via INT 13h
+        if ($this->streamReader instanceof \PHPMachineEmulator\Stream\ISO\ISOStream) {
+            $ma = $this->memoryAccessor;
+            $this->streamReader->setMemoryReader(function (int $address) use ($ma): int {
+                // Read byte from memory at the given linear address
+                $result = $ma->tryToFetch($address);
+                if ($result === null) {
+                    // Memory not allocated - return 0 (like uninitialized RAM)
+                    return 0;
+                }
+                // Return low byte of the value
+                return $result->asHighBit();
+            });
+        }
     }
 
     public function start(): void
@@ -77,8 +93,10 @@ class Runtime implements RuntimeInterface
             $this->instructionCount++;
             $this->tickTimers();
             $this->memoryAccessor->setInstructionFetch(true);
+            $ip = $this->streamReader->offset();
             $opcode = $this->streamReader->byte();
             $this->memoryAccessor->setInstructionFetch(false);
+            $this->machine->option()->logger()->debug(sprintf('IP=0x%05X opcode=0x%02X', $ip, $opcode));
             $result = $this->execute($opcode);
             if ($result === ExecutionStatus::EXIT) {
                 $this->machine->option()->logger()->info('Exited program');
@@ -284,6 +302,17 @@ class Runtime implements RuntimeInterface
             $this->memoryAccessor->allocate($address);
 
             $this->machine->option()->logger()->debug(sprintf('Address allocated 0x%03s', decbin($address)));
+        }
+
+        // Initialize CS register for El Torito ISO boot
+        // The boot code expects CS to be the load segment (e.g., 0x07C0 for 0x7C00)
+        if ($this->streamReader instanceof ISOStream) {
+            $bootImage = $this->streamReader->bootImage();
+            if ($bootImage !== null) {
+                $loadSegment = $bootImage->loadSegment();
+                $this->memoryAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $loadSegment);
+                $this->machine->option()->logger()->debug(sprintf('Initialized CS to 0x%04X for El Torito boot', $loadSegment));
+            }
         }
 
         foreach ($this->architectureProvider->services() as $service) {

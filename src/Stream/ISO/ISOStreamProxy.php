@@ -33,9 +33,17 @@ class ISOStreamProxy implements StreamReaderProxyInterface
 
     public function char(): string
     {
+        // Save the original stream offset
+        $originalOffset = $this->stream->offset();
+
+        // Read at proxy's offset
         $this->stream->setOffset($this->offset);
         $char = $this->stream->char();
         $this->offset = $this->stream->offset();
+
+        // Restore the original stream offset
+        $this->stream->setOffset($originalOffset);
+
         return $char;
     }
 
@@ -52,14 +60,53 @@ class ISOStreamProxy implements StreamReaderProxyInterface
 
     public function readBytes(int $length): string
     {
+        // Save the original stream offset
+        $originalOffset = $this->stream->offset();
+
+        // Read at proxy's offset
         $this->stream->setOffset($this->offset);
         $data = $this->stream->readBytes($length);
         $this->offset = $this->stream->offset();
+
+        // Restore the original stream offset
+        $this->stream->setOffset($originalOffset);
+
         return $data;
     }
 
     public function isoStream(): ISOStream
     {
         return $this->stream;
+    }
+
+    /**
+     * Read raw bytes from the underlying ISO file at given byte offset.
+     * This is used for disk interrupt reads to access the full ISO.
+     */
+    public function readRawFromISO(int $byteOffset, int $length): string
+    {
+        $iso = $this->stream->iso();
+        $data = $iso->readAt($byteOffset, $length);
+        return $data !== false ? $data : '';
+    }
+
+    /**
+     * Read raw sectors from the underlying ISO file.
+     * Sector size is 2048 bytes for CD-ROM.
+     */
+    public function readCDSectors(int $sectorNumber, int $sectorCount): string
+    {
+        $iso = $this->stream->iso();
+        $iso->seekSector($sectorNumber);
+        $data = $iso->readSectors($sectorCount);
+        return $data !== false ? $data : '';
+    }
+
+    /**
+     * Get the file size of the underlying ISO.
+     */
+    public function isoFileSize(): int
+    {
+        return $this->stream->iso()->fileSize();
     }
 }

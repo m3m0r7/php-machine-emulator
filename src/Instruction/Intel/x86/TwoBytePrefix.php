@@ -97,7 +97,7 @@ class TwoBytePrefix implements InstructionInterface
 
     private function movFromControl(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
     {
-        $modrm = $reader->modRegRM($modrmByte);
+        $modrm = $reader->byteAsModRegRM();
         if (ModType::from($modrm->mode()) !== ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException('MOV from CR requires register addressing');
         }

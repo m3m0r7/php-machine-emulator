@@ -27,17 +27,23 @@ class Loop implements InstructionInterface
             ->streamReader()
             ->offset();
 
+        // LOOP decrements ECX first, then checks if non-zero
+        $size = $runtime->context()->cpu()->addressSize();
         $counter = $runtime
             ->memoryAccessor()
             ->fetch(RegisterType::ECX)
-            ->asByte() - 1;
+            ->asBytesBySize($size);
 
-        if ($counter <= 0) {
+        $counter = ($counter - 1) & ($size === 32 ? 0xFFFFFFFF : 0xFFFF);
+
+        // Write decremented value back
+        $runtime->memoryAccessor()
+            ->writeBySize(RegisterType::ECX, $counter, $size);
+
+        // Jump if counter is non-zero
+        if ($counter === 0) {
             return ExecutionStatus::SUCCESS;
         }
-
-        $runtime->memoryAccessor()
-            ->decrement(RegisterType::ECX);
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime

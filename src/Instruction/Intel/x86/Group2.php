@@ -28,8 +28,20 @@ class Group2 implements InstructionInterface
             ->byteAsModRegRM();
         $opSize = $this->isByteOp($opcode) ? 8 : $runtime->context()->cpu()->operandSize();
 
+        // Debug: trace Group2 operations in problem region
+        $ip = $runtime->streamReader()->offset();
+        if ($ip >= 0x08A58 && $ip <= 0x08A60) {
+            $runtime->option()->logger()->debug(sprintf(
+                'Group2 at IP=0x%05X: opcode=0x%02X, digit=%d, opSize=%d',
+                $ip, $opcode, $modRegRM->digit(), $opSize
+            ));
+        }
+
         return match ($modRegRM->digit()) {
+            0x0 => $this->rotateLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             0x1 => $this->rotateRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
+            0x2 => $this->rotateCarryLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
+            0x3 => $this->rotateCarryRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             0x4 => $this->shiftLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             0x5 => $this->shiftRightLogical($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             0x7 => $this->shiftRightArithmetic($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
@@ -54,16 +66,70 @@ class Group2 implements InstructionInterface
         return in_array($opcode, [0xC0, 0xD0, 0xD2], true);
     }
 
-    protected function rotateRight(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    protected function rotateLeft(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
         $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
-            $value = $this->readRm8($runtime, $reader, $modRegRM) & 0xFF;
+            $value = $isRegister
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress()) & 0xFF
+                : $this->readMemory8($runtime, $address) & 0xFF;
+            $count = $operand % 8;
+            $result = $count === 0 ? $value : ((($value << $count) | ($value >> (8 - $count))) & 0xFF);
+
+            if ($isRegister) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeMemory8($runtime, $address, $result);
+            }
+            $runtime->memoryAccessor()->setCarryFlag($count > 0 ? ($result & 0x1) !== 0 : false);
+            $runtime->memoryAccessor()->updateFlags($result, 8);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $value = $isRegister
+            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size) & $mask
+            : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address)) & $mask;
+        $mod = $size;
+        $count = $operand % $mod;
+        $result = $count === 0 ? $value : ((($value << $count) | ($value >> ($mod - $count))) & $mask);
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
+        $runtime->memoryAccessor()->setCarryFlag($count > 0 ? ($result & 0x1) !== 0 : false);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
+
+        return ExecutionStatus::SUCCESS;
+    }
+
+    protected function rotateRight(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    {
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+
+        if ($this->isByteOp($opcode)) {
+            $value = $isRegister
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress()) & 0xFF
+                : $this->readMemory8($runtime, $address) & 0xFF;
             $count = $operand % 8;
             $result = $count === 0 ? $value : (($value >> $count) | (($value & ((1 << $count) - 1)) << (8 - $count)));
 
-            $this->writeRm8($runtime, $reader, $modRegRM, $result);
+            if ($isRegister) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeMemory8($runtime, $address, $result);
+            }
             $runtime->memoryAccessor()->setCarryFlag($count > 0 ? (($value >> ($count - 1)) & 0x1) !== 0 : false);
             $runtime->memoryAccessor()->updateFlags($result, 8);
 
@@ -71,12 +137,142 @@ class Group2 implements InstructionInterface
         }
 
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $value = $this->readRm($runtime, $reader, $modRegRM, $size) & $mask;
+        $value = $isRegister
+            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size) & $mask
+            : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address)) & $mask;
         $mod = $size;
         $count = $operand % $mod;
         $result = $count === 0 ? $value : (($value >> $count) | (($value & ((1 << $count) - 1)) << ($mod - $count)));
-        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
         $runtime->memoryAccessor()->setCarryFlag($count > 0 ? (($value >> ($count - 1)) & 0x1) !== 0 : false);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
+
+        return ExecutionStatus::SUCCESS;
+    }
+
+    protected function rotateCarryLeft(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    {
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
+
+        if ($this->isByteOp($opcode)) {
+            $value = $isRegister
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress()) & 0xFF
+                : $this->readMemory8($runtime, $address) & 0xFF;
+            $count = $operand % 9; // 8 bits + 1 carry bit
+            $result = $value;
+            $cf = $carry;
+            for ($i = 0; $i < $count; $i++) {
+                $newCf = ($result >> 7) & 1;
+                $result = (($result << 1) | $cf) & 0xFF;
+                $cf = $newCf;
+            }
+
+            if ($isRegister) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeMemory8($runtime, $address, $result);
+            }
+            $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
+            $runtime->memoryAccessor()->updateFlags($result, 8);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $value = $isRegister
+            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size) & $mask
+            : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address)) & $mask;
+        $mod = $size + 1; // size bits + 1 carry bit
+        $count = $operand % $mod;
+        $result = $value;
+        $cf = $carry;
+        for ($i = 0; $i < $count; $i++) {
+            $newCf = ($result >> ($size - 1)) & 1;
+            $result = (($result << 1) | $cf) & $mask;
+            $cf = $newCf;
+        }
+
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
+        $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
+        $runtime->memoryAccessor()->updateFlags($result, $size);
+
+        return ExecutionStatus::SUCCESS;
+    }
+
+    protected function rotateCarryRight(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    {
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
+
+        if ($this->isByteOp($opcode)) {
+            $value = $isRegister
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress()) & 0xFF
+                : $this->readMemory8($runtime, $address) & 0xFF;
+            $count = $operand % 9; // 8 bits + 1 carry bit
+            $result = $value;
+            $cf = $carry;
+            for ($i = 0; $i < $count; $i++) {
+                $newCf = $result & 1;
+                $result = (($result >> 1) | ($cf << 7)) & 0xFF;
+                $cf = $newCf;
+            }
+
+            if ($isRegister) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeMemory8($runtime, $address, $result);
+            }
+            $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
+            $runtime->memoryAccessor()->updateFlags($result, 8);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $value = $isRegister
+            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size) & $mask
+            : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address)) & $mask;
+        $mod = $size + 1; // size bits + 1 carry bit
+        $count = $operand % $mod;
+        $result = $value;
+        $cf = $carry;
+        for ($i = 0; $i < $count; $i++) {
+            $newCf = $result & 1;
+            $result = (($result >> 1) | ($cf << ($size - 1))) & $mask;
+            $cf = $newCf;
+        }
+
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
+        $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
         $runtime->memoryAccessor()->updateFlags($result, $size);
 
         return ExecutionStatus::SUCCESS;
@@ -84,13 +280,21 @@ class Group2 implements InstructionInterface
 
     protected function shiftLeft(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
         $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
-            $value = $this->readRm8($runtime, $reader, $modRegRM);
+            $value = $isRegister
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                : $this->readMemory8($runtime, $address);
             $result = ($value << $operand) & 0xFF;
 
-            $this->writeRm8($runtime, $reader, $modRegRM, $result);
+            if ($isRegister) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeMemory8($runtime, $address, $result);
+            }
             $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value << ($operand - 1)) & 0x100) !== 0 : false);
             $runtime->memoryAccessor()->updateFlags($result, 8);
 
@@ -98,9 +302,19 @@ class Group2 implements InstructionInterface
         }
 
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $value = $isRegister
+            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size)
+            : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address));
         $result = ($value << $operand) & $mask;
-        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
         $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value << ($operand - 1)) & ($mask + 1)) !== 0 : false);
         $runtime->memoryAccessor()->updateFlags($result, $size);
 
@@ -109,24 +323,42 @@ class Group2 implements InstructionInterface
 
     protected function shiftRightLogical(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
         $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
-            $value = $this->readRm8($runtime, $reader, $modRegRM);
+            $value = $isRegister
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                : $this->readMemory8($runtime, $address);
             $result = ($value >> $operand) & 0xFF;
 
-            $this->writeRm8($runtime, $reader, $modRegRM, $result);
+            if ($isRegister) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeMemory8($runtime, $address, $result);
+            }
             $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
             $runtime->memoryAccessor()->updateFlags($result, 8);
 
             return ExecutionStatus::SUCCESS;
         }
 
-        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $value = $isRegister
+            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size)
+            : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address));
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value >> $operand) & $mask;
 
-        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
         $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
         $runtime->memoryAccessor()->updateFlags($result, $size);
 
@@ -135,24 +367,34 @@ class Group2 implements InstructionInterface
 
     protected function shiftRightArithmetic(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
         $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
-            $value = $this->readRm8($runtime, $reader, $modRegRM);
+            $value = $isRegister
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                : $this->readMemory8($runtime, $address);
             $sign = $value & 0x80;
             $result = ($value >> $operand) & 0x7F;
             if ($sign) {
                 $result |= 0x80;
             }
 
-            $this->writeRm8($runtime, $reader, $modRegRM, $result);
+            if ($isRegister) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeMemory8($runtime, $address, $result);
+            }
             $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
             $runtime->memoryAccessor()->updateFlags($result, 8);
 
             return ExecutionStatus::SUCCESS;
         }
 
-        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $value = $isRegister
+            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size)
+            : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address));
         $signBit = 1 << ($size - 1);
         $sign = $value & $signBit;
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
@@ -161,7 +403,15 @@ class Group2 implements InstructionInterface
             $result |= $signBit;
         }
 
-        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
         $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
         $runtime->memoryAccessor()->updateFlags($result, $size);
 
