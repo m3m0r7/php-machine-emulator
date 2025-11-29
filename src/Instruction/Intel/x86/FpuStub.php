@@ -27,7 +27,7 @@ class FpuStub implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $this->assertFpuAvailable($runtime);
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
 
         return match ($opcode) {
             0x9B => ExecutionStatus::SUCCESS, // FWAIT

@@ -20,7 +20,7 @@ class JmpFar implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $opSize = $runtime->context()->cpu()->operandSize();
         $offset = $opSize === 32 ? $reader->dword() : $reader->short();
         $segment = $reader->short();
@@ -32,7 +32,7 @@ class JmpFar implements InstructionInterface
                 $gate = $this->readCallGateDescriptor($runtime, $segment);
                 if ($gate !== null) {
                     $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
-                    $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $runtime->streamReader()->offset(), $opSize);
+                    $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $runtime->memory()->offset(), $opSize);
                     $this->callThroughGate($runtime, $gate, $returnOffset, $currentCs, $opSize, pushReturn: false, copyParams: false);
                     return ExecutionStatus::SUCCESS;
                 }
@@ -40,14 +40,14 @@ class JmpFar implements InstructionInterface
                 $descriptor = $this->resolveCodeDescriptor($runtime, $segment);
                 $newCpl = $this->computeCplForTransfer($runtime, $segment, $descriptor);
                 $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
-                $runtime->streamReader()->setOffset($linearTarget);
+                $runtime->memory()->setOffset($linearTarget);
                 $this->writeCodeSegment($runtime, $segment, $newCpl, $descriptor);
                 return ExecutionStatus::SUCCESS;
             }
 
             $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
             $runtime->option()->logger()->debug(sprintf('JMP FAR: linearTarget=0x%05X', $linearTarget));
-            $runtime->streamReader()->setOffset($linearTarget);
+            $runtime->memory()->setOffset($linearTarget);
             $this->writeCodeSegment($runtime, $segment);
         }
 

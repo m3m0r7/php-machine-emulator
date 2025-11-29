@@ -22,7 +22,7 @@ class AndImm8 implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $operand = $runtime->streamReader()->byte();
+        $operand = $runtime->memory()->byte();
 
         $runtime
             ->memoryAccessor()

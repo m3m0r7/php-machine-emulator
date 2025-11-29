@@ -166,7 +166,7 @@ class Ata
         $offset = $lba * BIOS::READ_SIZE_PER_SECTOR;
 
         // Write to the underlying stream if it supports writing
-        $proxy = $this->runtime->streamReader()->proxy();
+        $proxy = $this->runtime->memory()->proxy();
         if (method_exists($proxy, 'writeAt')) {
             $proxy->writeAt($offset, $this->writeBuffer);
         }
@@ -311,7 +311,7 @@ class Ata
         $this->bufferPos = 0;
         $this->error = 0;
 
-        $proxy = $this->runtime->streamReader()->proxy();
+        $proxy = $this->runtime->memory()->proxy();
         try {
             $proxy->setOffset($lba * BIOS::READ_SIZE_PER_SECTOR);
             for ($i = 0; $i < $bytesToRead; $i++) {

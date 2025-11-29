@@ -40,7 +40,7 @@ class Xchg implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $reader->byteAsModRegRM();
 
         if ($opcode === 0x86) {

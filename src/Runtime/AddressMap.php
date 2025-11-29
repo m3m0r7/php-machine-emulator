@@ -42,7 +42,7 @@ class AddressMap implements AddressMapInterface
          * @var DiskInterface $disk
          */
         foreach ($this->addresses as [$targetAddress, $disk]) {
-            if ($this->runtime->streamReader()->offset() >= $disk->offset()) {
+            if ($this->runtime->memory()->offset() >= $disk->offset()) {
                 $last = [$targetAddress, $disk];
             }
         }

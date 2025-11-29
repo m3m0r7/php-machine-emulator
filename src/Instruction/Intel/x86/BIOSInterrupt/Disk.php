@@ -8,8 +8,6 @@ use PHPMachineEmulator\Disk\HardDisk;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Exception\StreamReaderException;
-use PHPMachineEmulator\Stream\ISO\ISOStream;
-use PHPMachineEmulator\Stream\ISO\ISOStreamProxy;
 use PHPMachineEmulator\Stream\ISO\ISO9660;
 
 class Disk implements InterruptInterface
@@ -28,6 +26,13 @@ class Disk implements InterruptInterface
         $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
         $ah = $ax->asHighBit();    // AH
         $al = $ax->asLowBit();   // AL
+
+        $runtime->option()->logger()->debug(sprintf(
+            'INT 13h: AH=0x%02X AL=0x%02X DL=0x%02X',
+            $ah,
+            $al,
+            $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit()
+        ));
 
         match ($ah) {
             0x00 => $this->reset($runtime),
@@ -83,6 +88,16 @@ class Disk implements InterruptInterface
 
     private function readSectorsCHS(RuntimeInterface $runtime, int $sectorsToRead): void
     {
+        $runtime->option()->logger()->debug(sprintf(
+            'INT 13h READ CHS request: sectors=%d DL=0x%02X ES:BX=%04X:%04X CS:IP=%04X:%04X',
+            $sectorsToRead,
+            $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit(),
+            $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte(),
+            $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize($runtime->context()->cpu()->addressSize()),
+            $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte(),
+            $runtime->memory()->offset() & 0xFFFF
+        ));
+
         if ($sectorsToRead === 0) {
             $this->fail($runtime, 0x04); // sector not found
             return;
@@ -102,12 +117,10 @@ class Disk implements InterruptInterface
         $dh = $dx->asHighBit();  // head
         $dl = $dx->asLowBit(); // drive
 
-        // For ISO streams with El Torito floppy emulation, allow floppy drive access (DL < 0x80)
-        $reader = $runtime->streamReader()->proxy();
-        $isIsoWithFloppyEmulation = $reader instanceof ISOStreamProxy;
-
-        if ($dl < 0x80 && !$isIsoWithFloppyEmulation) {
-            $this->fail($runtime, 0x01); // invalid function for drive (only for non-ISO)
+        // Read from bootStream (disk image) directly, not from unified memory
+        $bootStream = $runtime->bootStream();
+        if ($bootStream === null) {
+            $this->fail($runtime, 0x20);
             return;
         }
 
@@ -135,34 +148,56 @@ class Disk implements InterruptInterface
         $bufferAddress = $this->segmentLinearAddress($runtime, $es, $bx, $addressSize);
 
         // Also debug the [0x01FA] value for MikeOS
-        $bufPtr = $this->readMemory16($runtime, 0x01FA + $runtime->addressMap()->getOrigin());
+        $bootLoadAddress = $runtime->bootStream()?->loadAddress() ?? 0x7C00;
+        $bufPtr = $this->readMemory16($runtime, $bootLoadAddress + 0x01FA);
         $runtime->option()->logger()->debug(sprintf(
-            'INT 13h READ CHS: C=%d H=%d S=%d => LBA=%d, sectors=%d, ES:BX=%04X:%04X linear=0x%05X',
-            $cylinder, $head, $sector, $lba, $sectorsToRead, $es, $bx, $bufferAddress
+            'INT 13h READ CHS: C=%d H=%d S=%d => LBA=%d, sectors=%d, ES:BX=%04X:%04X linear=0x%05X CS:IP=%04X:%04X',
+            $cylinder, $head, $sector, $lba, $sectorsToRead, $es, $bx, $bufferAddress,
+            $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte(),
+            $runtime->memory()->offset() & 0xFFFF
         ));
 
+        // Save bootStream offset and read from disk image
+        $savedBootOffset = $bootStream->offset();
+
         try {
-            $reader->setOffset($lba * self::SECTOR_SIZE);
+            $bootStream->setOffset($lba * self::SECTOR_SIZE);
         } catch (StreamReaderException) {
+            $bootStream->setOffset($savedBootOffset);
             $this->fail($runtime, 0x20); // controller failure
             return;
         }
 
-        $readData = '';
+        $debugBytes = [];
         for ($i = 0; $i < $bytes; $i++) {
             try {
-                $byte = $reader->byte();
+                $byte = $bootStream->byte();
             } catch (StreamReaderException) {
+                $bootStream->setOffset($savedBootOffset);
                 $this->fail($runtime, 0x20);
                 return;
             }
 
-            $readData .= chr($byte);
             $address = $bufferAddress + $i;
             $runtime->memoryAccessor()->allocate($address, safe: false);
             $runtime->memoryAccessor()->writeRawByte($address, $byte);
+
+            // Debug first 16 bytes
+            if ($i < 16) {
+                $debugBytes[] = sprintf('%02X', $byte);
+            }
         }
 
+        if (!empty($debugBytes)) {
+            $runtime->option()->logger()->debug(sprintf(
+                'INT 13h READ CHS: first 16 bytes at 0x%05X: %s',
+                $bufferAddress,
+                implode(' ', $debugBytes)
+            ));
+        }
+
+        // Restore bootStream offset
+        $bootStream->setOffset($savedBootOffset);
 
         // update AL with sectors read, AH = 0, clear CF
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
@@ -179,8 +214,10 @@ class Disk implements InterruptInterface
     private function extensionsPresent(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
-        $ma->writeToHighBit(RegisterType::EAX, 0x00); // AH = 0 on success
+        // EDD version 3.0, features: bit0 (extended disk access), bit1 (EDD)
+        $ma->writeToHighBit(RegisterType::EAX, 0x30); // AH = version
         $ma->write16Bit(RegisterType::BX, 0xAA55);
+        $ma->write16Bit(RegisterType::ECX, 0x0003);
         $ma->setCarryFlag(false);
     }
 
@@ -190,15 +227,33 @@ class Disk implements InterruptInterface
         $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
         $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($addressSize);
 
-        // Many boot loaders set up the DAP at a fixed location using SI as an absolute address.
-        // When DS changes during boot, using DS:SI would point to the wrong location.
-        // We use SI directly as the linear DAP address to match common bootloader behavior.
-        $dapLinear = $si;
+        // DAP is specified via DS:SI in the BIOS API. Use the selector to compute a linear address.
+        $dapLinear = $this->segmentLinearAddress($runtime, $ds, $si, $addressSize);
 
-        // Read DAP size using byte-addressable memory
+        // Read DAP size using byte-addressable memory. Some bootloaders treat SI
+        // as a linear pointer, so if DS:SI looks invalid, fall back to raw SI.
         $size = $this->readMemory8($runtime, $dapLinear);
+        if ($size < 16) {
+            $fallbackLinear = $si;
+            $sizeAlt = $this->readMemory8($runtime, $fallbackLinear);
+            if ($sizeAlt >= 16) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'INT 13h READ LBA: DS:SI DAP invalid (size=%d), falling back to linear SI=0x%05X (size=%d)',
+                    $size,
+                    $fallbackLinear,
+                    $sizeAlt
+                ));
+                $dapLinear = $fallbackLinear;
+                $size = $sizeAlt;
+            }
+        }
 
         if ($size < 16) {
+            $runtime->option()->logger()->error(sprintf(
+                'INT 13h READ LBA failed: DAP size too small (size=%d at linear 0x%05X)',
+                $size,
+                $dapLinear
+            ));
             $this->fail($runtime, 0x01);
             return;
         }
@@ -219,6 +274,11 @@ class Disk implements InterruptInterface
         // Sanity check: sector count should be reasonable (max 127 sectors is standard for BIOS)
         // Also check if DAP looks corrupted by verifying sectorCount is reasonable
         if ($sectorCount === 0 || $sectorCount > 127) {
+            $runtime->option()->logger()->error(sprintf(
+                'INT 13h READ LBA failed: invalid sectorCount=%d (DAP at 0x%05X)',
+                $sectorCount,
+                $dapLinear
+            ));
             $this->fail($runtime, 0x01); // Invalid function/parameter
             return;
         }
@@ -231,40 +291,43 @@ class Disk implements InterruptInterface
 
         $bufferAddress = $this->segmentLinearAddress($runtime, $bufferSegment, $bufferOffset, $addressSize);
 
-        $reader = $runtime->streamReader()->proxy();
-
-        // Check if this is an ISO stream - use CD sector size (2048 bytes)
-        if ($reader instanceof ISOStreamProxy) {
-            // CD-ROM uses 2048-byte sectors
-            $data = $reader->readCDSectors($lba, $sectorCount);
-            $bytes = strlen($data);
-
-            for ($i = 0; $i < $bytes; $i++) {
-                $address = $bufferAddress + $i;
-                $runtime->memoryAccessor()->allocate($address, safe: false);
-                $runtime->memoryAccessor()->writeRawByte($address, ord($data[$i]));
-            }
-
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorCount);
-            $runtime->memoryAccessor()->setCarryFlag(false);
+        // Read from bootStream (disk image) directly
+        $bootStream = $runtime->bootStream();
+        if ($bootStream === null) {
+            $this->fail($runtime, 0x20);
             return;
         }
+
+        $runtime->option()->logger()->debug(sprintf(
+            'INT 13h READ LBA: DS:SI=%04X:%04X LBA=%d sectors=%d => linear=0x%05X',
+            $ds,
+            $si,
+            $lba,
+            $sectorCount,
+            $bufferAddress,
+        ));
 
         // Standard disk - use 512-byte sectors
         $bytes = $sectorCount * self::SECTOR_SIZE;
 
+        // Save and restore bootStream offset
+        $savedBootOffset = $bootStream->offset();
+
         try {
-            $reader->setOffset($lba * self::SECTOR_SIZE);
+            $bootStream->setOffset($lba * self::SECTOR_SIZE);
         } catch (StreamReaderException) {
+            $bootStream->setOffset($savedBootOffset);
+            $runtime->option()->logger()->error('INT 13h READ LBA failed: seek error');
             $this->fail($runtime, 0x20);
             return;
         }
 
         for ($i = 0; $i < $bytes; $i++) {
             try {
-                $byte = $reader->byte();
+                $byte = $bootStream->byte();
             } catch (StreamReaderException) {
+                $bootStream->setOffset($savedBootOffset);
+                $runtime->option()->logger()->error('INT 13h READ LBA failed: read error');
                 $this->fail($runtime, 0x20);
                 return;
             }
@@ -274,9 +337,17 @@ class Disk implements InterruptInterface
             $runtime->memoryAccessor()->writeRawByte($address, $byte);
         }
 
+        $bootStream->setOffset($savedBootOffset);
+
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorCount);
         $runtime->memoryAccessor()->setCarryFlag(false);
+
+        // Track mapping for later addressMap lookups (best-effort)
+        $runtime->addressMap()->register(
+            max(0, $bufferAddress - 1),
+            new HardDisk(0x80, $lba * self::SECTOR_SIZE, $lba * self::SECTOR_SIZE),
+        );
     }
 
     private function getDriveParametersExtended(RuntimeInterface $runtime): void
@@ -322,6 +393,7 @@ class Disk implements InterruptInterface
     {
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $linearMask = $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $linear = ((($selector << 4) & 0xFFFFF) + ($offset & $offsetMask)) & $linearMask;
 
         if ($runtime->context()->cpu()->isProtectedMode()) {
             $gdtr = $runtime->context()->cpu()->gdtr();
@@ -337,11 +409,20 @@ class Disk implements InterruptInterface
                 $b7 = $this->readMemory8($runtime, $descAddr + 7);
 
                 $segBase = ($b0) | ($b1 << 8) | ($b2 << 16) | ($b7 << 24);
-                return ($segBase + ($offset & $offsetMask)) & $linearMask;
+                $linear = ($segBase + ($offset & $offsetMask)) & $linearMask;
             }
         }
 
-        return ((($selector << 4) & 0xFFFFF) + ($offset & $offsetMask)) & $linearMask;
+        $runtime->option()->logger()->debug(sprintf(
+            'segmentLinearAddress: selector=0x%04X offset=0x%04X -> linear=0x%05X (addrSize=%d, pm=%d)',
+            $selector,
+            $offset,
+            $linear,
+            $addressSize,
+            $runtime->context()->cpu()->isProtectedMode() ? 1 : 0
+        ));
+
+        return $linear;
     }
 
     private function writeSectorsCHS(RuntimeInterface $runtime, int $sectorsToWrite): void
@@ -364,15 +445,6 @@ class Disk implements InterruptInterface
         $dx = $runtime->memoryAccessor()->fetch(RegisterType::EDX);
         $dh = $dx->asHighBit();
         $dl = $dx->asLowBit();
-
-        // For ISO streams with El Torito floppy emulation, allow floppy drive access (DL < 0x80)
-        $reader = $runtime->streamReader()->proxy();
-        $isIsoWithFloppyEmulation = $reader instanceof ISOStreamProxy;
-
-        if ($dl < 0x80 && !$isIsoWithFloppyEmulation) {
-            $this->fail($runtime, 0x01);
-            return;
-        }
 
         $cylinder = (($cl >> 6) & 0x03) << 8;
         $cylinder |= $ch;
@@ -468,6 +540,7 @@ class Disk implements InterruptInterface
 
     private function fail(RuntimeInterface $runtime, int $status): void
     {
+        $runtime->option()->logger()->error(sprintf('INT 13h failed with status 0x%02X', $status));
         $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, $status);
         $runtime->memoryAccessor()->setCarryFlag(true);
     }
@@ -483,20 +556,17 @@ class Disk implements InterruptInterface
             return $value;
         }
 
-        // Try to read from stream
-        $proxy = $runtime->streamReader()->proxy();
-        $currentOffset = $proxy->offset();
+        // In unified memory model, read directly using linear address
+        $memory = $runtime->memory();
+        $currentOffset = $memory->offset();
         try {
-            $origin = $runtime->addressMap()->getOrigin();
-            if ($address >= $origin) {
-                $proxy->setOffset($address - $origin);
-                $byte = $proxy->byte();
-                $proxy->setOffset($currentOffset);
-                return $byte;
-            }
+            $memory->setOffset($address);
+            $byte = $memory->byte();
+            $memory->setOffset($currentOffset);
+            return $byte;
         } catch (\Throwable) {
+            return 0;
         }
-        return 0;
     }
 
     /**

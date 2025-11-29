@@ -19,7 +19,7 @@ class TestRegRm implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = $opcode === 0x84;

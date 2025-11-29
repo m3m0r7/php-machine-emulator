@@ -19,7 +19,7 @@ class AdcRegRm implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $reader->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x10, 0x12], true);

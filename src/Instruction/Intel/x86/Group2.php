@@ -23,13 +23,13 @@ class Group2 implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
         $opSize = $this->isByteOp($opcode) ? 8 : $runtime->context()->cpu()->operandSize();
 
         // Debug: trace Group2 operations in problem region
-        $ip = $runtime->streamReader()->offset();
+        $ip = $runtime->memory()->offset();
 
         return match ($modRegRM->digit()) {
             0x0 => $this->rotateLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
@@ -48,7 +48,7 @@ class Group2 implements InstructionInterface
     protected function count(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): int
     {
         return match ($opcode) {
-            0xC0, 0xC1 => $runtime->streamReader()->byte(),
+            0xC0, 0xC1 => $runtime->memory()->byte(),
             0xD0, 0xD1 => 1,
             0xD2, 0xD3 => $runtime->memoryAccessor()->fetch(RegisterType::ECX)->asLowBit(),
             default => 0,

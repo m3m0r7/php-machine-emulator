@@ -20,11 +20,11 @@ class Loop implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
-            ->streamReader()
+                ->memory()
             ->signedByte();
 
         $pos = $runtime
-            ->streamReader()
+                ->memory()
             ->offset();
 
         // LOOP decrements ECX first, then checks if non-zero
@@ -60,7 +60,7 @@ class Loop implements InstructionInterface
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime
-                ->streamReader()
+                ->memory()
                 ->setOffset($pos + $operand);
         }
 

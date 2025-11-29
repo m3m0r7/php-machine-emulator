@@ -680,7 +680,7 @@ trait Instructable
 
         $targetOffset = $gate['offset'] & ($gate['is32'] ? 0xFFFFFFFF : 0xFFFF);
         $linearTarget = $this->linearCodeAddress($runtime, $targetSelector, $targetOffset, $opSize);
-        $runtime->streamReader()->setOffset($linearTarget);
+        $runtime->memory()->setOffset($linearTarget);
         $this->writeCodeSegment($runtime, $targetSelector, $newCpl, $targetDesc);
     }
 
@@ -722,7 +722,7 @@ trait Instructable
         if ($oldSelector !== 0 && $oldTssDesc !== null && ($oldTssDesc['type'] ?? 0) === 0xB) {
             $oldCr3 = $runtime->memoryAccessor()->readControlRegister(3);
             $csSel = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
-            $oldEip = $this->codeOffsetFromLinear($runtime, $csSel, $runtime->streamReader()->offset(), 32);
+            $oldEip = $this->codeOffsetFromLinear($runtime, $csSel, $runtime->memory()->offset(), 32);
             $flagsVal = $this->packFlags($runtime);
 
             // TSS32 layout
@@ -805,7 +805,7 @@ trait Instructable
 
         if ($runtime->option()->shouldChangeOffset()) {
             $linearTarget = $this->linearCodeAddress($runtime, $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte(), $newEip, 32);
-            $runtime->streamReader()->setOffset($linearTarget);
+            $runtime->memory()->setOffset($linearTarget);
         }
 
         // EFLAGS loaded from TSS (only low 16 bits honored in 32-bit TSS).
@@ -1553,23 +1553,13 @@ trait Instructable
             return $value;
         }
 
+        // In unified memory model, read directly from memory using linear address
         try {
-            $origin = $runtime->addressMap()->getOrigin();
-            if ($address < $origin) {
-                return 0;
-            }
-        } catch (\Throwable) {
-            return 0;
-        }
-
-        try {
-            $proxy = $runtime->streamReader()->proxy();
-            $currentOffset = $runtime->streamReader()->offset();
-            $proxy->setOffset(
-                $runtime->addressMap()->getDisk()->entrypointOffset() + ($address - $runtime->addressMap()->getOrigin())
-            );
-            $byte = $proxy->byte();
-            $proxy->setOffset($currentOffset);
+            $memory = $runtime->memory();
+            $currentOffset = $memory->offset();
+            $memory->setOffset($address);
+            $byte = $memory->byte();
+            $memory->setOffset($currentOffset);
             return $byte;
         } catch (\Throwable) {
             return 0;

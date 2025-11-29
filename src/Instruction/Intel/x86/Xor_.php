@@ -14,30 +14,12 @@ class Xor_ implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0x31];
+        // Handled by XorRegRm (0x30-0x33). Disable this legacy handler.
+        return [];
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $modRM = $runtime->streamReader()->byte();
-
-        $mode = ($modRM >> 6) & 0b00000011;
-        $register = ($modRM >> 3) & 0b00000111;
-        $registerOrMemory = $modRM & 0b00000111;
-
-        if ($mode !== 0b011) {
-           throw new ExecutionException(
-               sprintf('The addressing mode (0b%02s) is not supported yet', decbin($mode))
-           );
-        }
-
-        $runtime
-            ->memoryAccessor()
-            ->write16Bit(
-                $registerOrMemory,
-                $runtime->memoryAccessor()->fetch($registerOrMemory)->asByte() ^ $runtime->memoryAccessor()->fetch($register)->asByte(),
-            );
-
-        return ExecutionStatus::SUCCESS;
+        throw new ExecutionException('Xor_ handler should not be invoked (delegated to XorRegRm)');
     }
 }

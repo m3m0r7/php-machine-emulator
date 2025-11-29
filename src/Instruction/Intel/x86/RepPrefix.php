@@ -20,7 +20,7 @@ class RepPrefix implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = $runtime->streamReader();
+        $reader = $runtime->memory();
         $nextOpcode = $reader->byte();
 
         $isCmpsOrScas = in_array($nextOpcode, [0xA6, 0xAE, 0xA7, 0xAF], true);

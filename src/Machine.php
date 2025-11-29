@@ -8,16 +8,15 @@ use PHPMachineEmulator\Architecture\ArchitectureProvider;
 use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Exception\PHPMachineEmulatorException;
 use PHPMachineEmulator\Instruction\Intel;
-use PHPMachineEmulator\Runtime\Runtime;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Runtime\RuntimeOption;
-use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
+use PHPMachineEmulator\Stream\BootableStreamInterface;
 
 class Machine implements MachineInterface
 {
     protected array $runtimes = [];
 
-    public function __construct(protected StreamReaderIsProxyableInterface $streamReader, protected OptionInterface $option = new Option())
+    public function __construct(protected BootableStreamInterface $bootableStream, protected OptionInterface $option = new Option())
     {
         $this->runtimes[MachineType::Intel_x86->name] = [
             Intel\x86::class,
@@ -57,7 +56,7 @@ class Machine implements MachineInterface
             $this,
             new RuntimeOption(),
             $architectureProvider,
-            $this->streamReader,
+            $this->bootableStream,
         );
     }
 }

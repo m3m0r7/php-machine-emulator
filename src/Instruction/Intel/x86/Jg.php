@@ -19,11 +19,11 @@ class Jg implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
-            ->streamReader()
+                ->memory()
             ->signedByte();
 
         $pos = $runtime
-            ->streamReader()
+                ->memory()
             ->offset();
 
         $zf = $runtime->memoryAccessor()->shouldZeroFlag();
@@ -33,7 +33,7 @@ class Jg implements InstructionInterface
         // JG: jump if ZF=0 AND SF=OF
         if ($runtime->option()->shouldChangeOffset() && !$zf && ($sf === $of)) {
             $runtime
-                ->streamReader()
+                ->memory()
                 ->setOffset($pos + $operand);
         }
 

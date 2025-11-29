@@ -28,7 +28,7 @@ class AddImm8 implements InstructionInterface
         $size = $map['size'];
         $mask = $size === 8 ? 0xFF : 0xFFFF;
 
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $operand = $size === 8
             ? $reader->streamReader()->byte()
             : $reader->short();

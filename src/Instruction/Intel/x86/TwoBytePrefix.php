@@ -27,7 +27,7 @@ class TwoBytePrefix implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $next = $reader->streamReader()->byte();
 
         return match ($next) {
@@ -467,7 +467,7 @@ class TwoBytePrefix implements InstructionInterface
         $runtime->context()->cpu()->setCpl(0);
         $runtime->context()->cpu()->setUserMode(false);
         $target = $this->linearCodeAddress($runtime, $cs, $eip & 0xFFFFFFFF, 32);
-        $runtime->streamReader()->setOffset($target);
+        $runtime->memory()->setOffset($target);
         return ExecutionStatus::SUCCESS;
     }
 
@@ -488,7 +488,7 @@ class TwoBytePrefix implements InstructionInterface
         $runtime->context()->cpu()->setCpl(3);
         $runtime->context()->cpu()->setUserMode(true);
         $target = $this->linearCodeAddress($runtime, $cs, $eip & 0xFFFFFFFF, 32);
-        $runtime->streamReader()->setOffset($target);
+        $runtime->memory()->setOffset($target);
         return ExecutionStatus::SUCCESS;
     }
 
@@ -703,8 +703,8 @@ class TwoBytePrefix implements InstructionInterface
         $cc = $opcode & 0x0F;
         $opSize = $runtime->context()->cpu()->operandSize();
         $disp = $opSize === 32
-            ? $runtime->streamReader()->dword()
-            : $runtime->streamReader()->short();
+            ? $runtime->memory()->dword()
+            : $runtime->memory()->short();
 
         // Sign-extend displacement
         if ($opSize === 32) {
@@ -717,8 +717,8 @@ class TwoBytePrefix implements InstructionInterface
         }
 
         if ($this->conditionMet($runtime, $cc)) {
-            $current = $runtime->streamReader()->offset();
-            $runtime->streamReader()->setOffset(($current + $disp) & 0xFFFFFFFF);
+            $current = $runtime->memory()->offset();
+            $runtime->memory()->setOffset(($current + $disp) & 0xFFFFFFFF);
         }
         return ExecutionStatus::SUCCESS;
     }

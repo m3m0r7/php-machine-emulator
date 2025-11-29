@@ -20,12 +20,12 @@ class CallFar implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $size = $runtime->context()->cpu()->operandSize();
         $offset = $size === 32 ? $reader->dword() : $reader->short();
         $segment = $reader->short();
 
-        $pos = $runtime->streamReader()->offset();
+        $pos = $runtime->memory()->offset();
 
         $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
         $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $pos, $size);
@@ -47,13 +47,13 @@ class CallFar implements InstructionInterface
                 $descriptor = $this->resolveCodeDescriptor($runtime, $segment);
                 $newCpl = $this->computeCplForTransfer($runtime, $segment, $descriptor);
                 $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $size);
-                $runtime->streamReader()->setOffset($linearTarget);
+                $runtime->memory()->setOffset($linearTarget);
                 $this->writeCodeSegment($runtime, $segment, $newCpl, $descriptor);
                 return ExecutionStatus::SUCCESS;
             }
 
             $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $size);
-            $runtime->streamReader()->setOffset($linearTarget);
+            $runtime->memory()->setOffset($linearTarget);
             $this->writeCodeSegment($runtime, $segment);
         }
 

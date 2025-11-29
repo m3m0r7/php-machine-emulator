@@ -12,13 +12,17 @@ use PHPMachineEmulator\Util\BinaryInteger;
 
 class MemoryAccessor implements MemoryAccessorInterface
 {
-    protected array $memory = [];
+    /**
+     * Register storage (addresses 0-15 for CPU registers).
+     * General memory is handled by MemoryStream.
+     */
+    protected array $registers = [];
+
     protected bool $zeroFlag = false;
     protected bool $signFlag = false;
     protected bool $overflowFlag = false;
     protected bool $carryFlag = false;
     protected bool $parityFlag = false;
-    protected bool $fireEvents = true;
     protected bool $enableUpdateFlags = false;
     protected bool $directionFlag = false;
     protected bool $interruptFlag = false;
@@ -33,42 +37,84 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
     }
 
+    /**
+     * Read a byte from memory at the given address, preserving the current offset.
+     */
+    private function readFromMemory(int $address): int
+    {
+        $memory = $this->runtime->memory();
+        $savedOffset = $memory->offset();
+        $memory->setOffset($address);
+        $value = $memory->byte();
+        $memory->setOffset($savedOffset);
+        return $value;
+    }
+
+    /**
+     * Write a byte to memory at the given address, preserving the current offset.
+     */
+    private function writeToMemory(int $address, int $value): void
+    {
+        $memory = $this->runtime->memory();
+        $savedOffset = $memory->offset();
+        $memory->setOffset($address);
+        $memory->writeByte($value);
+        $memory->setOffset($savedOffset);
+    }
+
     public function allocate(int $address, int $size = 1, bool $safe = true): self
     {
-        if ($safe && array_key_exists($address, $this->memory)) {
-            throw new MemoryAccessorException('Specified memory address was allocated');
+        // Register addresses (0-31) are stored in $registers array
+        if ($this->isRegisterAddress($address)) {
+            if ($safe && array_key_exists($address, $this->registers)) {
+                throw new MemoryAccessorException('Specified register address was allocated');
+            }
+            for ($i = 0; $i < $size; $i++) {
+                if ($this->isRegisterAddress($address + $i)) {
+                    $this->registers[$address + $i] = null;
+                }
+            }
+            return $this;
         }
 
-        for ($i = 0; $i < $size; $i++) {
-            $this->memory[$address + $i] = null;
-        }
-
+        // General memory is handled by MemoryStream - no explicit allocation needed
+        // MemoryStream pre-allocates all memory at construction
         return $this;
     }
 
     public function fetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface
     {
         $address = $this->asAddress($registerType);
-        $this->validateMemoryAddressWasAllocated($address);
 
-        // Determine stored size: GPRs (addresses 0-7) are stored as 32-bit
-        $storedSize = ($address >= 0 && $address <= 7) ? 32 : 16;
+        // Register addresses use $registers array
+        if ($this->isRegisterAddress($address)) {
+            $this->validateRegisterAddressWasAllocated($address);
+            // Determine stored size: GPRs (addresses 0-7) are stored as 32-bit
+            $storedSize = $this->isGprAddress($address) ? 32 : 16;
+            return MemoryAccessorFetchResult::fromCache($this->registers[$address], $storedSize);
+        }
 
-        return MemoryAccessorFetchResult::fromCache($this->memory[$address], $storedSize);
+        // General memory uses MemoryStream
+        $value = $this->readFromMemory($address);
+        return MemoryAccessorFetchResult::fromCache($value, 8);
     }
 
     public function tryToFetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface|null
     {
         $address = $this->asAddress($registerType);
 
-        if (!array_key_exists($address, $this->memory)) {
-            return null;
+        // Register addresses use $registers array
+        if ($this->isRegisterAddress($address)) {
+            if (!array_key_exists($address, $this->registers)) {
+                return null;
+            }
+            $storedSize = $this->isGprAddress($address) ? 32 : 16;
+            return MemoryAccessorFetchResult::fromCache($this->registers[$address], $storedSize);
         }
 
-        // Determine stored size: GPRs (addresses 0-7) are stored as 32-bit
-        $storedSize = ($address >= 0 && $address <= 7) ? 32 : 16;
-
-        return MemoryAccessorFetchResult::fromCache($this->memory[$address], $storedSize);
+        // General memory uses MemoryStream
+        $value = $this->readFromMemory($address);
+        return MemoryAccessorFetchResult::fromCache($value, 8);
     }
 
     public function write16Bit(int|RegisterType $registerType, int|null $value): self
@@ -79,38 +125,40 @@ class MemoryAccessor implements MemoryAccessorInterface
     public function writeBySize(int|RegisterType $registerType, int|null $value, int $size = 64): self
     {
         $address = $this->asAddress($registerType);
-        $isGpr = $this->isGprAddress($address);
 
-        // For GPRs, always store as 32-bit internally to preserve upper bits when writing 16-bit values
-        if ($isGpr && $size === 16) {
-            // Read current 32-bit value (raw, not encoded)
-            $currentRaw = $this->memory[$address] ?? 0;
-            // Decode current value from little-endian 32-bit
-            $current = BinaryInteger::asLittleEndian($currentRaw, 32);
-            // Preserve upper 16 bits, replace lower 16 bits
-            $value = ($current & 0xFFFF0000) | ($value & 0xFFFF);
-            $size = 32;
-        }
+        // Register addresses use $registers array
+        if ($this->isRegisterAddress($address)) {
+            $isGpr = $this->isGprAddress($address);
 
-        // GPRs are always stored as 32-bit
-        if ($isGpr && $size < 32) {
-            $size = 32;
-        }
+            // For GPRs, always store as 32-bit internally to preserve upper bits when writing 16-bit values
+            if ($isGpr && $size === 16) {
+                $currentRaw = $this->registers[$address] ?? 0;
+                $current = BinaryInteger::asLittleEndian($currentRaw, 32);
+                $value = ($current & 0xFFFF0000) | ($value & 0xFFFF);
+                $size = 32;
+            }
 
-        [$address, $previousValue] = $this
-            ->processWrite(
+            // GPRs are always stored as 32-bit
+            if ($isGpr && $size < 32) {
+                $size = 32;
+            }
+
+            [$address, $previousValue] = $this->processRegisterWrite(
                 $registerType,
-                BinaryInteger::asLittleEndian(
-                    $value ?? 0,
-                    $size,
-                ),
+                BinaryInteger::asLittleEndian($value ?? 0, $size),
             );
 
-        $this->postProcessWhenWrote(
-            $address,
-            $previousValue,
-            $value,
-        );
+            $this->postProcessWhenWrote($address, $previousValue, $value);
+            return $this;
+        }
+
+        // General memory uses MemoryStream
+        $previousValue = $this->readFromMemory($address);
+        $bytes = intdiv($size, 8);
+        for ($i = 0; $i < $bytes; $i++) {
+            $this->writeToMemory($address + $i, ($value >> ($i * 8)) & 0xFF);
+        }
+        $this->postProcessWhenWrote($address, $previousValue, $value);
 
         return $this;
     }
@@ -125,7 +173,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
         $newValue = ($current & ~0xFF00) | (($value & 0xFF) << 8);
 
-        [$address, $previousValue] = $this->processWrite(
+        [$address, $previousValue] = $this->processRegisterWrite(
             $registerType,
             BinaryInteger::asLittleEndian($newValue, $isGpr ? 32 : 16),
         );
@@ -148,7 +196,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
         $newValue = ($current & ~0xFF) | ($value & 0xFF);
 
-        [$address, $previousValue] = $this->processWrite(
+        [$address, $previousValue] = $this->processRegisterWrite(
             $registerType,
             BinaryInteger::asLittleEndian($newValue, $isGpr ? 32 : 16),
         );
@@ -168,9 +216,8 @@ class MemoryAccessor implements MemoryAccessorInterface
      */
     public function writeRawByte(int $address, int $value): self
     {
-        $previousValue = $this->memory[$address] ?? null;
-        $this->memory[$address] = $value & 0xFF;
-
+        $previousValue = $this->readFromMemory($address);
+        $this->writeToMemory($address, $value & 0xFF);
         $this->postProcessWhenWrote($address, $previousValue, $value);
 
         return $this;
@@ -181,7 +228,7 @@ class MemoryAccessor implements MemoryAccessorInterface
      */
     public function readRawByte(int $address): ?int
     {
-        return $this->memory[$address] ?? null;
+        return $this->readFromMemory($address);
     }
 
     protected function postProcessWhenWrote(int $address, int|null $previousValue, int|null $value): void
@@ -376,13 +423,12 @@ class MemoryAccessor implements MemoryAccessorInterface
             $address = $this->stackLinearAddress($sp, $size, false);
             $value = 0;
             for ($i = 0; $i < $bytes; $i++) {
-                $value |= ($this->memory[$address + $i] ?? 0) << ($i * 8);
+                $value |= $this->readFromMemory($address + $i) << ($i * 8);
             }
             $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
             $newSp = ($sp + $bytes) & $mask;
 
             $this->writeBySize(RegisterType::ESP, $newSp, $size);
-            $verifyEsp = $this->fetch(RegisterType::ESP)->asBytesBySize($size);
 
             // Value is already in correct little-endian format from memory read
             // Pass alreadyDecoded=true to skip byte swap in asBytesBySize()
@@ -472,14 +518,13 @@ class MemoryAccessor implements MemoryAccessorInterface
         $this->efer = $value & 0xFFFFFFFFFFFFFFFF;
     }
 
-    private function processWrite(int|RegisterType $registerType, int|null $value): array
+    private function processRegisterWrite(int|RegisterType $registerType, int|null $value): array
     {
         $address = $this->asAddress($registerType);
-        $this->validateMemoryAddressWasAllocated($address);
+        $this->validateRegisterAddressWasAllocated($address);
 
-        $previousValue = $this->memory[$address];
-
-        $this->memory[$address] = $value;
+        $previousValue = $this->registers[$address];
+        $this->registers[$address] = $value;
 
         return [$address, $previousValue];
     }
@@ -503,24 +548,22 @@ class MemoryAccessor implements MemoryAccessorInterface
         }
     }
 
-    private function validateMemoryAddressWasAllocated(int $address): void
+    private function validateRegisterAddressWasAllocated(int $address): void
     {
-        if (array_key_exists($address, $this->memory)) {
+        if (array_key_exists($address, $this->registers)) {
             return;
         }
 
-        // Lazily back common VRAM/MMIO ranges so guest mappings do not fault.
-        if (MemoryRegion::isKnownRegion($address)) {
-            $this->allocate($address, safe: false);
-            return;
-        }
+        // Lazily allocate register if not yet allocated
+        $this->registers[$address] = null;
+    }
 
-        throw new MemoryAccessorException(
-            sprintf(
-                'Specified memory address was not allocated: 0x%04X',
-                $address,
-            ),
-        );
+    /**
+     * Check if address is a register address (0-31).
+     */
+    private function isRegisterAddress(int $address): bool
+    {
+        return $address >= 0 && $address < 32;
     }
 
     private function stackLinearAddress(int $sp, int $size, bool $isWrite = false): int
@@ -560,20 +603,6 @@ class MemoryAccessor implements MemoryAccessorInterface
 
         $linear = ((($ssSelector << 4) & 0xFFFFF) + ($sp & $mask)) & $linearMask;
         return $this->translateLinear($linear, $isWrite);
-    }
-
-    private function isGeneralPurposeRegister(RegisterType $registerType): bool
-    {
-        return in_array($registerType, [
-            RegisterType::EAX,
-            RegisterType::ECX,
-            RegisterType::EDX,
-            RegisterType::EBX,
-            RegisterType::ESP,
-            RegisterType::EBP,
-            RegisterType::ESI,
-            RegisterType::EDI,
-        ], true);
     }
 
     private function isGprAddress(int $address): bool
@@ -827,7 +856,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $value = 0;
         for ($i = 0; $i < 4; $i++) {
-            $value |= ($this->memory[$address + $i] ?? 0) << ($i * 8);
+            $value |= $this->readFromMemory($address + $i) << ($i * 8);
         }
         return $value & 0xFFFFFFFF;
     }
@@ -841,9 +870,8 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     private function writePhysical32(int $address, int $value): void
     {
-        $this->allocate($address, 4, safe: false);
         for ($i = 0; $i < 4; $i++) {
-            $this->memory[$address + $i] = ($value >> ($i * 8)) & 0xFF;
+            $this->writeToMemory($address + $i, ($value >> ($i * 8)) & 0xFF);
         }
     }
 
@@ -887,14 +915,14 @@ class MemoryAccessor implements MemoryAccessorInterface
             return null;
         }
 
-        $b0 = $this->memory[$offset] ?? 0;
-        $b1 = $this->memory[$offset + 1] ?? 0;
-        $b2 = $this->memory[$offset + 2] ?? 0;
-        $b3 = $this->memory[$offset + 3] ?? 0;
-        $b4 = $this->memory[$offset + 4] ?? 0;
-        $b5 = $this->memory[$offset + 5] ?? 0;
-        $b6 = $this->memory[$offset + 6] ?? 0;
-        $b7 = $this->memory[$offset + 7] ?? 0;
+        $b0 = $this->readFromMemory($offset);
+        $b1 = $this->readFromMemory($offset + 1);
+        $b2 = $this->readFromMemory($offset + 2);
+        $b3 = $this->readFromMemory($offset + 3);
+        $b4 = $this->readFromMemory($offset + 4);
+        $b5 = $this->readFromMemory($offset + 5);
+        $b6 = $this->readFromMemory($offset + 6);
+        $b7 = $this->readFromMemory($offset + 7);
 
         $limitLow = $b0 | ($b1 << 8);
         $limitHigh = $b6 & 0x0F;

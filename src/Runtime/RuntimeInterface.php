@@ -8,6 +8,8 @@ use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\OptionInterface;
+use PHPMachineEmulator\Stream\BootableStreamInterface;
+use PHPMachineEmulator\Stream\MemoryStream;
 use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
 use PHPMachineEmulator\Video\VideoInterface;
 
@@ -20,11 +22,12 @@ interface RuntimeInterface
     public function memoryAccessor(): MemoryAccessorInterface;
     public function execute(int $opcode): ExecutionStatus;
     public function shutdown(callable $callback): self;
-    public function streamReader(): StreamReaderIsProxyableInterface;
     public function register(): RegisterInterface;
     public function frame(): FrameInterface;
     public function option(): OptionInterface;
     public function video(): VideoInterface;
     public function segmentOverride(): ?\PHPMachineEmulator\Instruction\RegisterType;
     public function setSegmentOverride(?\PHPMachineEmulator\Instruction\RegisterType $segment): void;
+    public function memory(): ?MemoryStream;
+    public function bootStream(): ?BootableStreamInterface;
 }

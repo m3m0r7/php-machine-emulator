@@ -1,0 +1,161 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PHPMachineEmulator\Stream;
+
+/**
+ * Unified memory stream backed by php://memory.
+ *
+ * Implements both read and write operations on a single memory space.
+ * Boot data is copied here at startup, and all subsequent operations
+ * (INT 13h disk reads, REP MOVSB, instruction fetch, etc.) work on this same memory.
+ */
+class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyableInterface, StreamIsCopyableInterface
+{
+    /** @var resource */
+    private $memory;
+
+    private int $offset = 0;
+
+    private int $size;
+
+    /**
+     * @param int $size Total memory size (default 1MB)
+     */
+    public function __construct(int $size = 0x100000)
+    {
+        $this->size = $size;
+        $this->memory = fopen('php://memory', 'r+b');
+
+        // Pre-allocate memory with zeros
+        fwrite($this->memory, str_repeat("\x00", $size));
+        rewind($this->memory);
+    }
+
+    // ========================================
+    // StreamReaderInterface implementation
+    // ========================================
+
+    public function char(): string
+    {
+        fseek($this->memory, $this->offset, SEEK_SET);
+        $char = fread($this->memory, 1);
+        $this->offset++;
+
+        return $char === false || $char === '' ? "\x00" : $char;
+    }
+
+    public function byte(): int
+    {
+        return ord($this->char());
+    }
+
+    public function signedByte(): int
+    {
+        $byte = $this->byte();
+        return $byte > 127 ? $byte - 256 : $byte;
+    }
+
+    public function short(): int
+    {
+        $low = $this->byte();
+        $high = $this->byte();
+        return $low | ($high << 8);
+    }
+
+    public function dword(): int
+    {
+        $b0 = $this->byte();
+        $b1 = $this->byte();
+        $b2 = $this->byte();
+        $b3 = $this->byte();
+        return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+    }
+
+    public function offset(): int
+    {
+        return $this->offset;
+    }
+
+    public function setOffset(int $newOffset): self
+    {
+        $this->offset = $newOffset;
+        return $this;
+    }
+
+    public function isEOF(): bool
+    {
+        return $this->offset >= $this->size;
+    }
+
+    // ========================================
+    // StreamWriterInterface implementation
+    // ========================================
+
+    public function write(string $value): self
+    {
+        fseek($this->memory, $this->offset, SEEK_SET);
+        fwrite($this->memory, $value);
+        $this->offset += strlen($value);
+        return $this;
+    }
+
+    public function writeByte(int $value): void
+    {
+        fseek($this->memory, $this->offset, SEEK_SET);
+        fwrite($this->memory, chr($value & 0xFF));
+        $this->offset++;
+    }
+
+    public function writeShort(int $value): void
+    {
+        $this->writeByte($value & 0xFF);
+        $this->writeByte(($value >> 8) & 0xFF);
+    }
+
+    public function writeDword(int $value): void
+    {
+        $this->writeByte($value & 0xFF);
+        $this->writeByte(($value >> 8) & 0xFF);
+        $this->writeByte(($value >> 16) & 0xFF);
+        $this->writeByte(($value >> 24) & 0xFF);
+    }
+
+    public function copy(StreamReaderInterface $source, int $sourceOffset, int $destOffset, int $size): void
+    {
+        // Save current positions
+        $originalSourceOffset = $source->offset();
+        $originalDestOffset = $this->offset;
+
+        // Set source position
+        $source->setOffset($sourceOffset);
+
+        // Set destination position
+        fseek($this->memory, $destOffset, SEEK_SET);
+
+        // Copy byte by byte
+        for ($i = 0; $i < $size; $i++) {
+            $byte = $source->byte();
+            fwrite($this->memory, chr($byte));
+        }
+
+        // Restore positions
+        $source->setOffset($originalSourceOffset);
+        $this->offset = $originalDestOffset;
+    }
+
+    // ========================================
+    // Proxyable interface implementation
+    // ========================================
+
+    public function proxy(): StreamProxyInterface
+    {
+        return new StreamProxy($this);
+    }
+
+    public function size(): int
+    {
+        return $this->size;
+    }
+}

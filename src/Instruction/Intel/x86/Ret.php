@@ -20,7 +20,7 @@ class Ret implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $popBytes = ($opcode === 0xC2 || $opcode === 0xCA)
-            ? $runtime->streamReader()->short()
+            ? $runtime->memory()->short()
             : 0;
 
         $size = $runtime->context()->cpu()->operandSize();
@@ -62,20 +62,16 @@ class Ret implements InstructionInterface
         }
 
         if ($runtime->option()->shouldChangeOffset()) {
-            $inMemoryMode = $runtime->context()->cpu()->isMemoryMode();
-
             if ($opcode === 0xCB || $opcode === 0xCA) {
                 // Far return - use linearCodeAddress
                 $linear = $this->linearCodeAddress($runtime, $targetCs, $returnIp, $size);
-            } elseif ($inMemoryMode && !$runtime->context()->cpu()->isProtectedMode()) {
-                // Near return in memory mode: convert CS:IP to linear address
+            } else {
+                // Near return in unified memory model: convert CS:IP to linear address
                 $cs = $ma->fetch(RegisterType::CS)->asByte();
                 $linear = ($cs << 4) + ($returnIp & 0xFFFF);
-            } else {
-                $linear = $returnIp;
             }
-            $runtime->option()->logger()->debug(sprintf('RET: popped returnIp=0x%05X ESP before=0x%08X, setOffset to 0x%05X (memMode=%d)', $returnIp, $espBefore, $linear, $inMemoryMode ? 1 : 0));
-            $runtime->streamReader()->setOffset($linear);
+            $runtime->option()->logger()->debug(sprintf('RET: popped returnIp=0x%05X ESP before=0x%08X, setOffset to 0x%05X (CS=0x%04X)', $returnIp, $espBefore, $linear, $cs ?? $targetCs));
+            $runtime->memory()->setOffset($linear);
         }
 
         return ExecutionStatus::SUCCESS;

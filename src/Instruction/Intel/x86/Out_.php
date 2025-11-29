@@ -21,7 +21,7 @@ class Out_ implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhanced = new EnhanceStreamReader($runtime->streamReader());
+        $enhanced = new EnhanceStreamReader($runtime->memory());
 
         $port = match ($opcode) {
             0xE6, 0xE7 => $enhanced->streamReader()->byte(),

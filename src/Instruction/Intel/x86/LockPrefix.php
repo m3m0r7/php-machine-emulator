@@ -21,7 +21,7 @@ class LockPrefix implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $nextOpcode = $runtime->streamReader()->byte();
+        $nextOpcode = $runtime->memory()->byte();
         return $runtime->execute($nextOpcode);
     }
 }

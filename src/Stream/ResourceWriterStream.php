@@ -27,4 +27,20 @@ class ResourceWriterStream implements StreamWriterInterface
         fwrite($this->resource, $value);
         return $this;
     }
+
+    public function writeByte(int $value): void
+    {
+        fwrite($this->resource, chr($value & 0xFF));
+    }
+
+    public function writeShort(int $value): void
+    {
+        fwrite($this->resource, pack('v', $value & 0xFFFF));
+    }
+
+    public function writeDword(int $value): void
+    {
+        fwrite($this->resource, pack('V', $value & 0xFFFFFFFF));
+    }
+
 }

@@ -20,7 +20,7 @@ class ImulImmediate implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $modrm = $reader->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
         $isImm8 = $opcode === 0x6B;

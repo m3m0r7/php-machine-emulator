@@ -72,7 +72,7 @@ class InterruptDeliveryHandler implements InterruptDeliveryHandlerInterface
 
     private function raiseInterrupt(RuntimeInterface $runtime, int $vector): bool
     {
-        return $this->raiseInterruptWithErrorCode($runtime, $vector, $runtime->streamReader()->offset(), null);
+        return $this->raiseInterruptWithErrorCode($runtime, $vector, $runtime->memory()->offset(), null);
     }
 
     private function raiseInterruptWithErrorCode(RuntimeInterface $runtime, int $vector, int $ip, ?int $errorCode): bool

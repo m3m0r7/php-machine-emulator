@@ -25,7 +25,7 @@ class MovFrom8BitReg implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
         $value = $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());

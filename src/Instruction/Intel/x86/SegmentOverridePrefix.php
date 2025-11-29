@@ -23,7 +23,7 @@ class SegmentOverridePrefix implements InstructionInterface
         $runtime->setSegmentOverride($segment);
 
         // Execute the following opcode with the override applied.
-        $nextOpcode = $runtime->streamReader()->byte();
+        $nextOpcode = $runtime->memory()->byte();
         return $runtime->execute($nextOpcode);
     }
 

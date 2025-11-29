@@ -25,10 +25,8 @@ use PHPMachineEmulator\Runtime\Ticker\ApicTicker;
 use PHPMachineEmulator\Runtime\Ticker\PitTicker;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
-use PHPMachineEmulator\Stream\CompositeStreamReader;
-use PHPMachineEmulator\Stream\ISO\ISOStream;
-use PHPMachineEmulator\Stream\MemoryStreamReader;
-use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
+use PHPMachineEmulator\Stream\BootableStreamInterface;
+use PHPMachineEmulator\Stream\MemoryStream;
 use PHPMachineEmulator\Video\VideoInterface;
 
 class Runtime implements RuntimeInterface
@@ -43,12 +41,13 @@ class Runtime implements RuntimeInterface
     protected array $shutdown = [];
     protected ?RegisterType $segmentOverride = null;
     protected int $instructionCount = 0;
+    protected MemoryStream $memory;
 
     public function __construct(
         protected MachineInterface $machine,
         protected RuntimeOptionInterface $runtimeOption,
         protected ArchitectureProviderInterface $architectureProvider,
-        protected StreamReaderIsProxyableInterface $streamReader,
+        protected BootableStreamInterface $bootStream,
     ) {
         $this->register = $this
             ->architectureProvider
@@ -86,37 +85,59 @@ class Runtime implements RuntimeInterface
             $this->showHeader();
         }
 
-        // Wrap boot stream with composite reader for memory mode support
-        $this->streamReader = $this->wrapWithCompositeStreamReader($this->streamReader);
+        // Convert boot stream to memory stream
+        $this->memory = $this->createMemoryStream();
     }
 
     /**
-     * Wrap boot stream with composite reader if needed.
+     * Create memory stream with boot data copied in.
      */
-    private function wrapWithCompositeStreamReader(StreamReaderIsProxyableInterface $bootStream): StreamReaderIsProxyableInterface
+    private function createMemoryStream(): MemoryStream
     {
-        // Only wrap ISOStream (or other boot streams that need memory mode)
-        if (!$bootStream instanceof ISOStream) {
-            return $bootStream;
-        }
+        // Create memory stream (2MB to accommodate floppy images)
+        $memoryStream = new MemoryStream(0x200000);
 
-        return new CompositeStreamReader(
-            $this,
-            $bootStream,
-            new MemoryStreamReader($this->memoryAccessor),
-            $bootStream->fileSize(),
+        $loadAddress = $this->bootStream->loadAddress();
+        $bootSize = $this->bootStream->fileSize();
+
+        $this->machine->option()->logger()->debug(
+            sprintf('Copying boot data (%d bytes) to memory at 0x%05X', $bootSize, $loadAddress)
         );
+
+        // Copy boot data to memory at loadAddress (e.g., 0x7C00)
+        $memoryStream->copy($this->bootStream, 0, $loadAddress, $bootSize);
+
+        // Set initial offset to boot entry point
+        $memoryStream->setOffset($loadAddress);
+
+        return $memoryStream;
+    }
+
+    /**
+     * Get the memory stream.
+     */
+    public function memory(): MemoryStream
+    {
+        return $this->memory;
+    }
+
+    /**
+     * Get the boot stream.
+     */
+    public function bootStream(): ?BootableStreamInterface
+    {
+        return $this->bootStream;
     }
 
     public function start(): void
     {
         $this->initialize();
 
-        while (!$this->streamReader->isEOF()) {
+        while (!$this->memory->isEOF()) {
             $this->instructionCount++;
             $this->tickTimers();
             $this->memoryAccessor->setInstructionFetch(true);
-            $opcode = $this->streamReader->byte();
+            $opcode = $this->memory->byte();
             $this->memoryAccessor->setInstructionFetch(false);
             $result = $this->execute($opcode);
             if ($result === ExecutionStatus::EXIT) {
@@ -193,11 +214,6 @@ class Runtime implements RuntimeInterface
         return $this->machine->option();
     }
 
-    public function streamReader(): StreamReaderIsProxyableInterface
-    {
-        return $this->streamReader;
-    }
-
     public function memoryAccessor(): MemoryAccessorInterface
     {
         return $this->memoryAccessor;
@@ -245,7 +261,7 @@ class Runtime implements RuntimeInterface
                 ->process($this, $opcode);
         } catch (FaultException $e) {
             $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
-            if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->streamReader->offset(), $e->errorCode())) {
+            if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {
                 return ExecutionStatus::SUCCESS;
             }
             throw $e;
@@ -293,32 +309,15 @@ class Runtime implements RuntimeInterface
      */
     private function initializeBootSegment(): void
     {
-        $bootStream = $this->getBootStream();
-        if (!$bootStream instanceof ISOStream) {
+        if ($this->bootStream === null) {
             return;
         }
 
-        $bootImage = $bootStream->bootImage();
-        if ($bootImage === null) {
-            return;
-        }
-
-        $loadSegment = $bootImage->loadSegment();
+        $loadSegment = $this->bootStream->loadSegment();
         $this->memoryAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $loadSegment);
         $this->machine->option()->logger()->debug(
             sprintf('Initialized CS to 0x%04X for bootable stream', $loadSegment)
         );
-    }
-
-    /**
-     * Get the underlying boot stream.
-     */
-    private function getBootStream(): StreamReaderIsProxyableInterface
-    {
-        if ($this->streamReader instanceof CompositeStreamReader) {
-            return $this->streamReader->bootStream();
-        }
-        return $this->streamReader;
     }
 
     private function showHeader(): void

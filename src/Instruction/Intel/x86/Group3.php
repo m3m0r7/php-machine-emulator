@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Exception\ExecutionException;
+use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -23,7 +24,7 @@ class Group3 implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
 
@@ -182,11 +183,14 @@ class Group3 implements InstructionInterface
         if ($isByte) {
             $divider = $this->readRm8($runtime, $streamReader, $modRegRM);
             if ($divider === 0) {
-                throw new ExecutionException('Divide by zero');
+                throw new FaultException(0x00, 0, 'Divide by zero');
             }
             $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
             $quotient = intdiv($ax, $divider);
             $remainder = $ax % $divider;
+            if ($quotient > 0xFF) {
+                throw new FaultException(0x00, 0, 'Divide overflow');
+            }
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $quotient & 0xFF);
             $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, $remainder & 0xFF);
             return ExecutionStatus::SUCCESS;
@@ -194,7 +198,7 @@ class Group3 implements InstructionInterface
 
         $divider = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
         if ($divider === 0) {
-            throw new ExecutionException('Divide by zero');
+            throw new FaultException(0x00, 0, 'Divide by zero');
         }
 
         $ma = $runtime->memoryAccessor();
@@ -207,6 +211,12 @@ class Group3 implements InstructionInterface
 
             $quotient = (int) ($dividee / $divider);
             $remainder = $dividee % $divider;
+            if ($quotient > 0xFFFF) {
+                throw new FaultException(0x00, 0, 'Divide overflow');
+            }
+            if ($quotient > 0xFFFF) {
+                throw new FaultException(0x00, 0, 'Divide overflow');
+            }
 
             // Debug DIV for FAT calculation
             if ($divider === 2) {
@@ -233,6 +243,9 @@ class Group3 implements InstructionInterface
 
             $quotient = intdiv($dividee, $divider);
             $remainder = $dividee % $divider;
+            if ($quotient > 0xFFFFFFFF) {
+                throw new FaultException(0x00, 0, 'Divide overflow');
+            }
 
             $ma
                 ->enableUpdateFlags(false)
@@ -250,7 +263,7 @@ class Group3 implements InstructionInterface
             $dividerRaw = $this->readRm8($runtime, $streamReader, $modRegRM);
             $divider = $this->signExtend($dividerRaw, 8);
             if ($divider === 0) {
-                throw new ExecutionException('Divide by zero');
+                throw new FaultException(0x00, 0, 'Divide by zero');
             }
 
             $axRaw = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
@@ -258,6 +271,9 @@ class Group3 implements InstructionInterface
 
             $quotient = (int) ($ax / $divider);
             $remainder = $ax % $divider;
+            if ($quotient < -128 || $quotient > 127) {
+                throw new FaultException(0x00, 0, 'Divide overflow');
+            }
 
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $quotient & 0xFF);
             $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, $remainder & 0xFF);
@@ -267,7 +283,7 @@ class Group3 implements InstructionInterface
             $dividerRaw = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
             $divider = $this->signExtend($dividerRaw, $opSize);
             if ($divider === 0) {
-                throw new ExecutionException('Divide by zero');
+                throw new FaultException(0x00, 0, 'Divide by zero');
             }
 
             $ma = $runtime->memoryAccessor();
@@ -282,6 +298,9 @@ class Group3 implements InstructionInterface
 
                 $quotient = (int) ($dividee / $divider);
                 $remainder = $dividee % $divider;
+                if ($quotient < -32768 || $quotient > 32767) {
+                    throw new FaultException(0x00, 0, 'Divide overflow');
+                }
 
                 $ma
                     ->write16Bit(RegisterType::EAX, $quotient & 0xFFFF)
@@ -297,6 +316,9 @@ class Group3 implements InstructionInterface
 
                 $quotient = (int) ($dividee / $divider);
                 $remainder = $dividee % $divider;
+                if ($quotient < -(1 << 31) || $quotient > ((1 << 31) - 1)) {
+                    throw new FaultException(0x00, 0, 'Divide overflow');
+                }
 
                 $ma
                     ->enableUpdateFlags(false)

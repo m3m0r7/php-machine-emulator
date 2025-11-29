@@ -19,11 +19,11 @@ class Jnz implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
-            ->streamReader()
+                ->memory()
             ->signedByte();
 
         $pos = $runtime
-            ->streamReader()
+                ->memory()
             ->offset();
 
         $zf = $runtime->memoryAccessor()->shouldZeroFlag();
@@ -32,7 +32,7 @@ class Jnz implements InstructionInterface
 
         if ($runtime->option()->shouldChangeOffset() && !$zf) {
             $runtime
-                ->streamReader()
+                ->memory()
                 ->setOffset($target);
         }
 

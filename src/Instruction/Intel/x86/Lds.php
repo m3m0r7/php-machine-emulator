@@ -28,7 +28,7 @@ class Lds implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $reader->byteAsModRegRM();
 
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {

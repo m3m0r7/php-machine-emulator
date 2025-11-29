@@ -48,7 +48,7 @@ class Dos implements InstructionInterface
                 $runtime->option()->IO()->output()->write(chr($byte));
                 break;
             case 0x4C: // terminate process with return code AL
-                $runtime->frame()->append(new \PHPMachineEmulator\Frame\FrameSet($runtime, $this, $runtime->streamReader()->offset(), value: $al));
+                $runtime->frame()->append(new \PHPMachineEmulator\Frame\FrameSet($runtime, $this, $runtime->memory()->offset(), value: $al));
                 return ExecutionStatus::EXIT;
             default:
                 // Unimplemented DOS function; no-op but clear carry to indicate "success"

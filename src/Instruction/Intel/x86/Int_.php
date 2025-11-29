@@ -35,20 +35,36 @@ class Int_ implements InstructionInterface
      */
     public function raise(RuntimeInterface $runtime, int $vector, int $returnIp, ?int $errorCode = null): void
     {
-        if ($runtime->context()->cpu()->isProtectedMode()) {
-            $this->protectedModeInterrupt($runtime, $vector, $returnIp, $errorCode, false);
+        $opSize = $runtime->context()->cpu()->operandSize();
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+        $isProtected = $runtime->context()->cpu()->isProtectedMode();
+        $inMemoryMode = $runtime->context()->cpu()->isMemoryMode();
+        $returnVal = (!$inMemoryMode && !$isProtected)
+            ? $returnIp
+            : $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
+        $isProtected = $runtime->context()->cpu()->isProtectedMode();
+
+        if ($isProtected) {
+            $this->protectedModeInterrupt($runtime, $vector, $returnVal, $errorCode, false);
             return;
         }
 
-        $this->vectorInterrupt($runtime, $vector, $returnIp);
+        $this->vectorInterrupt($runtime, $vector, $returnVal);
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $vector = $runtime
-            ->streamReader()
+            ->memory()
             ->byte();
-        $returnIp = $runtime->streamReader()->offset();
+        $opSize = $runtime->context()->cpu()->operandSize();
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+        $returnIp = $runtime->memory()->offset();
+        $inMemoryMode = $runtime->context()->cpu()->isMemoryMode();
+        $isProtected = $runtime->context()->cpu()->isProtectedMode();
+        $returnVal = (!$inMemoryMode && !$isProtected)
+            ? $returnIp
+            : $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
 
         // $runtime->option()->logger()->debug(sprintf('INT 0x%02X called', $vector));
 
@@ -63,7 +79,7 @@ class Int_ implements InstructionInterface
                 ->process($runtime),
             BIOSInterrupt::SYSTEM_INTERRUPT => ($this->interruptInstances[System::class] ??= new System())->process($runtime),
             BIOSInterrupt::DOS_INTERRUPT => ($this->interruptInstances[Dos::class] ??= new Dos($this->instructionList))->process($runtime, $opcode),
-            default => $this->vectorInterrupt($runtime, $vector, $returnIp),
+            default => $this->vectorInterrupt($runtime, $vector, $returnVal),
         };
 
         return ExecutionStatus::SUCCESS;
@@ -72,7 +88,7 @@ class Int_ implements InstructionInterface
     /**
      * Basic IVT-based interrupt handling: push FLAGS, CS, IP then jump to vector.
      */
-    private function vectorInterrupt(RuntimeInterface $runtime, int $vector, int $returnIp): void
+    private function vectorInterrupt(RuntimeInterface $runtime, int $vector, int $returnOffset): void
     {
         // Nesting guard: allow re-entry but cap to avoid runaway.
         $key = $runtime->context()->cpu()->isProtectedMode() ? 'pm' : 'rm';
@@ -84,7 +100,7 @@ class Int_ implements InstructionInterface
 
         // Protected mode: try IDT lookup
         if ($runtime->context()->cpu()->isProtectedMode()) {
-            $this->protectedModeInterrupt($runtime, $vector, $returnIp, null, true);
+            $this->protectedModeInterrupt($runtime, $vector, $returnOffset, null, true);
             $this->nestedCount[$key]--;
             return;
         }
@@ -93,6 +109,19 @@ class Int_ implements InstructionInterface
 
         $offset = $this->readMemory16($runtime, $vectorAddress);
         $segment = $this->readMemory16($runtime, $vectorAddress + 2);
+
+        // In memory mode, if IVT vector points to 0:0, the vector is not set up.
+        // This typically means we're executing after the OS has taken over and
+        // the IVT hasn't been preserved. Log and skip the interrupt to avoid
+        // infinite loops.
+        if ($segment === 0 && $offset === 0 && $runtime->context()->cpu()->isMemoryMode()) {
+            $runtime->option()->logger()->warning(sprintf(
+                'INT 0x%02X: IVT vector is NULL (0:0) in memory mode, skipping interrupt',
+                $vector
+            ));
+            $this->nestedCount[$key]--;
+            return;
+        }
 
         // Push state (FLAGS, CS, IP)
         $flags =
@@ -107,7 +136,7 @@ class Int_ implements InstructionInterface
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $ma->push(RegisterType::ESP, $flags, 16);
         $ma->push(RegisterType::ESP, $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte(), 16);
-        $ma->push(RegisterType::ESP, $returnIp, 16);
+        $ma->push(RegisterType::ESP, $returnOffset, 16);
         $runtime->memoryAccessor()->enableUpdateFlags(true);
 
         // Clear IF like real INT.
@@ -121,7 +150,7 @@ class Int_ implements InstructionInterface
         $this->writeCodeSegment($runtime, $segment);
 
         try {
-            $runtime->streamReader()->setOffset($target);
+            $runtime->memory()->setOffset($target);
         } catch (StreamReaderException) {
             $this->nestedCount[$key]--;
             throw new ExecutionException(
@@ -269,7 +298,7 @@ class Int_ implements InstructionInterface
 
         $linear = $this->linearCodeAddress($runtime, $selector, $offset, $operandSize);
         $this->writeCodeSegment($runtime, $selector);
-        $runtime->streamReader()->setOffset($linear);
+        $runtime->memory()->setOffset($linear);
         $this->nestedCount[$key]--;
     }
 }

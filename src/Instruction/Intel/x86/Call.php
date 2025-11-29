@@ -20,32 +20,51 @@ class Call implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
 
-        $offset = $runtime->context()->cpu()->operandSize() === 32
+        $opSize = $runtime->context()->cpu()->operandSize();
+        $offset = $opSize === 32
             ? $enhancedStreamReader->signedDword()
             : $enhancedStreamReader->signedShort();
 
-        $pos = $runtime->streamReader()->offset();
+        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+
+        // After reading the displacement, the stream offset now points to the next instruction.
+        $nextLinear = $runtime->memory()->offset();
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+
+        // Unified memory model:
+        // - CS-relative addressing for return address (what gets pushed)
+        // - Linear addressing for actual jump target
+        $csBase = $cs << 4;
+        $returnOffset = ($nextLinear - $csBase) & $mask;
+        $targetOffset = ($returnOffset + $offset) & $mask;
+        $targetLinear = $csBase + $targetOffset;
+        $returnToPush = $returnOffset;
 
         // Push return address onto stack.
-        $espBefore = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(
-            $runtime->context()->cpu()->operandSize()
-        );
+        $espBefore = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize($opSize);
 
-        $opSize = $runtime->context()->cpu()->operandSize();
-        $target = $pos + $offset;
-        $runtime->option()->logger()->debug(sprintf('CALL near: pos=0x%05X offset=0x%04X target=0x%05X (push return=0x%05X, ESP before=0x%08X)', $pos, $offset & 0xFFFF, $target, $pos, $espBefore));
+        $runtime->option()->logger()->debug(sprintf(
+            'CALL near: nextLinear=0x%05X return=0x%05X offset=0x%04X targetOffset=0x%05X targetLinear=0x%05X (CS=0x%04X ESP before=0x%08X)',
+            $nextLinear,
+            $returnToPush,
+            $offset & $mask,
+            $targetOffset,
+            $targetLinear,
+            $cs,
+            $espBefore
+        ));
 
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)
-            ->push(RegisterType::ESP, $pos, $opSize);
+            ->push(RegisterType::ESP, $returnToPush, $opSize);
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime
-                ->streamReader()
-                ->setOffset($target);
+                ->memory()
+                ->setOffset($targetLinear);
         }
 
         return ExecutionStatus::SUCCESS;

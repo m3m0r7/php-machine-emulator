@@ -21,11 +21,17 @@ class MovRmToSeg implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = new EnhanceStreamReader($runtime->streamReader());
+        $reader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $reader->byteAsModRegRM();
 
         $seg = $this->segmentFromDigit($modRegRM->registerOrOPCode());
         $value = $this->readRm16($runtime, $reader, $modRegRM);
+
+        $runtime->option()->logger()->debug(sprintf(
+            'MOV %s, rm16: value=0x%04X',
+            $seg->name,
+            $value
+        ));
 
         $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($seg, $value);
 

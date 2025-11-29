@@ -22,11 +22,11 @@ class Jl implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
-            ->streamReader()
+                ->memory()
             ->signedByte();
 
         $pos = $runtime
-            ->streamReader()
+                ->memory()
             ->offset();
 
         $sf = $runtime->memoryAccessor()->shouldSignFlag();
@@ -35,7 +35,7 @@ class Jl implements InstructionInterface
         // JL: Jump if SF != OF
         if ($runtime->option()->shouldChangeOffset() && ($sf !== $of)) {
             $runtime
-                ->streamReader()
+                ->memory()
                 ->setOffset($pos + $operand);
         }
 

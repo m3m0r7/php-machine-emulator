@@ -19,16 +19,16 @@ class Jno implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
-            ->streamReader()
+                ->memory()
             ->signedByte();
 
         $pos = $runtime
-            ->streamReader()
+                ->memory()
             ->offset();
 
         if ($runtime->option()->shouldChangeOffset() && !$runtime->memoryAccessor()->shouldOverflowFlag()) {
             $runtime
-                ->streamReader()
+                ->memory()
                 ->setOffset($pos + $operand);
         }
 

@@ -20,14 +20,14 @@ class Jmp implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
 
         $relOffset = $runtime->context()->cpu()->operandSize() === 32
             ? $enhancedStreamReader->signedDword()
             : $enhancedStreamReader->signedShort();
 
         $pos = $runtime
-            ->streamReader()
+                ->memory()
             ->offset();
 
         // Check if we're in memory mode (executing code loaded into memory via INT 13h)
@@ -40,27 +40,26 @@ class Jmp implements InstructionInterface
             $runtime->option()->logger()->debug(sprintf('JMP near (memory mode): pos=0x%05X + rel=0x%04X = target=0x%05X', $pos, $relOffset & 0xFFFF, $target));
 
             if ($runtime->option()->shouldChangeOffset()) {
-                $runtime->streamReader()->setOffset($target);
+                $runtime->memory()->setOffset($target);
             }
             return ExecutionStatus::SUCCESS;
         }
 
-        // Real mode with boot sector: add origin to convert to logical address
-        $origin = $runtime->addressMap()->getOrigin();
-        $target = $pos + $relOffset + $origin;
-        $streamTarget = $target - $origin;
+        // Real mode with unified memory: use linear addresses directly
+        // pos is already a linear address (e.g., 0x7CCD), relOffset is signed displacement
+        $target = $pos + $relOffset;
 
         // Debug JMP near
-        $runtime->option()->logger()->debug(sprintf('JMP near: pos=0x%04X + rel=0x%04X + origin=0x%04X = target=0x%04X (streamTarget=0x%04X)', $pos, $relOffset & 0xFFFF, $origin, $target, $streamTarget));
+        $runtime->option()->logger()->debug(sprintf('JMP near: pos=0x%04X + rel=0x%04X = target=0x%04X', $pos, $relOffset & 0xFFFF, $target));
 
         if (!$runtime->option()->shouldChangeOffset()) {
             return ExecutionStatus::SUCCESS;
         }
 
-        // In real mode for ISO boot, use stream-relative offset directly
+        // In unified memory model, target is the linear address directly
         $runtime
-            ->streamReader()
-            ->setOffset($streamTarget);
+                ->memory()
+            ->setOffset($target);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -19,7 +19,7 @@ class MovRm16 implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
         $size = $runtime->context()->cpu()->operandSize();

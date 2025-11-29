@@ -19,11 +19,11 @@ class Jnc implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
-            ->streamReader()
+                ->memory()
             ->signedByte();
 
         $pos = $runtime
-            ->streamReader()
+                ->memory()
             ->offset();
 
         // JNC: Jump if Not Carry (CF=0)
@@ -33,7 +33,7 @@ class Jnc implements InstructionInterface
 
         if ($runtime->option()->shouldChangeOffset() && !$cf) {
             $runtime
-                ->streamReader()
+                ->memory()
                 ->setOffset($target);
         }
 

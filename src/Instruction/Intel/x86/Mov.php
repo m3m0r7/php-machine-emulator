@@ -23,7 +23,7 @@ class Mov implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
 
@@ -34,7 +34,7 @@ class Mov implements InstructionInterface
         $this->writeRm($runtime, $enhancedStreamReader, $modRegRM, $value, $size);
 
         // Debug: log memory writes
-        $ip = $runtime->streamReader()->offset();
+        $ip = $runtime->memory()->offset();
         if ($ip >= 0x8315 && $ip <= 0x8318) {
             // Check what's at 0x7FFF0 directly
             $addr = 0x7FFF0;

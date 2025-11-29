@@ -19,11 +19,11 @@ class Jbe implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
-            ->streamReader()
+            ->memory()
             ->signedByte();
 
         $pos = $runtime
-            ->streamReader()
+            ->memory()
             ->offset();
 
         $cf = $runtime->memoryAccessor()->shouldCarryFlag();
@@ -34,7 +34,7 @@ class Jbe implements InstructionInterface
 
         if ($runtime->option()->shouldChangeOffset() && $taken) {
             $runtime
-                ->streamReader()
+                ->memory()
                 ->setOffset($target);
         }
 

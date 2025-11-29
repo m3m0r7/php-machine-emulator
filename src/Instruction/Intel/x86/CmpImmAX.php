@@ -24,7 +24,7 @@ class CmpImmAX implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->streamReader());
+        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
 
         $operand = $opcode === 0x3D
             ? $enhancedStreamReader->short()

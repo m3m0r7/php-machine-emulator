@@ -19,11 +19,11 @@ class Jc implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime
-            ->streamReader()
+            ->memory()
             ->signedByte();
 
         $pos = $runtime
-            ->streamReader()
+            ->memory()
             ->offset();
 
         $cf = $runtime->memoryAccessor()->shouldCarryFlag();
@@ -32,7 +32,7 @@ class Jc implements InstructionInterface
 
         if ($runtime->option()->shouldChangeOffset() && $cf) {
             $runtime
-                ->streamReader()
+                ->memory()
                 ->setOffset($target);
         }
 
