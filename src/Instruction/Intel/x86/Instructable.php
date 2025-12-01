@@ -226,14 +226,30 @@ trait Instructable
 
     protected function effectiveAddressInfo(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): array
     {
-        if ($runtime->context()->cpu()->addressSize() === 32) {
+        $addrSize = $runtime->context()->cpu()->addressSize();
+        if ($addrSize === 32) {
             return $this->effectiveAddressAndSegment32($runtime, $reader, $modRegRM);
         }
 
-        return [
-            $this->effectiveAddress16($runtime, $reader, $modRegRM),
-            $this->defaultSegmentFor16($modRegRM),
-        ];
+        $offset = $this->effectiveAddress16($runtime, $reader, $modRegRM);
+        $seg = $this->defaultSegmentFor16($modRegRM);
+
+        // Debug: log 16-bit addressing
+        $rm = $modRegRM->registerOrMemoryAddress();
+        if ($rm === 0b100) {
+            $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
+            $mode = ModType::from($modRegRM->mode());
+            $runtime->option()->logger()->debug(sprintf(
+                'effectiveAddress16 [SI]: ESI=0x%08X si_byte=0x%04X offset=0x%04X addrSize=%d mode=%s',
+                $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize(32),
+                $si,
+                $offset,
+                $addrSize,
+                $mode->name
+            ));
+        }
+
+        return [$offset, $seg];
     }
 
     protected function rmLinearAddress(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, RegisterType|null $segmentOverride = null): int
@@ -345,6 +361,17 @@ trait Instructable
 
         $mask = $runtime->context()->cpu()->isProtectedMode() ? 0xFFFFFFFF : 0xFFFFF;
         $offset = ($baseVal + $indexVal * $scale + $disp) & $mask;
+
+        // Debug: log 32-bit SIB addressing when base is EDI
+        if ($rm === 0b100 && isset($sib) && $sib->base() === 0b111) {
+            $runtime->option()->logger()->debug(sprintf(
+                'effectiveAddress32 SIB [EDI+index]: base=0x%08X index=0x%08X scale=%d offset=0x%08X',
+                $baseVal,
+                $indexVal,
+                $scale,
+                $offset
+            ));
+        }
 
         return [$offset, $defaultSegment];
     }
@@ -459,8 +486,7 @@ trait Instructable
         if ($this->writeMmio($runtime, $physical, $value & 0xFF, 8)) {
             return;
         }
-        $runtime->memoryAccessor()->allocate($physical, safe: false);
-        // Store raw byte value directly (no encoding needed for single byte)
+        // Write directly to memory (no allocation needed, MemoryStream pre-allocates)
         $runtime->memoryAccessor()->writeRawByte($physical, $value & 0xFF);
     }
 
@@ -477,6 +503,16 @@ trait Instructable
 
     protected function writeMemory32(RuntimeInterface $runtime, int $address, int $value): void
     {
+        // Debug: trace writes near stack area around EBP-24
+        if ($address >= 0x7FFC0 && $address <= 0x7FFD0) {
+            $runtime->option()->logger()->debug(sprintf(
+                'WRITE32 to stack: addr=0x%X value=0x%08X IP=0x%X',
+                $address,
+                $value & 0xFFFFFFFF,
+                $runtime->memory()->offset()
+            ));
+        }
+
         $physical = $this->translateLinear($runtime, $address, true);
         if ($this->writeMmio($runtime, $physical, $value & 0xFFFFFFFF, 32)) {
             return;

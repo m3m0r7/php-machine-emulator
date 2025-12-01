@@ -14,7 +14,6 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 class VideoMemoryObserver implements MemoryAccessorObserverInterface
 {
     protected ?ScreenWriterInterface $writer = null;
-    protected int $previousEDI = -1;
 
     public function shouldMatch(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): bool
     {
@@ -41,15 +40,6 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): void
     {
-        $di = $runtime->memoryAccessor()
-            ->fetch(
-                ($runtime->register())::addressBy(RegisterType::EDI),
-            )
-            ->asByte();
-
-        $diff = $this->previousEDI >= 0 ? $di - $this->previousEDI - 1 : 0;
-        $this->previousEDI = $di;
-
         $videoSettingAddress = $runtime
             ->memoryAccessor()
             ->fetch(
@@ -71,15 +61,16 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
             ->screenWriter();
 
         $textColor = $nextValue & 0b00001111;
-        $backgroundColor = ($nextValue & 0b11110000) >> 4;
 
-        for ($i = 0; $i < $diff; $i++) {
-            $this->writer
-                ->dot(Color::asBlack());
-        }
+        // Calculate x, y from video memory offset
+        $videoMemoryOffset = $address - VideoMemoryService::VIDEO_MEMORY_ADDRESS_STARTED;
+        $x = $videoMemoryOffset % $width;
+        $y = (int) ($videoMemoryOffset / $width);
 
         $this->writer
             ->dot(
+                $x,
+                $y,
                 Color::fromANSI(
                     $textColor & 0b1111,
                 ),

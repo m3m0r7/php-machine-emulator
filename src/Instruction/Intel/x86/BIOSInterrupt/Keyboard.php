@@ -80,6 +80,28 @@ class Keyboard implements InterruptInterface
         // Reset state at start of wait
         $this->lastKeyPressed = null;
 
+        $runtime->option()->logger()->debug('INT 16h: waitForKeypress started');
+
+        // First, wait until all keys are released to avoid detecting
+        // keys that were pressed before this call (e.g., Enter from menu selection)
+        $releaseWaitStart = microtime(true);
+        while (true) {
+            $screenWriter->window()->processEvents();
+            $keyCode = $screenWriter->pollKeyPress();
+            if ($keyCode === null) {
+                // All keys released
+                break;
+            }
+            // Timeout after 500ms to avoid infinite loop
+            if ((microtime(true) - $releaseWaitStart) > 0.5) {
+                $runtime->option()->logger()->debug('INT 16h: timeout waiting for key release');
+                break;
+            }
+            usleep(1000);
+        }
+
+        $runtime->option()->logger()->debug('INT 16h: waiting for new keypress');
+
         // Wait until a key is pressed
         while (true) {
             $screenWriter->window()->processEvents();
@@ -89,6 +111,14 @@ class Keyboard implements InterruptInterface
                 // Accept any new key
                 if ($keyCode !== $this->lastKeyPressed) {
                     $this->lastKeyPressed = $keyCode;
+
+                    $runtime->option()->logger()->debug(sprintf(
+                        'INT 16h: key pressed, keyCode=0x%04X (AH=0x%02X, AL=0x%02X char=%s)',
+                        $keyCode,
+                        ($keyCode >> 8) & 0xFF,
+                        $keyCode & 0xFF,
+                        chr($keyCode & 0xFF)
+                    ));
 
                     // AH = scan code, AL = ASCII
                     $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $keyCode & 0xFFFF);

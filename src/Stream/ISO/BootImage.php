@@ -25,13 +25,18 @@ class BootImage
 
     private function loadImage(): void
     {
+        // For No Emulation mode, check for Boot Info Table to get actual image size
+        if ($this->mediaType === ElTorito::MEDIA_NO_EMULATION) {
+            $this->loadNoEmulationImage();
+            return;
+        }
+
         // For floppy emulation modes, always load the full floppy image
         // regardless of sectorCount field (which is often incorrect/unused)
         $sectors = match ($this->mediaType) {
             ElTorito::MEDIA_FLOPPY_1_2M => (int) ceil(1200 * 1024 / ISO9660::SECTOR_SIZE),
             ElTorito::MEDIA_FLOPPY_1_44M => (int) ceil(1440 * 1024 / ISO9660::SECTOR_SIZE),
             ElTorito::MEDIA_FLOPPY_2_88M => (int) ceil(2880 * 1024 / ISO9660::SECTOR_SIZE),
-            ElTorito::MEDIA_NO_EMULATION => $this->sectorCount > 0 ? $this->sectorCount : 1,
             default => $this->sectorCount > 0 ? $this->sectorCount : 1,
         };
 
@@ -40,7 +45,6 @@ class BootImage
             ElTorito::MEDIA_FLOPPY_1_2M => 1200 * 1024,      // 1.2MB
             ElTorito::MEDIA_FLOPPY_1_44M => 1440 * 1024,     // 1.44MB
             ElTorito::MEDIA_FLOPPY_2_88M => 2880 * 1024,     // 2.88MB
-            ElTorito::MEDIA_NO_EMULATION => $this->sectorCount * 512,  // 512-byte virtual sectors
             default => $sectors * ISO9660::SECTOR_SIZE,
         };
 
@@ -52,6 +56,72 @@ class BootImage
         // Trim to actual floppy/image size (ISO sectors are 2048 bytes, but floppy uses 512 bytes)
         if (strlen($this->imageData) > $this->imageSize) {
             $this->imageData = substr($this->imageData, 0, $this->imageSize);
+        }
+    }
+
+    /**
+     * Load No Emulation boot image, checking for Boot Info Table.
+     * The Boot Info Table is embedded at offset 8 in the boot image by mkisofs/genisoimage
+     * and contains the actual file length.
+     */
+    private function loadNoEmulationImage(): void
+    {
+        // First, read at least the first sector to check for Boot Info Table
+        $this->iso->seekSector($this->loadRBA);
+        $firstSector = $this->iso->readSectors(1) ?: '';
+
+        if (strlen($firstSector) < 24) {
+            // Fallback to sectorCount-based size
+            $this->imageSize = $this->sectorCount * 512;
+            $this->imageData = $firstSector;
+            return;
+        }
+
+        // Boot Info Table format (at offset 8 in the boot image):
+        // Offset 8-11: bi_pvd - LBA of primary volume descriptor (should be 16)
+        // Offset 12-15: bi_file - LBA of boot file
+        // Offset 16-19: bi_length - Length of boot file in bytes
+        // Offset 20-23: bi_checksum - Checksum
+        $bi_pvd = unpack('V', substr($firstSector, 8, 4))[1];
+        $bi_file = unpack('V', substr($firstSector, 12, 4))[1];
+        $bi_length = unpack('V', substr($firstSector, 16, 4))[1];
+
+        // Validate Boot Info Table: bi_pvd should be 16 (PVD sector), bi_file should match loadRBA
+        $hasValidBootInfoTable = ($bi_pvd === 16 && $bi_file === $this->loadRBA && $bi_length > 0 && $bi_length < 10 * 1024 * 1024);
+
+        if ($hasValidBootInfoTable) {
+            // Use bi_length from Boot Info Table
+            $this->imageSize = $bi_length;
+            $sectorsNeeded = (int) ceil($bi_length / ISO9660::SECTOR_SIZE);
+
+            // Read remaining sectors if needed
+            if ($sectorsNeeded > 1) {
+                $this->iso->seekSector($this->loadRBA);
+                $this->imageData = $this->iso->readSectors($sectorsNeeded) ?: '';
+            } else {
+                $this->imageData = $firstSector;
+            }
+
+            // Trim to exact size
+            if (strlen($this->imageData) > $this->imageSize) {
+                $this->imageData = substr($this->imageData, 0, $this->imageSize);
+            }
+        } else {
+            // No valid Boot Info Table, fallback to sectorCount-based size
+            // For No Emulation, sectorCount is in 512-byte virtual sectors
+            $this->imageSize = $this->sectorCount * 512;
+            $sectorsNeeded = (int) ceil($this->imageSize / ISO9660::SECTOR_SIZE);
+
+            if ($sectorsNeeded > 1) {
+                $this->iso->seekSector($this->loadRBA);
+                $this->imageData = $this->iso->readSectors($sectorsNeeded) ?: '';
+            } else {
+                $this->imageData = $firstSector;
+            }
+
+            if (strlen($this->imageData) > $this->imageSize) {
+                $this->imageData = substr($this->imageData, 0, $this->imageSize);
+            }
         }
     }
 

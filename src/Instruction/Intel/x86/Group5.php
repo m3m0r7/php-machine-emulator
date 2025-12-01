@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Group5 implements InstructionInterface
@@ -33,21 +34,32 @@ class Group5 implements InstructionInterface
             0x4 => $this->jmpNearRm($runtime, $reader, $modRegRM),
             0x5 => $this->jmpFarRm($runtime, $reader, $modRegRM),
             0x6 => $this->push($runtime, $reader, $modRegRM),
-            default => throw new ExecutionException(sprintf(
-                'Group5 digit 0x%X not implemented at IP=0x%05X',
-                $modRegRM->digit(),
-                $runtime->memory()->offset() - 2
-            )),
+            default => $this->handleUnimplementedDigit($runtime, $modRegRM),
         };
     }
 
     protected function inc(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
-        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $result = ($value + 1) & $mask;
-        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+        if ($isRegister) {
+            $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
+            $result = ($value + 1) & $mask;
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            // Calculate address once to avoid consuming displacement bytes twice
+            $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $value = $size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address);
+            $result = ($value + 1) & $mask;
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
+
         $runtime->memoryAccessor()->updateFlags($result, $size);
         // NOTE: Carry flag unaffected by INC.
         return ExecutionStatus::SUCCESS;
@@ -56,10 +68,25 @@ class Group5 implements InstructionInterface
     protected function dec(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
-        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $result = ($value - 1) & $mask;
-        $this->writeRm($runtime, $reader, $modRegRM, $result, $size);
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+        if ($isRegister) {
+            $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
+            $result = ($value - 1) & $mask;
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+        } else {
+            // Calculate address once to avoid consuming displacement bytes twice
+            $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $value = $size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address);
+            $result = ($value - 1) & $mask;
+            if ($size === 32) {
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
+
         $runtime->memoryAccessor()->updateFlags($result, $size);
         return ExecutionStatus::SUCCESS;
     }
@@ -83,6 +110,13 @@ class Group5 implements InstructionInterface
     {
         $size = $runtime->context()->cpu()->operandSize();
         $target = $this->readRm($runtime, $reader, $modRegRM, $size);
+
+        $runtime->option()->logger()->debug(sprintf(
+            'JMP [r/m] (Group5): target=0x%08X mode=%d rm=%d',
+            $target,
+            $modRegRM->mode(),
+            $modRegRM->registerOrMemoryAddress()
+        ));
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime->memory()->setOffset($target);
@@ -180,5 +214,33 @@ class Group5 implements InstructionInterface
         $value = $this->readRm($runtime, $reader, $modRegRM, $size);
         $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $value, $size);
         return ExecutionStatus::SUCCESS;
+    }
+
+    protected function handleUnimplementedDigit(RuntimeInterface $runtime, ModRegRMInterface $modRegRM): ExecutionStatus
+    {
+        $ip = $runtime->memory()->offset() - 2;
+
+        // Dump memory around IP
+        $memory = $runtime->memory();
+        $savedOffset = $memory->offset();
+        $memory->setOffset($ip);
+        $bytes = [];
+        for ($i = 0; $i < 16; $i++) {
+            $bytes[] = sprintf('%02X', $memory->byte());
+        }
+        $memory->setOffset($savedOffset);
+
+        $runtime->option()->logger()->error(sprintf(
+            'Group5 digit 0x%X at IP=0x%05X, memory dump: %s',
+            $modRegRM->digit(),
+            $ip,
+            implode(' ', $bytes)
+        ));
+
+        throw new ExecutionException(sprintf(
+            'Group5 digit 0x%X not implemented at IP=0x%05X',
+            $modRegRM->digit(),
+            $ip
+        ));
     }
 }

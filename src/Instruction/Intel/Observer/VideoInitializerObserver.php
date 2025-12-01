@@ -49,10 +49,9 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
         $screenWriter = $runtime->context()->screen()->screenWriter();
         $this->cursor ??= new Cursor($screenWriter);
 
-        for ($i = 0; $i < $clearWidth * $clearHeight; $i++) {
-            $screenWriter->dot(Color::asBlack());
-            if (($i % $clearWidth) === 0) {
-                $screenWriter->newline();
+        for ($y = 0; $y < $clearHeight; $y++) {
+            for ($x = 0; $x < $clearWidth; $x++) {
+                $screenWriter->dot($x, $y, Color::asBlack());
             }
         }
 

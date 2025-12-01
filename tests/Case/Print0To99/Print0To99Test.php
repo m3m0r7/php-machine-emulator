@@ -8,7 +8,7 @@ use PHPMachineEmulator\IO\Buffer;
 use PHPMachineEmulator\Machine;
 use PHPMachineEmulator\MachineType;
 use PHPMachineEmulator\OptionInterface;
-use PHPMachineEmulator\Stream\FileStream;
+use Tests\Utils\BootableFileStream;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Spatie\Snapshots\MatchesSnapshots;
@@ -23,7 +23,7 @@ class Print0To99Test extends TestCase
     public function testPrintHelloWorld(MachineType $machineType, OptionInterface $option)
     {
         $machine = new Machine(
-            new FileStream(__DIR__ . '/Fixture/Print0To99.o'),
+            new BootableFileStream(__DIR__ . '/Fixture/Print0To99.o'),
             $option,
         );
 

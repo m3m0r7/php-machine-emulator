@@ -15,3 +15,7 @@ TinyCore*.iso
 mikeos.iso
 debug_iso.php
 debug/
+qemu
+trace*
+test*.log
+

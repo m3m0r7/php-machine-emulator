@@ -7,6 +7,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
+use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Xchg implements InstructionInterface
@@ -20,12 +21,14 @@ class Xchg implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
+        $opSize = $runtime->context()->cpu()->operandSize();
+
         if ($opcode >= 0x90) {
-            // XCHG AX, r16 (0x90 + reg)
+            // XCHG EAX, r32 / XCHG AX, r16 (0x90 + reg)
             $reg = ($opcode - 0x90);
             $target = ($this->instructionList->register())::find($reg);
-            $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
-            $rv = $runtime->memoryAccessor()->fetch($target)->asByte();
+            $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
+            $rv = $runtime->memoryAccessor()->fetch($target)->asBytesBySize($opSize);
 
             // Debug: log XCHG when SI is involved
             if ($target === RegisterType::ESI) {
@@ -35,8 +38,8 @@ class Xchg implements InstructionInterface
                 ));
             }
 
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $rv);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($target, $ax);
+            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $rv, $opSize);
+            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($target, $ax, $opSize);
             return ExecutionStatus::SUCCESS;
         }
 
@@ -53,11 +56,43 @@ class Xchg implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $rm = $this->readRm16($runtime, $reader, $modRegRM);
-        $reg = $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asByte();
+        // 0x87: XCHG r/m16, r16 or XCHG r/m32, r32 depending on operand size
+        // Important: We need to read the address ONCE and reuse it, otherwise displacement bytes
+        // will be consumed twice (once for read, once for write).
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $linearAddress = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
 
-        $this->writeRm16($runtime, $reader, $modRegRM, $reg);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($modRegRM->registerOrOPCode(), $rm);
+        // Read values
+        if ($isRegister) {
+            $rm = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize);
+        } else {
+            $rm = $opSize === 32 ? $this->readMemory32($runtime, $linearAddress) : $this->readMemory16($runtime, $linearAddress);
+        }
+        $reg = $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asBytesBySize($opSize);
+
+        // Debug log for XCHG r/m32, r32
+        $runtime->option()->logger()->debug(sprintf(
+            'XCHG r/m%d, r%d: addr=0x%08X rm=0x%08X reg=0x%08X mode=%d regCode=%d rmCode=%d',
+            $opSize, $opSize,
+            $linearAddress ?? 0,
+            $rm,
+            $reg,
+            $modRegRM->mode(),
+            $modRegRM->registerOrOPCode(),
+            $modRegRM->registerOrMemoryAddress()
+        ));
+
+        // Write swapped values
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $reg, $opSize);
+        } else {
+            if ($opSize === 32) {
+                $this->writeMemory32($runtime, $linearAddress, $reg);
+            } else {
+                $this->writeMemory16($runtime, $linearAddress, $reg);
+            }
+        }
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($modRegRM->registerOrOPCode(), $rm, $opSize);
 
         return ExecutionStatus::SUCCESS;
     }

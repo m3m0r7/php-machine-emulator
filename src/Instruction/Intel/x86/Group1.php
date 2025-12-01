@@ -74,13 +74,16 @@ class Group1 implements InstructionInterface
             $original = $isReg
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
-            $result = $original + $operand;
+            $result = $original + ($operand & 0xFF);
+            $maskedResult = $result & 0xFF;
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult);
             } else {
-                $this->writeMemory8($runtime, $linearAddr, $result);
+                $this->writeMemory8($runtime, $linearAddr, $maskedResult);
             }
-            $runtime->memoryAccessor()->setCarryFlag($result > 0xFF);
+            $runtime->memoryAccessor()
+                ->updateFlags($maskedResult, 8)
+                ->setCarryFlag($result > 0xFF);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -90,18 +93,23 @@ class Group1 implements InstructionInterface
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
 
-        $result = $original + $operand;
+        // For sign-extended operand, convert to unsigned for proper carry detection
+        $unsignedOperand = $operand & $mask;
+        $result = $original + $unsignedOperand;
+        $maskedResult = $result & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult, $opSize);
         } else {
             if ($opSize === 32) {
-                $this->writeMemory32($runtime, $linearAddr, $result);
+                $this->writeMemory32($runtime, $linearAddr, $maskedResult);
             } else {
-                $this->writeMemory16($runtime, $linearAddr, $result);
+                $this->writeMemory16($runtime, $linearAddr, $maskedResult);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag($result > $mask);
+        $runtime->memoryAccessor()
+            ->updateFlags($maskedResult, $opSize)
+            ->setCarryFlag($result > $mask);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -118,7 +126,9 @@ class Group1 implements InstructionInterface
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
-            $runtime->memoryAccessor()->setCarryFlag(false);
+            $runtime->memoryAccessor()
+                ->updateFlags($result, 8)
+                ->setCarryFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -138,7 +148,9 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $result);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag(false);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $opSize)
+            ->setCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -152,12 +164,15 @@ class Group1 implements InstructionInterface
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
             $result = $left + ($operand & 0xFF) + $carry;
+            $maskedResult = $result & 0xFF;
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult);
             } else {
-                $this->writeMemory8($runtime, $linearAddr, $result);
+                $this->writeMemory8($runtime, $linearAddr, $maskedResult);
             }
-            $runtime->memoryAccessor()->setCarryFlag($result > 0xFF);
+            $runtime->memoryAccessor()
+                ->updateFlags($maskedResult, 8)
+                ->setCarryFlag($result > 0xFF);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -166,18 +181,22 @@ class Group1 implements InstructionInterface
         $left = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
-        $result = $left + $operand + $carry;
+        $unsignedOperand = $operand & $mask;
+        $result = $left + $unsignedOperand + $carry;
+        $maskedResult = $result & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult, $opSize);
         } else {
             if ($opSize === 32) {
-                $this->writeMemory32($runtime, $linearAddr, $result);
+                $this->writeMemory32($runtime, $linearAddr, $maskedResult);
             } else {
-                $this->writeMemory16($runtime, $linearAddr, $result);
+                $this->writeMemory16($runtime, $linearAddr, $maskedResult);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag($result > $mask);
+        $runtime->memoryAccessor()
+            ->updateFlags($maskedResult, $opSize)
+            ->setCarryFlag($result > $mask);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -190,13 +209,16 @@ class Group1 implements InstructionInterface
             $left = $isReg
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
-            $result = ($left - ($operand & 0xFF) - $borrow) & 0xFF;
+            $calc = $left - ($operand & 0xFF) - $borrow;
+            $result = $calc & 0xFF;
             if ($isReg) {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
-            $runtime->memoryAccessor()->setCarryFlag(($left - ($operand & 0xFF) - $borrow) < 0);
+            $runtime->memoryAccessor()
+                ->updateFlags($result, 8)
+                ->setCarryFlag($calc < 0);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -205,7 +227,9 @@ class Group1 implements InstructionInterface
         $left = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
-        $calc = $left - $operand - $borrow;
+        // Convert sign-extended operand to unsigned for proper borrow calculation
+        $unsignedOperand = $operand & $mask;
+        $calc = $left - $unsignedOperand - $borrow;
         $result = $calc & $mask;
 
         if ($isReg) {
@@ -217,7 +241,9 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $result);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag($calc < 0);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $opSize)
+            ->setCarryFlag($calc < 0);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -234,7 +260,9 @@ class Group1 implements InstructionInterface
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
-            $runtime->memoryAccessor()->setCarryFlag(false);
+            $runtime->memoryAccessor()
+                ->updateFlags($result, 8)
+                ->setCarryFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -254,7 +282,9 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $result);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag(false);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $opSize)
+            ->setCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -265,13 +295,16 @@ class Group1 implements InstructionInterface
             $left = $isReg
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
-            $result = ($left - ($operand & 0xFF)) & 0xFF;
+            $calc = $left - ($operand & 0xFF);
+            $result = $calc & 0xFF;
             if ($isReg) {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
-            $runtime->memoryAccessor()->setCarryFlag(($left - ($operand & 0xFF)) < 0);
+            $runtime->memoryAccessor()
+                ->updateFlags($result, 8)
+                ->setCarryFlag($calc < 0);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -280,7 +313,9 @@ class Group1 implements InstructionInterface
         $left = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
-        $calc = $left - $operand;
+        // Convert sign-extended operand to unsigned for proper borrow calculation
+        $unsignedOperand = $operand & $mask;
+        $calc = $left - $unsignedOperand;
         $result = $calc & $mask;
 
         if ($isReg) {
@@ -292,7 +327,9 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $result);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag($calc < 0);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $opSize)
+            ->setCarryFlag($calc < 0);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -309,7 +346,9 @@ class Group1 implements InstructionInterface
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
-            $runtime->memoryAccessor()->setCarryFlag(false);
+            $runtime->memoryAccessor()
+                ->updateFlags($result, 8)
+                ->setCarryFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -329,7 +368,9 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $result);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag(false);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $opSize)
+            ->setCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -345,6 +386,7 @@ class Group1 implements InstructionInterface
                 ->memoryAccessor()
                 ->updateFlags($leftHand - ($operand & 0xFF), 8)
                 ->setCarryFlag($leftHand < ($operand & 0xFF));
+            $runtime->option()->logger()->debug(sprintf('CMP r/m8, imm8: left=0x%02X right=0x%02X ZF=%d', $leftHand, $operand & 0xFF, $leftHand === ($operand & 0xFF) ? 1 : 0));
 
             return ExecutionStatus::SUCCESS;
         }
@@ -358,6 +400,7 @@ class Group1 implements InstructionInterface
             ->memoryAccessor()
             ->updateFlags($leftHand - $operand, $opSize)
             ->setCarryFlag($newCF);
+        $runtime->option()->logger()->debug(sprintf('CMP r/m%d, imm: left=0x%04X right=0x%04X ZF=%d', $opSize, $leftHand, $operand, $leftHand === $operand ? 1 : 0));
 
         return ExecutionStatus::SUCCESS;
     }

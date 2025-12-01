@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Group4 implements InstructionInterface
@@ -33,9 +34,20 @@ class Group4 implements InstructionInterface
 
     protected function inc(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $value = $this->readRm8($runtime, $reader, $modRegRM);
-        $result = ($value + 1) & 0xFF;
-        $this->writeRm8($runtime, $reader, $modRegRM, $result);
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+        if ($isRegister) {
+            $value = $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
+            $result = ($value + 1) & 0xFF;
+            $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+        } else {
+            // Calculate address once to avoid consuming displacement bytes twice
+            $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $value = $this->readMemory8($runtime, $address);
+            $result = ($value + 1) & 0xFF;
+            $this->writeMemory8($runtime, $address, $result);
+        }
+
         $runtime->memoryAccessor()->updateFlags($result, 8); // CF unaffected in INC
         $runtime->option()->logger()->debug(sprintf('INC r/m8: %d -> %d (rm=%d)', $value, $result, $modRegRM->registerOrMemoryAddress()));
         return ExecutionStatus::SUCCESS;
@@ -43,9 +55,20 @@ class Group4 implements InstructionInterface
 
     protected function dec(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $value = $this->readRm8($runtime, $reader, $modRegRM);
-        $result = ($value - 1) & 0xFF;
-        $this->writeRm8($runtime, $reader, $modRegRM, $result);
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+        if ($isRegister) {
+            $value = $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
+            $result = ($value - 1) & 0xFF;
+            $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+        } else {
+            // Calculate address once to avoid consuming displacement bytes twice
+            $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $value = $this->readMemory8($runtime, $address);
+            $result = ($value - 1) & 0xFF;
+            $this->writeMemory8($runtime, $address, $result);
+        }
+
         $runtime->memoryAccessor()->updateFlags($result, 8);
         return ExecutionStatus::SUCCESS;
     }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Display\Window\SDLKeyMapper;
+use PHPMachineEmulator\Display\Window\SDLScancode;
 use PHPMachineEmulator\Display\Writer\WindowScreenWriter;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -91,36 +92,27 @@ class KeyboardController
             return;
         }
 
-        // Filter out modifier keys
-        $modifiers = [
-            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_LSHIFT,
-            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_RSHIFT,
-            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_LCTRL,
-            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_RCTRL,
-            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_LALT,
-            \PHPMachineEmulator\Display\Window\Window::SDL_SCANCODE_RALT,
-        ];
-
         $currentTimeMs = (int)(microtime(true) * 1000);
 
         foreach ($pressed as $sdlScancode) {
-            if (in_array($sdlScancode, $modifiers, true)) {
+            // Skip modifier keys using enum method
+            if ($sdlScancode->isModifier()) {
                 continue;
             }
 
             // Check for key repeat
-            if ($sdlScancode === $this->lastSDLScancode &&
+            if ($sdlScancode->value === $this->lastSDLScancode &&
                 ($currentTimeMs - $this->lastSDLKeyTime) < self::SDL_KEY_REPEAT_DELAY_MS) {
                 continue;
             }
 
             // Convert SDL scancode to BIOS scancode
-            $biosScancode = SDLKeyMapper::toBiosScancode($sdlScancode);
+            $biosScancode = SDLKeyMapper::toBiosScancode($sdlScancode->value);
             if ($biosScancode === null) {
                 continue;
             }
 
-            $this->lastSDLScancode = $sdlScancode;
+            $this->lastSDLScancode = $sdlScancode->value;
             $this->lastSDLKeyTime = $currentTimeMs;
 
             // Enqueue the BIOS scancode (make code)

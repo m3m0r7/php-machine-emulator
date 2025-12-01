@@ -28,6 +28,8 @@ use PHPMachineEmulator\Instruction\Intel\x86\Jbe;
 use PHPMachineEmulator\Instruction\Intel\x86\Jc;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnc;
 use PHPMachineEmulator\Instruction\Intel\x86\Jno;
+use PHPMachineEmulator\Instruction\Intel\x86\Js;
+use PHPMachineEmulator\Instruction\Intel\x86\Jns;
 use PHPMachineEmulator\Instruction\Intel\x86\Jmp;
 use PHPMachineEmulator\Instruction\Intel\x86\JmpShort;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnz;
@@ -38,6 +40,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Jle;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsw;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
+use PHPMachineEmulator\Instruction\Intel\x86\Loopne;
 use PHPMachineEmulator\Instruction\Intel\x86\Mov;
 use PHPMachineEmulator\Instruction\Intel\x86\MovImm8;
 use PHPMachineEmulator\Instruction\Intel\x86\MovMem;
@@ -96,6 +99,10 @@ use PHPMachineEmulator\Instruction\Intel\x86\SegmentOverridePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\LockPrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoBytePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\CbwCwd;
+use PHPMachineEmulator\Instruction\Intel\x86\Daa;
+use PHPMachineEmulator\Instruction\Intel\x86\Das;
+use PHPMachineEmulator\Instruction\Intel\x86\Enter;
+use PHPMachineEmulator\Instruction\Intel\x86\Leave;
 use PHPMachineEmulator\Instruction\Intel\x86\Nop;
 use PHPMachineEmulator\Instruction\Intel\x86\In_;
 use PHPMachineEmulator\Instruction\Intel\x86\Or_;
@@ -148,6 +155,8 @@ class x86 implements InstructionListInterface
             Jc::class,
             Jnc::class,
             Jno::class,
+            Js::class,
+            Jns::class,
             Jmp::class,
             JmpShort::class,
             Jnz::class,
@@ -158,6 +167,7 @@ class x86 implements InstructionListInterface
             Lodsb::class,
             Lodsw::class,
             Loop::class,
+            Loopne::class,
             In_::class,
             Mov::class,
             MovImm8::class,
@@ -222,6 +232,10 @@ class x86 implements InstructionListInterface
             LockPrefix::class,
             TwoBytePrefix::class,
             CbwCwd::class,
+            Daa::class,
+            Das::class,
+            Enter::class,
+            Leave::class,
             PushReg::class,
             Group5::class,
             Ret::class,

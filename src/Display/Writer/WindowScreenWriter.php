@@ -128,23 +128,14 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->canvas->present();
     }
 
-    public function dot(ColorInterface $color): void
+    public function dot(int $x, int $y, ColorInterface $color): void
     {
-        $x = $this->cursorX * $this->pixelSize;
-        $y = $this->cursorY * $this->pixelSize;
+        $pixelX = $x * $this->pixelSize;
+        $pixelY = $y * $this->pixelSize;
         $size = $this->pixelSize;
         $windowColor = new Color($color->red(), $color->green(), $color->blue());
 
-        $this->canvas->add(function (WindowCanvas $canvas) use ($x, $y, $size, $windowColor) {
-            $canvas->rect($x, $y, $size, $size, $windowColor);
-        });
-
-        $this->cursorX++;
-
-        if ($this->cursorX >= $this->videoTypeInfo->width) {
-            $this->cursorX = 0;
-            $this->cursorY++;
-        }
+        $this->canvas->rect($pixelX, $pixelY, $size, $size, $windowColor);
     }
 
     public function newline(): void
@@ -205,7 +196,6 @@ class WindowScreenWriter implements ScreenWriterInterface
 
     public function clear(): void
     {
-        $this->canvas->clearChunks();
         $this->textBuffer = [];
         $this->resetCursor();
         $this->canvas->clear(Color::asBlack());
@@ -275,10 +265,10 @@ class WindowScreenWriter implements ScreenWriterInterface
     /**
      * Check if a specific key is currently pressed
      *
-     * @param int $scancode SDL scancode (use Window::SDL_SCANCODE_* constants)
+     * @param \PHPMachineEmulator\Display\Window\SDLScancode $scancode SDL scancode
      * @return bool
      */
-    public function isKeyPressed(int $scancode): bool
+    public function isKeyPressed(\PHPMachineEmulator\Display\Window\SDLScancode $scancode): bool
     {
         return $this->window->isKeyPressed($scancode);
     }

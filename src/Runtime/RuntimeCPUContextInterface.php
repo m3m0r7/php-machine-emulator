@@ -51,8 +51,4 @@ interface RuntimeCPUContextInterface
     public function apicState(): \PHPMachineEmulator\Instruction\Intel\x86\ApicState;
     public function keyboardController(): \PHPMachineEmulator\Instruction\Intel\x86\KeyboardController;
     public function cmos(): \PHPMachineEmulator\Instruction\Intel\x86\Cmos;
-    public function setMemoryMode(bool $enabled): void;
-    public function isMemoryMode(): bool;
-    public function memoryModeThreshold(): int;
-    public function activateMemoryModeIfNeeded(int $address): void;
 }

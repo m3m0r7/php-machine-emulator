@@ -30,14 +30,11 @@ class Jmp implements InstructionInterface
                 ->memory()
             ->offset();
 
-        // Check if we're in memory mode (executing code loaded into memory via INT 13h)
-        $inMemoryMode = $runtime->context()->cpu()->isMemoryMode();
-
-        if ($inMemoryMode || $runtime->context()->cpu()->isProtectedMode()) {
-            // In memory mode or protected mode, use linear addresses directly
+        if ($runtime->context()->cpu()->isProtectedMode()) {
+            // In protected mode, use linear addresses directly
             // pos is already a linear address, relOffset is the signed displacement
             $target = $pos + $relOffset;
-            $runtime->option()->logger()->debug(sprintf('JMP near (memory mode): pos=0x%05X + rel=0x%04X = target=0x%05X', $pos, $relOffset & 0xFFFF, $target));
+            $runtime->option()->logger()->debug(sprintf('JMP near (protected mode): pos=0x%05X + rel=0x%04X = target=0x%05X', $pos, $relOffset & 0xFFFF, $target));
 
             if ($runtime->option()->shouldChangeOffset()) {
                 $runtime->memory()->setOffset($target);

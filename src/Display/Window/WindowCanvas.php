@@ -4,74 +4,16 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Display\Window;
 
-use Closure;
 use FFI;
 use PHPMachineEmulator\Display\Pixel\Color;
 
 class WindowCanvas
 {
-    /** @var array<string, Closure(WindowCanvas): void> */
-    protected array $chunks = [];
-
-    protected int $chunkId = 0;
-
     public function __construct(
         protected Window $window,
         protected FFI $ffi,
         protected mixed $renderer,
     ) {
-    }
-
-    /**
-     * @param Closure(WindowCanvas): void $callback
-     */
-    public function register(string $name, Closure $callback): self
-    {
-        $this->chunks[$name] = $callback;
-
-        return $this;
-    }
-
-    /**
-     * Register a callback with auto-generated key
-     * @param Closure(WindowCanvas): void $callback
-     */
-    public function add(Closure $callback): self
-    {
-        $this->chunks['chunk_' . $this->chunkId++] = $callback;
-
-        return $this;
-    }
-
-    public function unregister(string $name): self
-    {
-        unset($this->chunks[$name]);
-
-        return $this;
-    }
-
-    public function has(string $name): bool
-    {
-        return isset($this->chunks[$name]);
-    }
-
-    public function render(): void
-    {
-        foreach ($this->chunks as $callback) {
-            $callback($this);
-        }
-    }
-
-    public function clearChunks(): self
-    {
-        $this->chunks = [];
-
-        return $this;
-    }
-
-    public function count(): int
-    {
-        return count($this->chunks);
     }
 
     public function pixel(int $x, int $y, Color $color): self

@@ -10,7 +10,7 @@ interface ScreenWriterInterface
 {
     public function write(string $value): void;
     public function newline(): void;
-    public function dot(ColorInterface $color): void;
+    public function dot(int $x, int $y, ColorInterface $color): void;
     public function setCursorPosition(int $row, int $col): void;
     public function getCursorPosition(): array;
     public function writeCharAtCursor(string $char, int $count = 1, ?int $attribute = null): void;

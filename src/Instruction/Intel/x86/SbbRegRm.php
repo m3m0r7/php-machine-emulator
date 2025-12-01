@@ -27,6 +27,12 @@ class SbbRegRm implements InstructionInterface
         $destIsRm = in_array($opcode, [0x18, 0x19], true);
         $borrow = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
+        // Cache effective address to avoid reading displacement twice
+        $rmAddress = null;
+        if ($destIsRm && $modRegRM->mode() !== 0b11) {
+            $rmAddress = $this->translateLinear($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
+        }
+
         $src = $isByte
             ? ($destIsRm
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
@@ -37,22 +43,36 @@ class SbbRegRm implements InstructionInterface
 
         if ($isByte) {
             $dest = $destIsRm
-                ? $this->readRm8($runtime, $reader, $modRegRM)
+                ? ($rmAddress !== null ? $this->readMemory8($runtime, $rmAddress) : $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress()))
                 : $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
             $result = $dest - $src - $borrow;
             if ($destIsRm) {
-                $this->writeRm8($runtime, $reader, $modRegRM, $result);
+                if ($rmAddress !== null) {
+                    $this->writeMemory8($runtime, $rmAddress, $result);
+                } else {
+                    $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                }
             } else {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrOPCode(), $result);
             }
             $runtime->memoryAccessor()->setCarryFlag($result < 0)->updateFlags($result, 8);
         } else {
             $dest = $destIsRm
-                ? $this->readRm($runtime, $reader, $modRegRM, $opSize)
+                ? ($rmAddress !== null
+                    ? ($opSize === 32 ? $this->readMemory32($runtime, $rmAddress) : $this->readMemory16($runtime, $rmAddress))
+                    : $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize))
                 : $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
             $result = $dest - $src - $borrow;
             if ($destIsRm) {
-                $this->writeRm($runtime, $reader, $modRegRM, $result, $opSize);
+                if ($rmAddress !== null) {
+                    if ($opSize === 32) {
+                        $this->writeMemory32($runtime, $rmAddress, $result);
+                    } else {
+                        $this->writeMemory16($runtime, $rmAddress, $result);
+                    }
+                } else {
+                    $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+                }
             } else {
                 $this->writeRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $result, $opSize);
             }

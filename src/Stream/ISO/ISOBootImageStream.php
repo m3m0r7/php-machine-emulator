@@ -18,6 +18,7 @@ class ISOBootImageStream implements BootableStreamInterface
     private string $bootData;
     private int $fileSize;
     private int $offset = 0;
+    private bool $isNoEmulation;
 
     public function __construct(private ISOStreamInterface $isoStream)
     {
@@ -29,7 +30,15 @@ class ISOBootImageStream implements BootableStreamInterface
 
         $this->bootImage = $bootImage;
         $this->bootData = $bootImage->data();
-        $this->fileSize = strlen($this->bootData);
+        $this->isNoEmulation = $bootImage->isNoEmulation();
+
+        // For No Emulation mode, BIOS only loads the first sector (2048 bytes)
+        // The boot code is responsible for loading the rest via INT 13h
+        if ($this->isNoEmulation) {
+            $this->fileSize = min(strlen($this->bootData), ISO9660::SECTOR_SIZE);
+        } else {
+            $this->fileSize = strlen($this->bootData);
+        }
     }
 
     public function bootImage(): BootImage
@@ -124,5 +133,37 @@ class ISOBootImageStream implements BootableStreamInterface
     public function fileSize(): int
     {
         return $this->fileSize;
+    }
+
+    /**
+     * Check if this is a No Emulation boot image (CD-ROM boot).
+     */
+    public function isNoEmulation(): bool
+    {
+        return $this->isNoEmulation;
+    }
+
+    /**
+     * Read sectors from ISO using LBA addressing.
+     * For No Emulation mode, LBA is in CD-ROM sectors (2048 bytes).
+     *
+     * @param int $lba LBA sector number (2048-byte sectors for CD-ROM)
+     * @param int $sectorCount Number of sectors to read
+     * @return string|null Data read, or null on error
+     */
+    public function readIsoSectors(int $lba, int $sectorCount): ?string
+    {
+        $iso = $this->isoStream->iso();
+        $iso->seekSector($lba);
+        $data = $iso->readSectors($sectorCount);
+        return $data !== false ? $data : null;
+    }
+
+    /**
+     * Get the underlying ISO9660 object for direct access.
+     */
+    public function iso(): ISO9660
+    {
+        return $this->isoStream->iso();
     }
 }

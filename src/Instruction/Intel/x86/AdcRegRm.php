@@ -27,6 +27,12 @@ class AdcRegRm implements InstructionInterface
         $destIsRm = in_array($opcode, [0x10, 0x11], true);
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
+        // Cache effective address to avoid reading displacement twice
+        $rmAddress = null;
+        if ($destIsRm && $modRegRM->mode() !== 0b11) {
+            $rmAddress = $this->translateLinear($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
+        }
+
         $src = $isByte
             ? ($destIsRm
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
@@ -37,22 +43,43 @@ class AdcRegRm implements InstructionInterface
 
         if ($isByte) {
             $dest = $destIsRm
-                ? $this->readRm8($runtime, $reader, $modRegRM)
+                ? ($rmAddress !== null ? $this->readMemory8($runtime, $rmAddress) : $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress()))
                 : $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
             $result = $dest + $src + $carry;
             if ($destIsRm) {
-                $this->writeRm8($runtime, $reader, $modRegRM, $result);
+                if ($rmAddress !== null) {
+                    $this->writeMemory8($runtime, $rmAddress, $result);
+                } else {
+                    $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                }
             } else {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrOPCode(), $result);
             }
             $runtime->memoryAccessor()->setCarryFlag($result > 0xFF)->updateFlags($result, 8);
         } else {
             $dest = $destIsRm
-                ? $this->readRm($runtime, $reader, $modRegRM, $opSize)
+                ? ($rmAddress !== null
+                    ? ($opSize === 32 ? $this->readMemory32($runtime, $rmAddress) : $this->readMemory16($runtime, $rmAddress))
+                    : $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize))
                 : $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
             $result = $dest + $src + $carry;
+
+            // Debug ADC for LZMA distance calculation
+            $runtime->option()->logger()->debug(sprintf(
+                'ADC r%d: dest=0x%X src=0x%X CF=%d result=0x%X',
+                $opSize, $dest & 0xFFFFFFFF, $src & 0xFFFFFFFF, $carry, $result & 0xFFFFFFFF
+            ));
+
             if ($destIsRm) {
-                $this->writeRm($runtime, $reader, $modRegRM, $result, $opSize);
+                if ($rmAddress !== null) {
+                    if ($opSize === 32) {
+                        $this->writeMemory32($runtime, $rmAddress, $result);
+                    } else {
+                        $this->writeMemory16($runtime, $rmAddress, $result);
+                    }
+                } else {
+                    $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+                }
             } else {
                 $this->writeRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $result, $opSize);
             }

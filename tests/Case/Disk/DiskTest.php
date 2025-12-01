@@ -8,7 +8,7 @@ use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\IO\Buffer;
 use PHPMachineEmulator\MachineType;
 use PHPMachineEmulator\OptionInterface;
-use PHPMachineEmulator\Stream\FileStream;
+use Tests\Utils\BootableFileStream;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\CreateApplication;
@@ -22,7 +22,7 @@ class DiskTest extends TestCase
     {
         try {
             BIOS::start(
-                new FileStream(__DIR__ . '/Fixture/Bundle.o'),
+                new BootableFileStream(__DIR__ . '/Fixture/Bundle.o', 0x7C00),
                 $machineType,
                 $option,
             );

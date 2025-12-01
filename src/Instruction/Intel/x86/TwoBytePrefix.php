@@ -958,6 +958,29 @@ class TwoBytePrefix implements InstructionInterface
         $base = $this->readMemory16($runtime, $address + 2);
         $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
         $runtime->context()->cpu()->setGdtr($base, $limit);
+
+        // Debug: dump GDT entries
+        $runtime->option()->logger()->debug(sprintf(
+            'LGDT: address=0x%05X base=0x%08X limit=0x%04X',
+            $address,
+            $base,
+            $limit
+        ));
+        // Dump the first 5 GDT entries
+        for ($i = 0; $i < 5 && ($i * 8) <= $limit; $i++) {
+            $descAddr = $base + ($i * 8);
+            $bytes = [];
+            for ($j = 0; $j < 8; $j++) {
+                $bytes[] = sprintf('%02X', $this->readMemory8($runtime, $descAddr + $j));
+            }
+            $runtime->option()->logger()->debug(sprintf(
+                'GDT[%d] at 0x%08X: %s',
+                $i,
+                $descAddr,
+                implode(' ', $bytes)
+            ));
+        }
+
         return ExecutionStatus::SUCCESS;
     }
 

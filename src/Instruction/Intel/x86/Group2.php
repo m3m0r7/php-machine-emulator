@@ -289,7 +289,9 @@ class Group2 implements InstructionInterface
             } else {
                 $this->writeMemory8($runtime, $address, $result);
             }
-            $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value << ($operand - 1)) & 0x100) !== 0 : false);
+            // CF is set to the last bit shifted out (bit 7 for 8-bit SHL by 1)
+            $cfBit = $operand > 0 ? (($value >> (8 - $operand)) & 0x1) !== 0 : false;
+            $runtime->memoryAccessor()->setCarryFlag($cfBit);
             $runtime->memoryAccessor()->updateFlags($result, 8);
 
             return ExecutionStatus::SUCCESS;
@@ -300,6 +302,16 @@ class Group2 implements InstructionInterface
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size)
             : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address));
         $result = ($value << $operand) & $mask;
+
+        // Debug: trace SHL to code/range (0x7FFD4/0x7FFD8)
+        $cfBitMem = $operand > 0 ? (($value >> ($size - $operand)) & 0x1) !== 0 : false;
+        if ($address !== null && $address >= 0x7FFD0 && $address <= 0x7FFE0) {
+            $runtime->option()->logger()->debug(sprintf(
+                'SHL dword [0x%X], %d: before=0x%08X after=0x%08X CF=%d (bit%d of value=0x%X)',
+                $address, $operand, $value, $result, $cfBitMem ? 1 : 0, $size - $operand, ($value >> ($size - $operand)) & 0x1
+            ));
+        }
+
         if ($isRegister) {
             $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
         } else {
@@ -309,7 +321,20 @@ class Group2 implements InstructionInterface
                 $this->writeMemory16($runtime, $address, $result);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value << ($operand - 1)) & ($mask + 1)) !== 0 : false);
+        // CF is set to the last bit shifted out (bit at position size-1 after shifting by operand-1)
+        // For SHL by 1, CF = original bit 31 (for 32-bit) or bit 15 (for 16-bit)
+        $cfBit = $operand > 0 ? (($value >> ($size - $operand)) & 0x1) !== 0 : false;
+
+        // Debug: trace SHL EDX (register 2) in LZMA direct bits loop
+        $ip = $runtime->memory()->offset();
+        if ($isRegister && $modRegRM->registerOrMemoryAddress() === 2 && $ip >= 0x8CC0 && $ip <= 0x8D10) {
+            $runtime->option()->logger()->debug(sprintf(
+                'SHL EDX, %d: before=0x%08X after=0x%08X CF=%d (bit%d=%d) IP=0x%X',
+                $operand, $value, $result, $cfBit ? 1 : 0, $size - $operand, ($value >> ($size - $operand)) & 0x1, $ip
+            ));
+        }
+
+        $runtime->memoryAccessor()->setCarryFlag($cfBit);
         $runtime->memoryAccessor()->updateFlags($result, $size);
 
         return ExecutionStatus::SUCCESS;
@@ -344,6 +369,15 @@ class Group2 implements InstructionInterface
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value >> $operand) & $mask;
 
+        // Debug: trace SHR to code/range (0x7FFD4/0x7FFD8)
+        if ($address !== null && $address >= 0x7FFD0 && $address <= 0x7FFE0) {
+            $runtime->option()->logger()->debug(sprintf(
+                'SHR dword [0x%X], %d: before=0x%08X after=0x%08X CF=%d',
+                $address, $operand, $value, $result,
+                $operand > 0 ? (($value >> ($operand - 1)) & 0x1) : 0
+            ));
+        }
+
         if ($isRegister) {
             $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
         } else {
@@ -369,10 +403,14 @@ class Group2 implements InstructionInterface
             $value = $isRegister
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $address);
+
+            // SAR: Arithmetic right shift - sign bit is propagated
             $sign = $value & 0x80;
-            $result = ($value >> $operand) & 0x7F;
-            if ($sign) {
-                $result |= 0x80;
+            $result = $value >> $operand;
+            if ($sign && $operand > 0) {
+                // Fill upper bits with 1s (sign extension)
+                $signFill = ((1 << $operand) - 1) << (8 - $operand);
+                $result = ($result | $signFill) & 0xFF;
             }
 
             if ($isRegister) {
@@ -389,12 +427,17 @@ class Group2 implements InstructionInterface
         $value = $isRegister
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size)
             : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address));
+
         $signBit = 1 << ($size - 1);
         $sign = $value & $signBit;
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $result = ($value >> $operand) & (~$signBit & $mask);
-        if ($sign) {
-            $result |= $signBit;
+
+        // SAR: Arithmetic right shift - sign bit is propagated
+        $result = $value >> $operand;
+        if ($sign && $operand > 0) {
+            // Fill upper bits with 1s (sign extension)
+            $signFill = ((1 << $operand) - 1) << ($size - $operand);
+            $result = ($result | $signFill) & $mask;
         }
 
         if ($isRegister) {

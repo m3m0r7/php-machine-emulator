@@ -67,22 +67,26 @@ class RepPrefix implements InstructionInterface
      */
     private function bulkStringOp(RuntimeInterface $runtime, int $opcode, int $counter): ExecutionStatus
     {
-        $step = $this->stepForElement($runtime, $this->elementSize($opcode));
-
         switch ($opcode) {
             case 0xAA: // STOSB
+                $step = $this->stepForElement($runtime, 1);
                 $this->bulkStos($runtime, $counter, 8, $step);
                 break;
             case 0xAB: // STOSW/STOSD
                 $size = $runtime->context()->cpu()->operandSize();
-                $this->bulkStos($runtime, $counter, $size, $step * ($size / 8));
+                $elementBytes = $size / 8;  // 2 for 16-bit, 4 for 32-bit
+                $step = $this->stepForElement($runtime, $elementBytes);
+                $this->bulkStos($runtime, $counter, $size, $step);
                 break;
             case 0xA4: // MOVSB
+                $step = $this->stepForElement($runtime, 1);
                 $this->bulkMovs($runtime, $counter, 8, $step);
                 break;
             case 0xA5: // MOVSW/MOVSD
                 $size = $runtime->context()->cpu()->operandSize();
-                $this->bulkMovs($runtime, $counter, $size, $step * ($size / 8));
+                $elementBytes = $size / 8;  // 2 for 16-bit, 4 for 32-bit
+                $step = $this->stepForElement($runtime, $elementBytes);
+                $this->bulkMovs($runtime, $counter, $size, $step);
                 break;
         }
 
@@ -98,6 +102,14 @@ class RepPrefix implements InstructionInterface
             : $ma->fetch(RegisterType::EAX)->asBytesBySize($size);
 
         $di = $this->readIndex($runtime, RegisterType::EDI);
+
+        // Debug: log REP STOSD for LZMA probability table initialization
+        if ($size === 32 && $value === 0x400 && $count > 100) {
+            $runtime->option()->logger()->debug(sprintf(
+                'REP STOSD (prob table init?): count=%d value=0x%X di=0x%X',
+                $count, $value, $di
+            ));
+        }
 
         for ($i = 0; $i < $count; $i++) {
             $address = $this->translateLinear(
@@ -152,14 +164,5 @@ class RepPrefix implements InstructionInterface
 
         $this->writeIndex($runtime, RegisterType::ESI, $si);
         $this->writeIndex($runtime, RegisterType::EDI, $di);
-    }
-
-    private function elementSize(int $opcode): int
-    {
-        return match ($opcode) {
-            0xA4, 0xAA => 1, // MOVSB, STOSB
-            0xA5, 0xAB => 2, // MOVSW/MOVSD, STOSW/STOSD (will be adjusted by operand size)
-            default => 1,
-        };
     }
 }

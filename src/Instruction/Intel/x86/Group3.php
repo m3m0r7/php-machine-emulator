@@ -72,8 +72,36 @@ class Group3 implements InstructionInterface
     {
         $size = $isByte ? 8 : $opSize;
         $mask = $this->maskForSize($size);
-        $value = $this->readRm($runtime, $streamReader, $modRegRM, $size);
-        $this->writeRm($runtime, $streamReader, $modRegRM, ~$value & $mask, $size);
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+        if ($isRegister) {
+            $value = $isByte
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                : $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
+            $result = ~$value & $mask;
+            if ($isByte) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+            }
+        } else {
+            // Calculate address once to avoid consuming displacement bytes twice
+            $address = $this->rmLinearAddress($runtime, $streamReader, $modRegRM);
+            if ($isByte) {
+                $value = $this->readMemory8($runtime, $address);
+                $result = ~$value & $mask;
+                $this->writeMemory8($runtime, $address, $result);
+            } elseif ($size === 32) {
+                $value = $this->readMemory32($runtime, $address);
+                $result = ~$value & $mask;
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $value = $this->readMemory16($runtime, $address);
+                $result = ~$value & $mask;
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
+
         $runtime->memoryAccessor()->setCarryFlag(false);
         return ExecutionStatus::SUCCESS;
     }
@@ -82,10 +110,44 @@ class Group3 implements InstructionInterface
     {
         $size = $isByte ? 8 : $opSize;
         $mask = $this->maskForSize($size);
-        $value = $this->readRm($runtime, $streamReader, $modRegRM, $size) & $mask;
-        $result = (-$value) & $mask;
+        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
 
-        $this->writeRm($runtime, $streamReader, $modRegRM, $result, $size);
+        if ($isRegister) {
+            $value = $isByte
+                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                : $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
+            $value &= $mask;
+            $result = (-$value) & $mask;
+
+            // Debug NEG for LZMA distance
+            $runtime->option()->logger()->debug(sprintf(
+                'NEG r%d: value=0x%X result=0x%X (reg=%d)',
+                $size, $value & 0xFFFFFFFF, $result & 0xFFFFFFFF, $modRegRM->registerOrMemoryAddress()
+            ));
+
+            if ($isByte) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+            }
+        } else {
+            // Calculate address once to avoid consuming displacement bytes twice
+            $address = $this->rmLinearAddress($runtime, $streamReader, $modRegRM);
+            if ($isByte) {
+                $value = $this->readMemory8($runtime, $address) & $mask;
+                $result = (-$value) & $mask;
+                $this->writeMemory8($runtime, $address, $result);
+            } elseif ($size === 32) {
+                $value = $this->readMemory32($runtime, $address) & $mask;
+                $result = (-$value) & $mask;
+                $this->writeMemory32($runtime, $address, $result);
+            } else {
+                $value = $this->readMemory16($runtime, $address) & $mask;
+                $result = (-$value) & $mask;
+                $this->writeMemory16($runtime, $address, $result);
+            }
+        }
+
         $runtime->memoryAccessor()->setCarryFlag($value !== 0);
 
         return ExecutionStatus::SUCCESS;
@@ -127,6 +189,11 @@ class Group3 implements InstructionInterface
             $product = ($acc & 0xFFFFFFFF) * ($operand & 0xFFFFFFFF);
             $low = $product & 0xFFFFFFFF;
             $high = ($product >> 32) & 0xFFFFFFFF;
+
+            $runtime->option()->logger()->debug(sprintf(
+                'MUL32: EAX=0x%08X × operand=0x%08X = 0x%016X (EAX=0x%08X, EDX=0x%08X)',
+                $acc, $operand, $product, $low, $high
+            ));
 
             $ma
                 ->writeBySize(RegisterType::EAX, $low, 32)

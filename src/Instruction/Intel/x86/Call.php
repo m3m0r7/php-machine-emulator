@@ -33,13 +33,11 @@ class Call implements InstructionInterface
         $nextLinear = $runtime->memory()->offset();
         $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
 
-        // Unified memory model:
-        // - CS-relative addressing for return address (what gets pushed)
-        // - Linear addressing for actual jump target
-        $csBase = $cs << 4;
-        $returnOffset = ($nextLinear - $csBase) & $mask;
+        // Calculate return offset and target using proper segment base resolution
+        // This handles both real mode (cs << 4) and protected mode (descriptor base)
+        $returnOffset = $this->codeOffsetFromLinear($runtime, $cs, $nextLinear, $opSize);
         $targetOffset = ($returnOffset + $offset) & $mask;
-        $targetLinear = $csBase + $targetOffset;
+        $targetLinear = $this->linearCodeAddress($runtime, $cs, $targetOffset, $opSize);
         $returnToPush = $returnOffset;
 
         // Push return address onto stack.

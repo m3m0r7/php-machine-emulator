@@ -48,8 +48,7 @@ class AddRegRm implements InstructionInterface
             $result = $dest + $src;
             if ($destIsRm) {
                 if ($rmAddress !== null) {
-                    $runtime->memoryAccessor()->allocate($rmAddress, 1, safe: false);
-                    $runtime->memoryAccessor()->writeBySize($rmAddress, $result, 8);
+                    $this->writeMemory8($runtime, $rmAddress, $result);
                 } else {
                     $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
                 }
@@ -66,8 +65,11 @@ class AddRegRm implements InstructionInterface
             $result = $dest + $src;
             if ($destIsRm) {
                 if ($rmAddress !== null) {
-                    $runtime->memoryAccessor()->allocate($rmAddress, $opSize === 32 ? 4 : 2, safe: false);
-                    $runtime->memoryAccessor()->writeBySize($rmAddress, $result, $opSize);
+                    if ($opSize === 32) {
+                        $this->writeMemory32($runtime, $rmAddress, $result);
+                    } else {
+                        $this->writeMemory16($runtime, $rmAddress, $result);
+                    }
                 } else {
                     $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
                 }

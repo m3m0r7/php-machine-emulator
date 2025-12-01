@@ -38,11 +38,9 @@ class Int_ implements InstructionInterface
         $opSize = $runtime->context()->cpu()->operandSize();
         $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
         $isProtected = $runtime->context()->cpu()->isProtectedMode();
-        $inMemoryMode = $runtime->context()->cpu()->isMemoryMode();
-        $returnVal = (!$inMemoryMode && !$isProtected)
+        $returnVal = !$isProtected
             ? $returnIp
             : $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
-        $isProtected = $runtime->context()->cpu()->isProtectedMode();
 
         if ($isProtected) {
             $this->protectedModeInterrupt($runtime, $vector, $returnVal, $errorCode, false);
@@ -60,9 +58,8 @@ class Int_ implements InstructionInterface
         $opSize = $runtime->context()->cpu()->operandSize();
         $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
         $returnIp = $runtime->memory()->offset();
-        $inMemoryMode = $runtime->context()->cpu()->isMemoryMode();
         $isProtected = $runtime->context()->cpu()->isProtectedMode();
-        $returnVal = (!$inMemoryMode && !$isProtected)
+        $returnVal = !$isProtected
             ? $returnIp
             : $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
 
@@ -110,19 +107,6 @@ class Int_ implements InstructionInterface
         $offset = $this->readMemory16($runtime, $vectorAddress);
         $segment = $this->readMemory16($runtime, $vectorAddress + 2);
 
-        // In memory mode, if IVT vector points to 0:0, the vector is not set up.
-        // This typically means we're executing after the OS has taken over and
-        // the IVT hasn't been preserved. Log and skip the interrupt to avoid
-        // infinite loops.
-        if ($segment === 0 && $offset === 0 && $runtime->context()->cpu()->isMemoryMode()) {
-            $runtime->option()->logger()->warning(sprintf(
-                'INT 0x%02X: IVT vector is NULL (0:0) in memory mode, skipping interrupt',
-                $vector
-            ));
-            $this->nestedCount[$key]--;
-            return;
-        }
-
         // Push state (FLAGS, CS, IP)
         $flags =
             ($runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0) |
@@ -147,6 +131,7 @@ class Int_ implements InstructionInterface
         }
 
         $target = (($segment << 4) + $offset) & 0xFFFFF;
+        $runtime->option()->logger()->debug(sprintf('INT vector 0x%02X: IVT entry [%04X:%04X] -> linear 0x%05X, return=0x%04X', $vector, $segment, $offset, $target, $returnOffset));
         $this->writeCodeSegment($runtime, $segment);
 
         try {

@@ -20,17 +20,49 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     private int $size;
 
+    private int $maxSize;
+
     /**
-     * @param int $size Total memory size (default 1MB)
+     * @param int $size Initial memory size (default 1MB)
+     * @param int $maxSize Maximum memory size for auto-expansion (default 16MB)
      */
-    public function __construct(int $size = 0x100000)
+    public function __construct(int $size = 0x100000, int $maxSize = 0x1000000)
     {
         $this->size = $size;
+        $this->maxSize = $maxSize;
         $this->memory = fopen('php://memory', 'r+b');
 
         // Pre-allocate memory with zeros
         fwrite($this->memory, str_repeat("\x00", $size));
         rewind($this->memory);
+    }
+
+    /**
+     * Expand memory if needed to accommodate the given offset.
+     */
+    public function ensureCapacity(int $requiredOffset): bool
+    {
+        if ($requiredOffset < $this->size) {
+            return true;
+        }
+
+        if ($requiredOffset >= $this->maxSize) {
+            return false;
+        }
+
+        // Expand in 1MB chunks
+        $newSize = min(
+            $this->maxSize,
+            (int) ceil(($requiredOffset + 1) / 0x100000) * 0x100000
+        );
+
+        $currentPos = ftell($this->memory);
+        fseek($this->memory, $this->size, SEEK_SET);
+        fwrite($this->memory, str_repeat("\x00", $newSize - $this->size));
+        fseek($this->memory, $currentPos, SEEK_SET);
+
+        $this->size = $newSize;
+        return true;
     }
 
     // ========================================
@@ -39,6 +71,16 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     public function char(): string
     {
+        // Safety check: don't allow access beyond maxSize
+        if ($this->offset >= $this->maxSize) {
+            throw new \RuntimeException(sprintf('Memory read out of bounds: offset=0x%X maxSize=0x%X', $this->offset, $this->maxSize));
+        }
+
+        // Auto-expand if reading beyond current size
+        if ($this->offset >= $this->size) {
+            $this->ensureCapacity($this->offset);
+        }
+
         fseek($this->memory, $this->offset, SEEK_SET);
         $char = fread($this->memory, 1);
         $this->offset++;
@@ -80,13 +122,22 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     public function setOffset(int $newOffset): self
     {
+        // Safety check: don't allow setting offset beyond maxSize
+        if ($newOffset < 0 || $newOffset >= $this->maxSize) {
+            throw new \RuntimeException(sprintf('Cannot set offset beyond bounds: offset=0x%X maxSize=0x%X', $newOffset, $this->maxSize));
+        }
+
+        // Auto-expand memory if needed
+        if ($newOffset >= $this->size) {
+            $this->ensureCapacity($newOffset);
+        }
         $this->offset = $newOffset;
         return $this;
     }
 
     public function isEOF(): bool
     {
-        return $this->offset >= $this->size;
+        return $this->offset >= $this->size && $this->offset >= $this->maxSize;
     }
 
     // ========================================
@@ -95,6 +146,11 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     public function write(string $value): self
     {
+        $endOffset = $this->offset + strlen($value);
+        if ($endOffset >= $this->size) {
+            $this->ensureCapacity($endOffset);
+        }
+
         fseek($this->memory, $this->offset, SEEK_SET);
         fwrite($this->memory, $value);
         $this->offset += strlen($value);
@@ -103,6 +159,15 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     public function writeByte(int $value): void
     {
+        // Safety check: don't allow access beyond maxSize
+        if ($this->offset >= $this->maxSize) {
+            throw new \RuntimeException(sprintf('Memory access out of bounds: offset=0x%X maxSize=0x%X', $this->offset, $this->maxSize));
+        }
+
+        if ($this->offset >= $this->size) {
+            $this->ensureCapacity($this->offset);
+        }
+
         fseek($this->memory, $this->offset, SEEK_SET);
         fwrite($this->memory, chr($value & 0xFF));
         $this->offset++;

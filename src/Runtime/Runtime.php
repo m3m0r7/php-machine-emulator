@@ -136,9 +136,20 @@ class Runtime implements RuntimeInterface
         while (!$this->memory->isEOF()) {
             $this->instructionCount++;
             $this->tickTimers();
+            $ipBefore = $this->memory->offset();
             $this->memoryAccessor->setInstructionFetch(true);
             $opcode = $this->memory->byte();
             $this->memoryAccessor->setInstructionFetch(false);
+
+            // Debug: trace ALL opcodes with full register state
+            $cf = $this->memoryAccessor->shouldCarryFlag() ? 1 : 0;
+            $eax = $this->memoryAccessor->fetch(\PHPMachineEmulator\Instruction\RegisterType::EAX)->asBytesBySize(32);
+            $edx = $this->memoryAccessor->fetch(\PHPMachineEmulator\Instruction\RegisterType::EDX)->asBytesBySize(32);
+            $this->machine->option()->logger()->debug(sprintf(
+                'EXEC: IP=0x%04X op=0x%02X CF=%d EAX=0x%08X EDX=0x%08X',
+                $ipBefore, $opcode, $cf, $eax, $edx
+            ));
+
             $result = $this->execute($opcode);
             if ($result === ExecutionStatus::EXIT) {
                 $this->machine->option()->logger()->info('Exited program');

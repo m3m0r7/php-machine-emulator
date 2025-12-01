@@ -35,4 +35,6 @@ interface MemoryAccessorInterface
     public function shouldOverflowFlag(): bool;
     public function shouldCarryFlag(): bool;
     public function shouldParityFlag(): bool;
+    public function shouldAuxiliaryCarryFlag(): bool;
+    public function setAuxiliaryCarryFlag(bool $which): self;
 }

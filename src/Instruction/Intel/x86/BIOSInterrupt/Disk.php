@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Stream\ISO\ISO9660;
+use PHPMachineEmulator\Stream\ISO\ISOBootImageStream;
 
 class Disk implements InterruptInterface
 {
@@ -283,12 +284,6 @@ class Disk implements InterruptInterface
             return;
         }
 
-        if ($sectorCount === 0) {
-            $runtime->option()->logger()->debug('LBA: sectorCount is 0, failing');
-            $this->fail($runtime, 0x04);
-            return;
-        }
-
         $bufferAddress = $this->segmentLinearAddress($runtime, $bufferSegment, $bufferOffset, $addressSize);
 
         // Read from bootStream (disk image) directly
@@ -298,14 +293,47 @@ class Disk implements InterruptInterface
             return;
         }
 
+        // Check if this is a No Emulation CD-ROM boot
+        $isNoEmulationCdrom = ($bootStream instanceof ISOBootImageStream) && $bootStream->isNoEmulation();
+
         $runtime->option()->logger()->debug(sprintf(
-            'INT 13h READ LBA: DS:SI=%04X:%04X LBA=%d sectors=%d => linear=0x%05X',
+            'INT 13h READ LBA: DS:SI=%04X:%04X LBA=%d sectors=%d => linear=0x%05X (CD-ROM=%s)',
             $ds,
             $si,
             $lba,
             $sectorCount,
             $bufferAddress,
+            $isNoEmulationCdrom ? 'yes' : 'no'
         ));
+
+        if ($isNoEmulationCdrom) {
+            // For No Emulation CD-ROM, read directly from ISO using 2048-byte sectors
+            $data = $bootStream->readIsoSectors($lba, $sectorCount);
+            if ($data === null) {
+                $runtime->option()->logger()->error('INT 13h READ LBA failed: ISO read error');
+                $this->fail($runtime, 0x20);
+                return;
+            }
+
+            // Write data to memory
+            $dataLen = strlen($data);
+            for ($i = 0; $i < $dataLen; $i++) {
+                $address = $bufferAddress + $i;
+                $runtime->memoryAccessor()->allocate($address, safe: false);
+                $runtime->memoryAccessor()->writeRawByte($address, ord($data[$i]));
+            }
+
+            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
+            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorCount);
+            $runtime->memoryAccessor()->setCarryFlag(false);
+
+            // Track mapping for later addressMap lookups
+            $runtime->addressMap()->register(
+                max(0, $bufferAddress - 1),
+                new HardDisk(0x80, $lba * self::CD_SECTOR_SIZE, $lba * self::CD_SECTOR_SIZE),
+            );
+            return;
+        }
 
         // Standard disk - use 512-byte sectors
         $bytes = $sectorCount * self::SECTOR_SIZE;

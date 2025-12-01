@@ -18,77 +18,13 @@ class Window
     public const SDL_BUTTON_MIDDLE = 2;
     public const SDL_BUTTON_RIGHT = 4;
 
-    // SDL Scancodes (commonly used keys)
-    public const SDL_SCANCODE_A = 4;
-    public const SDL_SCANCODE_B = 5;
-    public const SDL_SCANCODE_C = 6;
-    public const SDL_SCANCODE_D = 7;
-    public const SDL_SCANCODE_E = 8;
-    public const SDL_SCANCODE_F = 9;
-    public const SDL_SCANCODE_G = 10;
-    public const SDL_SCANCODE_H = 11;
-    public const SDL_SCANCODE_I = 12;
-    public const SDL_SCANCODE_J = 13;
-    public const SDL_SCANCODE_K = 14;
-    public const SDL_SCANCODE_L = 15;
-    public const SDL_SCANCODE_M = 16;
-    public const SDL_SCANCODE_N = 17;
-    public const SDL_SCANCODE_O = 18;
-    public const SDL_SCANCODE_P = 19;
-    public const SDL_SCANCODE_Q = 20;
-    public const SDL_SCANCODE_R = 21;
-    public const SDL_SCANCODE_S = 22;
-    public const SDL_SCANCODE_T = 23;
-    public const SDL_SCANCODE_U = 24;
-    public const SDL_SCANCODE_V = 25;
-    public const SDL_SCANCODE_W = 26;
-    public const SDL_SCANCODE_X = 27;
-    public const SDL_SCANCODE_Y = 28;
-    public const SDL_SCANCODE_Z = 29;
-    public const SDL_SCANCODE_1 = 30;
-    public const SDL_SCANCODE_2 = 31;
-    public const SDL_SCANCODE_3 = 32;
-    public const SDL_SCANCODE_4 = 33;
-    public const SDL_SCANCODE_5 = 34;
-    public const SDL_SCANCODE_6 = 35;
-    public const SDL_SCANCODE_7 = 36;
-    public const SDL_SCANCODE_8 = 37;
-    public const SDL_SCANCODE_9 = 38;
-    public const SDL_SCANCODE_0 = 39;
-    public const SDL_SCANCODE_RETURN = 40;
-    public const SDL_SCANCODE_ESCAPE = 41;
-    public const SDL_SCANCODE_BACKSPACE = 42;
-    public const SDL_SCANCODE_TAB = 43;
-    public const SDL_SCANCODE_SPACE = 44;
-    public const SDL_SCANCODE_F1 = 58;
-    public const SDL_SCANCODE_F2 = 59;
-    public const SDL_SCANCODE_F3 = 60;
-    public const SDL_SCANCODE_F4 = 61;
-    public const SDL_SCANCODE_F5 = 62;
-    public const SDL_SCANCODE_F6 = 63;
-    public const SDL_SCANCODE_F7 = 64;
-    public const SDL_SCANCODE_F8 = 65;
-    public const SDL_SCANCODE_F9 = 66;
-    public const SDL_SCANCODE_F10 = 67;
-    public const SDL_SCANCODE_F11 = 68;
-    public const SDL_SCANCODE_F12 = 69;
-    public const SDL_SCANCODE_RIGHT = 79;
-    public const SDL_SCANCODE_LEFT = 80;
-    public const SDL_SCANCODE_DOWN = 81;
-    public const SDL_SCANCODE_UP = 82;
-    public const SDL_SCANCODE_LCTRL = 224;
-    public const SDL_SCANCODE_LSHIFT = 225;
-    public const SDL_SCANCODE_LALT = 226;
-    public const SDL_SCANCODE_RCTRL = 228;
-    public const SDL_SCANCODE_RSHIFT = 229;
-    public const SDL_SCANCODE_RALT = 230;
-
     protected FFI $ffi;
     protected mixed $window = null;
     protected mixed $renderer = null;
     protected mixed $event = null;
     protected bool $running = false;
     protected ?WindowCanvas $canvas = null;
+    protected ?WindowKeyboard $keyboard = null;
     protected WindowOption $option;
 
     public function __construct(
@@ -210,34 +146,9 @@ class Window
         $this->event = $this->ffi->new('SDL_Event');
 
         $this->canvas = new WindowCanvas($this, $this->ffi, $this->renderer);
+        $this->keyboard = new WindowKeyboard($this->ffi);
 
         return $this;
-    }
-
-    public function start(): void
-    {
-        $this->running = true;
-        $frameDelay = (int) (1000 / $this->option->frameRate);
-
-        while ($this->running) {
-            while ($this->ffi->SDL_PollEvent(FFI::addr($this->event))) {
-                if ($this->event->type === self::SDL_QUIT_EVENT) {
-                    $this->running = false;
-                }
-            }
-
-            if (!$this->running) {
-                break;
-            }
-
-            $this->canvas->clear(Color::asBlack());
-            $this->canvas->render();
-            $this->canvas->present();
-
-            $this->ffi->SDL_Delay($frameDelay);
-        }
-
-        $this->destroy();
     }
 
     public function stop(): void
@@ -323,16 +234,24 @@ class Window
         ];
     }
 
+    public function keyboard(): WindowKeyboard
+    {
+        if ($this->keyboard === null) {
+            throw new WindowException('Window must be initialized before accessing keyboard');
+        }
+
+        return $this->keyboard;
+    }
+
     /**
      * Check if a specific key is currently pressed
      *
-     * @param int $scancode SDL scancode (SDL_SCANCODE_*)
+     * @param SDLScancode $scancode SDL scancode
      * @return bool True if key is pressed
      */
-    public function isKeyPressed(int $scancode): bool
+    public function isKeyPressed(SDLScancode $scancode): bool
     {
-        $keyboardState = $this->ffi->SDL_GetKeyboardState(null);
-        return $keyboardState[$scancode] !== 0;
+        return $this->keyboard()->isKeyPressed($scancode);
     }
 
     /**
@@ -342,39 +261,25 @@ class Window
      */
     public function getKeyboardState(): FFI\CData
     {
-        return $this->ffi->SDL_GetKeyboardState(null);
+        return $this->keyboard()->getKeyboardState();
     }
 
     /**
      * Get all currently pressed keys as SDL scancodes
      *
-     * @return int[] Array of SDL scancodes that are currently pressed
+     * @return SDLScancode[] Array of SDL scancodes that are currently pressed
      */
     public function getPressedKeys(): array
     {
-        $keyboardState = $this->ffi->SDL_GetKeyboardState(null);
-        $pressed = [];
-
-        // Check all mapped scancodes
-        foreach (SDLKeyMapper::getMappedScancodes() as $scancode) {
-            if ($keyboardState[$scancode] !== 0) {
-                $pressed[] = $scancode;
-            }
-        }
-
-        return $pressed;
+        return $this->keyboard()->getPressedKeys();
     }
 
     /**
      * Check if shift key is currently pressed
-     *
-     * @return bool
      */
     public function isShiftPressed(): bool
     {
-        $keyboardState = $this->ffi->SDL_GetKeyboardState(null);
-        return $keyboardState[self::SDL_SCANCODE_LSHIFT] !== 0
-            || $keyboardState[self::SDL_SCANCODE_RSHIFT] !== 0;
+        return $this->keyboard()->isShiftPressed();
     }
 
     /**
@@ -387,27 +292,6 @@ class Window
      */
     public function pollKeyPress(): ?int
     {
-        $pressed = $this->getPressedKeys();
-        if (empty($pressed)) {
-            return null;
-        }
-
-        // Filter out modifier keys
-        $modifiers = [
-            self::SDL_SCANCODE_LSHIFT,
-            self::SDL_SCANCODE_RSHIFT,
-            self::SDL_SCANCODE_LCTRL,
-            self::SDL_SCANCODE_RCTRL,
-            self::SDL_SCANCODE_LALT,
-            self::SDL_SCANCODE_RALT,
-        ];
-
-        foreach ($pressed as $scancode) {
-            if (!in_array($scancode, $modifiers, true)) {
-                return SDLKeyMapper::toBiosKeyCode($scancode, $this->isShiftPressed());
-            }
-        }
-
-        return null;
+        return $this->keyboard()->pollKeyPress();
     }
 }

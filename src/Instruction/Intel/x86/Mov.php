@@ -31,6 +31,15 @@ class Mov implements InstructionInterface
         $regCode = $modRegRM->registerOrOPCode();
         $value = $this->readRegisterBySize($runtime, $regCode, $size);
 
+        // Debug: trace MOV [ebp-offset], edx around distance calculation
+        $ip = $runtime->memory()->offset();
+        if ($ip >= 0x8CF8 && $ip <= 0x8D15 && $regCode === 2) { // EDX
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV [rm], EDX: IP_after_modrm=0x%04X EDX_value=0x%08X',
+                $ip, $value & 0xFFFFFFFF
+            ));
+        }
+
         $this->writeRm($runtime, $enhancedStreamReader, $modRegRM, $value, $size);
 
         // Debug: log memory writes

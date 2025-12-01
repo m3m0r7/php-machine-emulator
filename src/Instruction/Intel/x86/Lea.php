@@ -33,16 +33,7 @@ class Lea implements InstructionInterface
         $size = $runtime->context()->cpu()->operandSize();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
 
-        // Debug: log LEA SI
         $regCode = $modRegRM->registerOrOPCode();
-        if ($regCode === 6) {  // SI
-            $runtime->option()->logger()->debug(sprintf(
-                'LEA SI: address=0x%04X mode=%d rm=%d',
-                $address & $mask,
-                $modRegRM->mode(),
-                $modRegRM->registerOrMemoryAddress()
-            ));
-        }
 
         $runtime
             ->memoryAccessor()

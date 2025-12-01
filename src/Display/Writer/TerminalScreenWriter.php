@@ -26,8 +26,11 @@ class TerminalScreenWriter implements ScreenWriterInterface
             ->write($value);
     }
 
-    public function dot(ColorInterface $color): void
+    public function dot(int $x, int $y, ColorInterface $color): void
     {
+        // Move cursor to x, y position
+        $this->setCursorPosition($y, $x);
+
         $dot = sprintf(
             "\033[38;2;%d;%d;%d;48;2;%d;%d;%d;1m",
             $color->red(),

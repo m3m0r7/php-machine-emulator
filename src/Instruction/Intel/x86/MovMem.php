@@ -27,31 +27,31 @@ class MovMem implements InstructionInterface
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();
 
-        $value = $this->readRm8($runtime, $enhancedStreamReader, $modRegRM);
-
-        // Debug: log MOV r8, rm8 for string comparison analysis
+        // Debug: check ModRM and address size before reading
+        $addrSize = $runtime->context()->cpu()->addressSize();
         $mode = $modRegRM->mode();
         $rm = $modRegRM->registerOrMemoryAddress();
+        $streamPosBefore = $runtime->memory()->offset();
+
+        $value = $this->readRm8($runtime, $enhancedStreamReader, $modRegRM);
+
+        // Debug: log MOV r8, rm8 for memory access
         $destReg = $modRegRM->destination();
         $destName = match ($destReg) {
             0 => 'AL', 1 => 'CL', 2 => 'DL', 3 => 'BL',
             4 => 'AH', 5 => 'CH', 6 => 'DH', 7 => 'BH',
         };
-        $rmName = match ($rm) {
-            0b100 => '[SI]', 0b101 => '[DI]', default => 'other',
-        };
-        if ($mode === 0 && ($rm === 0b100 || $rm === 0b101)) {
-            $regType = $rm === 0b100 ? RegisterType::ESI : RegisterType::EDI;
-            $offset = $runtime->memoryAccessor()->fetch($regType)->asByte();
-            $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
-            $linear = ($ds << 4) + $offset;
+        // In 32-bit mode with rm=4, check SIB byte for addressing
+        if ($addrSize === 32 && $mode === 0 && $rm === 0b100) {
+            $edi = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize(32);
+            $edx = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asBytesBySize(32);
+            $esi = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize(32);
             $runtime->option()->logger()->debug(sprintf(
-                'MOV %s, %s: DS=0x%04X offset=0x%04X linear=0x%05X value=0x%02X (%s)',
+                'MOV %s, [SIB]: EDI=0x%08X EDX=0x%08X ESI=0x%08X value=0x%02X (%s)',
                 $destName,
-                $rmName,
-                $ds,
-                $offset,
-                $linear,
+                $edi,
+                $edx,
+                $esi,
                 $value,
                 $value >= 0x20 && $value < 0x7F ? chr($value) : '.'
             ));

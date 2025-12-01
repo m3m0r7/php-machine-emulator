@@ -51,6 +51,7 @@ class MovRm16 implements InstructionInterface
             ));
         }
 
+
         $runtime
             ->memoryAccessor()
             ->enableUpdateFlags(false)

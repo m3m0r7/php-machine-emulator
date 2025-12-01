@@ -23,6 +23,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     protected bool $overflowFlag = false;
     protected bool $carryFlag = false;
     protected bool $parityFlag = false;
+    protected bool $auxiliaryCarryFlag = false;
     protected bool $enableUpdateFlags = false;
     protected bool $directionFlag = false;
     protected bool $interruptFlag = false;
@@ -132,8 +133,7 @@ class MemoryAccessor implements MemoryAccessorInterface
 
             // For GPRs, always store as 32-bit internally to preserve upper bits when writing 16-bit values
             if ($isGpr && $size === 16) {
-                $currentRaw = $this->registers[$address] ?? 0;
-                $current = BinaryInteger::asLittleEndian($currentRaw, 32);
+                $current = $this->registers[$address] ?? 0;
                 $value = ($current & 0xFFFF0000) | ($value & 0xFFFF);
                 $size = 32;
             }
@@ -143,9 +143,11 @@ class MemoryAccessor implements MemoryAccessorInterface
                 $size = 32;
             }
 
+            // Store register values directly without byte swapping
+            // The value from memory reads is already in native format
             [$address, $previousValue] = $this->processRegisterWrite(
                 $registerType,
-                BinaryInteger::asLittleEndian($value ?? 0, $size),
+                $value ?? 0,
             );
 
             $this->postProcessWhenWrote($address, $previousValue, $value);
@@ -168,14 +170,14 @@ class MemoryAccessor implements MemoryAccessorInterface
         $address = $this->asAddress($registerType);
         $isGpr = $this->isGprAddress($address);
 
-
         // Read current value, update high byte (bits 8-15), preserve the rest
         $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
         $newValue = ($current & ~0xFF00) | (($value & 0xFF) << 8);
 
+        // Store directly without byte swapping
         [$address, $previousValue] = $this->processRegisterWrite(
             $registerType,
-            BinaryInteger::asLittleEndian($newValue, $isGpr ? 32 : 16),
+            $newValue,
         );
 
         $this->postProcessWhenWrote(
@@ -196,9 +198,10 @@ class MemoryAccessor implements MemoryAccessorInterface
         $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
         $newValue = ($current & ~0xFF) | ($value & 0xFF);
 
+        // Store directly without byte swapping
         [$address, $previousValue] = $this->processRegisterWrite(
             $registerType,
-            BinaryInteger::asLittleEndian($newValue, $isGpr ? 32 : 16),
+            $newValue,
         );
 
         $this->postProcessWhenWrote(
@@ -346,6 +349,17 @@ class MemoryAccessor implements MemoryAccessorInterface
     public function shouldParityFlag(): bool
     {
         return $this->parityFlag;
+    }
+
+    public function shouldAuxiliaryCarryFlag(): bool
+    {
+        return $this->auxiliaryCarryFlag;
+    }
+
+    public function setAuxiliaryCarryFlag(bool $which): self
+    {
+        $this->auxiliaryCarryFlag = $which;
+        return $this;
     }
 
     public function setZeroFlag(bool $which): self
