@@ -54,4 +54,19 @@ class TestOption implements OptionInterface
     {
         return BootType::ISO;
     }
+
+    public function memorySize(): int
+    {
+        return 0x10000; // 64KB for tests
+    }
+
+    public function maxMemorySize(): int
+    {
+        return 0x100000; // 1MB for tests
+    }
+
+    public function phpMemoryLimit(): string
+    {
+        return '256M';
+    }
 }

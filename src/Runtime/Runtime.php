@@ -94,13 +94,25 @@ class Runtime implements RuntimeInterface
      */
     private function createMemoryStream(): MemoryStream
     {
-        // Create memory stream (2MB to accommodate floppy images)
-        $memoryStream = new MemoryStream(0x200000);
+        $option = $this->machine->option();
+
+        // Create memory stream with configurable sizes from Option
+        $memoryStream = new MemoryStream(
+            $option->memorySize(),
+            $option->maxMemorySize()
+        );
 
         $loadAddress = $this->bootStream->loadAddress();
         $bootSize = $this->bootStream->fileSize();
 
-        $this->machine->option()->logger()->debug(
+        $option->logger()->debug(
+            sprintf(
+                'Memory configured: initial=%dMB max=%dMB',
+                $option->memorySize() / 0x100000,
+                $option->maxMemorySize() / 0x100000
+            )
+        );
+        $option->logger()->debug(
             sprintf('Copying boot data (%d bytes) to memory at 0x%05X', $bootSize, $loadAddress)
         );
 

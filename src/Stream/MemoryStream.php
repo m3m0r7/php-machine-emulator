@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Stream;
 
 /**
- * Unified memory stream backed by php://memory.
+ * Unified memory stream backed by php://temp.
+ *
+ * Uses php://temp/maxmemory:xxx to allow large memory with automatic
+ * swap to temporary file when exceeding the threshold.
  *
  * Implements both read and write operations on a single memory space.
  * Boot data is copied here at startup, and all subsequent operations
@@ -25,12 +28,16 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
     /**
      * @param int $size Initial memory size (default 1MB)
      * @param int $maxSize Maximum memory size for auto-expansion (default 16MB)
+     * @param int $tempMaxMemory Maximum bytes to keep in memory before swapping to temp file (default 256MB)
      */
-    public function __construct(int $size = 0x100000, int $maxSize = 0x1000000)
+    public function __construct(int $size = 0x100000, int $maxSize = 0x1000000, int $tempMaxMemory = 0x10000000)
     {
         $this->size = $size;
         $this->maxSize = $maxSize;
-        $this->memory = fopen('php://memory', 'r+b');
+
+        // Use php://temp with maxmemory option
+        // Data is kept in memory up to $tempMaxMemory bytes, then swaps to temp file
+        $this->memory = fopen("php://temp/maxmemory:{$tempMaxMemory}", 'r+b');
 
         // Pre-allocate memory with zeros
         fwrite($this->memory, str_repeat("\x00", $size));

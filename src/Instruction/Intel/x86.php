@@ -117,9 +117,12 @@ use PHPMachineEmulator\Instruction\Intel\x86\Stosb;
 use PHPMachineEmulator\Instruction\Intel\x86\TestImmAl;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
 use PHPMachineEmulator\Instruction\RegisterInterface;
+use PHPMachineEmulator\Instruction\Traits\RuntimeAwareTrait;
 
 class x86 implements InstructionListInterface
 {
+    use RuntimeAwareTrait;
+
     protected ?RegisterInterface $register = null;
     protected array $instructionList = [];
 

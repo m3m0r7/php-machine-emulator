@@ -419,4 +419,127 @@ class LeaTest extends InstructionTestCase
         // They should differ for high addresses
         $this->assertNotSame($realModeResult, $protectedModeResult);
     }
+
+    // ========================================
+    // SIB with Large/Negative Index Tests (32-bit wraparound)
+    // ========================================
+
+    public function testLeaSibWithLargeIndex(): void
+    {
+        $this->setProtectedMode(true);
+
+        // LEA EAX, [EDI+EDX*1] where EDX has a large value (simulating NEG result)
+        // This tests the case from LZMA decoder: NEG EDX gives 0xFFD158A4
+        // ModRM = 0x04 = 00 000 100 (mode=00, reg=EAX, r/m=100=SIB)
+        // SIB = 0x17 = 00 010 111 (scale=1, index=EDX, base=EDI)
+        $this->setRegister(RegisterType::EDI, 0x0010012A);
+        $this->setRegister(RegisterType::EDX, 0xFFD158A4); // -0x2EA75C in two's complement
+
+        $this->executeBytes([0x8D, 0x04, 0x17]); // LEA EAX, [EDI+EDX*1]
+
+        // 0x0010012A + 0xFFD158A4 = 0xFFE159CE (wraps at 32-bit)
+        $this->assertSame(0xFFE159CE, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testLeaSibWithLargeIndexScale2(): void
+    {
+        $this->setProtectedMode(true);
+
+        // LEA EAX, [EBX+ECX*2] with large index
+        $this->setRegister(RegisterType::EBX, 0x00001000);
+        $this->setRegister(RegisterType::ECX, 0x80000000); // Large value
+
+        // SIB = 0x4B = 01 001 011 (scale=2, index=ECX, base=EBX)
+        $this->executeBytes([0x8D, 0x04, 0x4B]); // LEA EAX, [EBX+ECX*2]
+
+        // 0x1000 + 0x80000000 * 2 = 0x1000 + 0x100000000 = 0x00001000 (wraps)
+        $this->assertSame(0x00001000, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testLeaSibWithLargeIndexScale4(): void
+    {
+        $this->setProtectedMode(true);
+
+        // LEA EAX, [EBX+ECX*4] with large index causing overflow
+        $this->setRegister(RegisterType::EBX, 0x00000100);
+        $this->setRegister(RegisterType::ECX, 0x40000000); // 0x40000000 * 4 = 0x100000000 = 0
+
+        // SIB = 0x8B = 10 001 011 (scale=4, index=ECX, base=EBX)
+        $this->executeBytes([0x8D, 0x04, 0x8B]); // LEA EAX, [EBX+ECX*4]
+
+        // 0x100 + 0x40000000 * 4 = 0x100 + 0 = 0x100
+        $this->assertSame(0x00000100, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testLeaSibWithNegativeStyleIndex(): void
+    {
+        $this->setProtectedMode(true);
+
+        // Simulate backward reference: base - offset
+        // Using NEG result as index: base + (-offset) = base - offset
+        $this->setRegister(RegisterType::EBX, 0x00010000); // Base = 0x10000
+        $this->setRegister(RegisterType::ECX, 0xFFFFFF00); // -256 in two's complement
+
+        // LEA EAX, [EBX+ECX*1]
+        // SIB = 0x0B = 00 001 011 (scale=1, index=ECX, base=EBX)
+        $this->executeBytes([0x8D, 0x04, 0x0B]);
+
+        // 0x10000 + 0xFFFFFF00 = 0x10000FF00 & 0xFFFFFFFF = 0x0000FF00
+        $this->assertSame(0x0000FF00, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testLeaSibOverflowWrapsCorrectly(): void
+    {
+        $this->setProtectedMode(true);
+
+        // Test that address calculation wraps correctly at 32-bit boundary
+        $this->setRegister(RegisterType::EBX, 0xFFFFFFFF);
+        $this->setRegister(RegisterType::ECX, 0x00000002);
+
+        // LEA EAX, [EBX+ECX*1]
+        // SIB = 0x0B = 00 001 011 (scale=1, index=ECX, base=EBX)
+        $this->executeBytes([0x8D, 0x04, 0x0B]);
+
+        // 0xFFFFFFFF + 2 = 0x100000001 & 0xFFFFFFFF = 0x00000001
+        $this->assertSame(0x00000001, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testLeaSibWithDisplacementOverflow(): void
+    {
+        $this->setProtectedMode(true);
+
+        // LEA EAX, [EBX+ECX*1+disp8] with overflow
+        $this->setRegister(RegisterType::EBX, 0xFFFFFFF0);
+        $this->setRegister(RegisterType::ECX, 0x00000000);
+
+        // ModRM = 0x44 = 01 000 100 (mode=01=disp8, reg=EAX, r/m=100=SIB)
+        // SIB = 0x0B = 00 001 011 (scale=1, index=ECX, base=EBX)
+        // disp8 = 0x20 = 32
+        $this->executeBytes([0x8D, 0x44, 0x0B, 0x20]);
+
+        // 0xFFFFFFF0 + 0 + 32 = 0x100000010 & 0xFFFFFFFF = 0x00000010
+        $this->assertSame(0x00000010, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testLeaRealModeSibWithLargeIndexMasked(): void
+    {
+        // In real mode, even with 32-bit addressing, result is masked to 20 bits
+        $this->setProtectedMode(false);
+        $this->setAddressSize(32);
+        $this->setOperandSize(32);
+
+        $this->setRegister(RegisterType::EDI, 0x0010012A);
+        $this->setRegister(RegisterType::EDX, 0xFFD158A4);
+
+        // LEA EAX, [EDI+EDX*1]
+        $this->executeBytes([0x8D, 0x04, 0x17]);
+
+        // (0x0010012A + 0xFFD158A4) & 0xFFFFF = 0xFFE159CE & 0xFFFFF = 0xE159CE
+        // Wait - the value is 0xFFE159CE, masked to 20 bits = 0xE159CE
+        // Actually 0xFFE159CE & 0xFFFFF = 0xE159CE... let me check
+        // 0xFFE159CE = 1111 1111 1110 0001 0101 1001 1100 1110
+        // & 0x000FFFFF = 0000 0000 0000 1111 1111 1111 1111 1111
+        // = 0x000159CE
+        $this->assertSame(0x000159CE, $this->getRegister(RegisterType::EAX));
+    }
 }

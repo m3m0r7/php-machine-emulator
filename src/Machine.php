@@ -24,6 +24,13 @@ class Machine implements MachineInterface
             Intel\MemoryAccessorObserverCollection::class,
             Intel\ServiceCollection::class,
         ];
+
+        $this->runtimes[MachineType::Intel_x86_64->name] = [
+            Intel\x86_64::class,
+            Intel\VideoInterrupt::class,
+            Intel\MemoryAccessorObserverCollection::class,
+            Intel\ServiceCollection::class,
+        ];
     }
 
     public function option(): OptionInterface
@@ -52,11 +59,16 @@ class Machine implements MachineInterface
 
     protected function createRuntime(ArchitectureProviderInterface $architectureProvider): RuntimeInterface
     {
-        return new ($this->option->runtimeClass())(
+        $runtime = new ($this->option->runtimeClass())(
             $this,
             new RuntimeOption(),
             $architectureProvider,
             $this->bootableStream,
         );
+
+        // Inject runtime into instruction list for mode detection
+        $architectureProvider->instructionList()->setRuntime($runtime);
+
+        return $runtime;
     }
 }

@@ -90,8 +90,8 @@ class MemoryAccessor implements MemoryAccessorInterface
         // Register addresses use $registers array
         if ($this->isRegisterAddress($address)) {
             $this->validateRegisterAddressWasAllocated($address);
-            // Determine stored size: GPRs (addresses 0-7) are stored as 32-bit
-            $storedSize = $this->isGprAddress($address) ? 32 : 16;
+            // GPRs (0-7 and 16-23) are stored as 64-bit, segment registers as 16-bit
+            $storedSize = $this->isGprAddress($address) ? 64 : 16;
             return MemoryAccessorFetchResult::fromCache($this->registers[$address], $storedSize);
         }
 
@@ -109,7 +109,8 @@ class MemoryAccessor implements MemoryAccessorInterface
             if (!array_key_exists($address, $this->registers)) {
                 return null;
             }
-            $storedSize = $this->isGprAddress($address) ? 32 : 16;
+            // GPRs (0-7 and 16-23) are stored as 64-bit, segment registers as 16-bit
+            $storedSize = $this->isGprAddress($address) ? 64 : 16;
             return MemoryAccessorFetchResult::fromCache($this->registers[$address], $storedSize);
         }
 
@@ -131,16 +132,24 @@ class MemoryAccessor implements MemoryAccessorInterface
         if ($this->isRegisterAddress($address)) {
             $isGpr = $this->isGprAddress($address);
 
-            // For GPRs, always store as 32-bit internally to preserve upper bits when writing 16-bit values
-            if ($isGpr && $size === 16) {
+            if ($isGpr) {
                 $current = $this->registers[$address] ?? 0;
-                $value = ($current & 0xFFFF0000) | ($value & 0xFFFF);
-                $size = 32;
-            }
 
-            // GPRs are always stored as 32-bit
-            if ($isGpr && $size < 32) {
-                $size = 32;
+                // In x86-64:
+                // - Writing to 8/16-bit register preserves upper bits
+                // - Writing to 32-bit register zero-extends to 64-bit
+                // - Writing to 64-bit register replaces all bits
+                if ($size === 8) {
+                    // Preserve bits 8-63, update bits 0-7
+                    $value = ($current & ~0xFF) | ($value & 0xFF);
+                } elseif ($size === 16) {
+                    // Preserve bits 16-63, update bits 0-15
+                    $value = ($current & ~0xFFFF) | ($value & 0xFFFF);
+                } elseif ($size === 32) {
+                    // Zero-extend to 64-bit (clear bits 32-63)
+                    $value = $value & 0xFFFFFFFF;
+                }
+                // For 64-bit, use value as-is
             }
 
             // Store register values directly without byte swapping
@@ -573,11 +582,20 @@ class MemoryAccessor implements MemoryAccessorInterface
     }
 
     /**
-     * Check if address is a register address (0-31).
+     * Check if address is a register address.
+     * Layout:
+     *   0-7:   GPRs (EAX-EDI / RAX-RDI)
+     *   8-13:  Segment registers (ES, CS, SS, DS, FS, GS)
+     *   14-15: Reserved (not used)
+     *   16-23: Extended GPRs (R8-R15)
+     *   24:    RIP
+     *   25:    EDI_ON_MEMORY (special)
      */
     private function isRegisterAddress(int $address): bool
     {
-        return $address >= 0 && $address < 32;
+        // GPRs: 0-7, Segment regs: 8-13, Extended GPRs: 16-23, RIP: 24, EDI_ON_MEMORY: 25
+        // Skip 14-15 as they are reserved
+        return ($address >= 0 && $address <= 13) || ($address >= 16 && $address <= 25);
     }
 
     private function stackLinearAddress(int $sp, int $size, bool $isWrite = false): int
@@ -621,8 +639,11 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     private function isGprAddress(int $address): bool
     {
-        // GPR addresses are 0-7 (EAX=0, ECX=1, EDX=2, EBX=3, ESP=4, EBP=5, ESI=6, EDI=7)
-        return $address >= 0 && $address <= 7;
+        // GPR addresses:
+        // 0-7: EAX-EDI (RAX-RDI in 64-bit mode)
+        // 16-23: R8-R15 (64-bit mode only)
+        // 24: RIP
+        return ($address >= 0 && $address <= 7) || ($address >= 16 && $address <= 24);
     }
 
     private function translateLinear(int $linear, bool $isWrite = false): int

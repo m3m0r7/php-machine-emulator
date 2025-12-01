@@ -637,4 +637,187 @@ class MovTest extends InstructionTestCase
 
         $this->assertSame(0xDEADBEEF, $this->getRegister(RegisterType::EAX));
     }
+
+    // ========================================
+    // 32-bit SIB Addressing Mode Tests
+    // ========================================
+
+    public function testMovWithSibBaseAndIndex(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV EAX, [EBX+ECX*1]
+        // ModRM = 0x04 = 00 000 100 (mode=00, reg=EAX, r/m=100=SIB)
+        // SIB = 0x0B = 00 001 011 (scale=1, index=ECX, base=EBX)
+        $this->setRegister(RegisterType::EBX, 0x1000);
+        $this->setRegister(RegisterType::ECX, 0x100);
+        $this->writeMemory(0x1100, 0xAABBCCDD, 32);
+
+        $this->executeBytes([0x8B, 0x04, 0x0B]); // MOV EAX, [EBX+ECX*1]
+
+        $this->assertSame(0xAABBCCDD, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testMovWithSibScaledIndex(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV EAX, [EBX+ECX*4]
+        // SIB = 0x8B = 10 001 011 (scale=4, index=ECX, base=EBX)
+        $this->setRegister(RegisterType::EBX, 0x2000);
+        $this->setRegister(RegisterType::ECX, 0x40);
+        $this->writeMemory(0x2100, 0x11223344, 32); // 0x2000 + 0x40*4 = 0x2100
+
+        $this->executeBytes([0x8B, 0x04, 0x8B]); // MOV EAX, [EBX+ECX*4]
+
+        $this->assertSame(0x11223344, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testMovWithSibAndDisplacement8(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV EAX, [EBX+ECX*2+0x10]
+        // ModRM = 0x44 = 01 000 100 (mode=01 disp8, reg=EAX, r/m=100=SIB)
+        // SIB = 0x4B = 01 001 011 (scale=2, index=ECX, base=EBX)
+        $this->setRegister(RegisterType::EBX, 0x3000);
+        $this->setRegister(RegisterType::ECX, 0x20);
+        $this->writeMemory(0x3050, 0x55667788, 32); // 0x3000 + 0x20*2 + 0x10 = 0x3050
+
+        $this->executeBytes([0x8B, 0x44, 0x4B, 0x10]); // MOV EAX, [EBX+ECX*2+0x10]
+
+        $this->assertSame(0x55667788, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testMovWithSibScale8(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV EAX, [EBX+ECX*8]
+        // SIB = 0xCB = 11 001 011 (scale=8, index=ECX, base=EBX)
+        $this->setRegister(RegisterType::EBX, 0x4000);
+        $this->setRegister(RegisterType::ECX, 0x10);
+        $this->writeMemory(0x4080, 0x99AABBCC, 32); // 0x4000 + 0x10*8 = 0x4080
+
+        $this->executeBytes([0x8B, 0x04, 0xCB]); // MOV EAX, [EBX+ECX*8]
+
+        $this->assertSame(0x99AABBCC, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testMovWriteWithSib(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV [EDI+ESI*1], EAX
+        // ModRM = 0x04 (r/m=100=SIB), but this is for 0x89 so reg encodes source
+        // 0x89 = MOV r/m, r : ModRM = 0x04 = 00 000 100 (reg=EAX, r/m=SIB)
+        // SIB = 0x37 = 00 110 111 (scale=1, index=ESI, base=EDI)
+        $this->setRegister(RegisterType::EDI, 0x5000);
+        $this->setRegister(RegisterType::ESI, 0x200);
+        $this->setRegister(RegisterType::EAX, 0xDEADC0DE);
+
+        $this->executeBytes([0x89, 0x04, 0x37]); // MOV [EDI+ESI*1], EAX
+
+        $this->assertSame(0xDEADC0DE, $this->readMemory(0x5200, 32));
+    }
+
+    public function testMov8BitWithSib(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV AL, [EBX+ECX*1]
+        // 0x8A = MOV r8, r/m8
+        // ModRM = 0x04, SIB = 0x0B
+        $this->setRegister(RegisterType::EBX, 0x6000);
+        $this->setRegister(RegisterType::ECX, 0x50);
+        $this->writeMemory(0x6050, 0xAB, 8);
+
+        $this->executeBytes([0x8A, 0x04, 0x0B]); // MOV AL, [EBX+ECX*1]
+
+        $this->assertSame(0xAB, $this->getRegister(RegisterType::EAX) & 0xFF);
+    }
+
+    public function testMovWithSibNoIndex(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV EAX, [ESP] - ESP as base, no index (index=100 means no index)
+        // ModRM = 0x04, SIB = 0x24 = 00 100 100 (scale=1, index=ESP=none, base=ESP)
+        $this->setRegister(RegisterType::ESP, 0x7000);
+        $this->writeMemory(0x7000, 0x12345678, 32);
+
+        $this->executeBytes([0x8B, 0x04, 0x24]); // MOV EAX, [ESP]
+
+        $this->assertSame(0x12345678, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testMovWithSibDisp32Only(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV EAX, [ECX*4+disp32] - base=101 with mod=00 means disp32 only
+        // ModRM = 0x04 = 00 000 100
+        // SIB = 0x8D = 10 001 101 (scale=4, index=ECX, base=101=disp32)
+        $this->setRegister(RegisterType::ECX, 0x10);
+        $this->writeMemory(0x1040, 0xFEDCBA98, 32); // 0x1000 + 0x10*4 = 0x1040
+
+        // SIB with base=101 and mod=00 means [index*scale + disp32]
+        $this->executeBytes([0x8B, 0x04, 0x8D, 0x00, 0x10, 0x00, 0x00]); // MOV EAX, [ECX*4+0x1000]
+
+        $this->assertSame(0xFEDCBA98, $this->getRegister(RegisterType::EAX));
+    }
+
+    // ========================================
+    // 32-bit Address Wraparound Tests
+    // ========================================
+
+    public function testMovAddressWithLargeIndex(): void
+    {
+        // Test SIB addressing with large index values
+        $this->setProtectedMode(true);
+
+        // MOV EAX, [EBX+ECX*1] where ECX is a large value
+        $this->setRegister(RegisterType::EBX, 0x1000);
+        $this->setRegister(RegisterType::ECX, 0x500);
+        $this->writeMemory(0x1500, 0xCAFEBABE, 32);
+
+        $this->executeBytes([0x8B, 0x04, 0x0B]); // MOV EAX, [EBX+ECX*1]
+
+        $this->assertSame(0xCAFEBABE, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testMovWithNegativeDisplacement(): void
+    {
+        $this->setProtectedMode(true);
+
+        // MOV EAX, [EBX-16] using signed displacement
+        // ModRM = 0x43 = 01 000 011 (mode=01 disp8, reg=EAX, r/m=EBX)
+        // disp8 = 0xF0 = -16
+        $this->setRegister(RegisterType::EBX, 0x1020);
+        $this->writeMemory(0x1010, 0x13579BDF, 32); // 0x1020 - 16 = 0x1010
+
+        $this->executeBytes([0x8B, 0x43, 0xF0]); // MOV EAX, [EBX-16]
+
+        $this->assertSame(0x13579BDF, $this->getRegister(RegisterType::EAX));
+    }
+
+    // ========================================
+    // Real Mode 32-bit Addressing Tests
+    // ========================================
+
+    public function testMovRealModeWith32BitAddressing(): void
+    {
+        // Real mode with 32-bit address size (via 0x67 prefix simulation)
+        $this->setProtectedMode(false);
+        $this->setAddressSize(32);
+        $this->setOperandSize(32);
+
+        $this->setRegister(RegisterType::EBX, 0x1000);
+        $this->setRegister(RegisterType::ECX, 0x100);
+        $this->writeMemory(0x1100, 0x87654321, 32);
+
+        $this->executeBytes([0x8B, 0x04, 0x0B]); // MOV EAX, [EBX+ECX*1]
+
+        $this->assertSame(0x87654321, $this->getRegister(RegisterType::EAX));
+    }
 }

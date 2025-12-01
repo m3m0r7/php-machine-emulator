@@ -15,6 +15,8 @@ class TestCPUContext implements RuntimeCPUContextInterface
     private bool $operandSizeOverride = false;
     private bool $addressSizeOverride = false;
     private bool $protectedMode = false;
+    private bool $longMode = false;
+    private bool $compatibilityMode = false;
     private int $defaultOperandSize = 32;
     private int $defaultAddressSize = 32;
     private array $gdtr = ['base' => 0, 'limit' => 0];
@@ -29,6 +31,7 @@ class TestCPUContext implements RuntimeCPUContextInterface
     private int $iopl = 0;
     private bool $nt = false;
     private int $interruptDeliveryBlock = 0;
+    private int $rex = 0;
     private PicState $picState;
     private ApicState $apicState;
     private KeyboardController $keyboardController;
@@ -286,5 +289,88 @@ class TestCPUContext implements RuntimeCPUContextInterface
     public function cmos(): Cmos
     {
         return $this->cmos;
+    }
+
+    // ========================================
+    // 64-bit mode support
+    // ========================================
+
+    public function shouldUse64bit(bool $consume = true): bool
+    {
+        if (!$this->longMode || $this->compatibilityMode) {
+            return false;
+        }
+        // In 64-bit mode, REX.W forces 64-bit operand size
+        return $this->rexW();
+    }
+
+    public function shouldUse64bitAddress(bool $consume = true): bool
+    {
+        if (!$this->longMode || $this->compatibilityMode) {
+            return false;
+        }
+        // In 64-bit mode, default address size is 64-bit
+        $override = $consume ? $this->consumeAddressSizeOverride() : $this->addressSizeOverride;
+        return !$override;
+    }
+
+    public function setLongMode(bool $enabled): void
+    {
+        $this->longMode = $enabled;
+    }
+
+    public function isLongMode(): bool
+    {
+        return $this->longMode;
+    }
+
+    public function setCompatibilityMode(bool $enabled): void
+    {
+        $this->compatibilityMode = $enabled;
+    }
+
+    public function isCompatibilityMode(): bool
+    {
+        return $this->compatibilityMode;
+    }
+
+    public function setRex(int $rex): void
+    {
+        $this->rex = $rex & 0xFF;
+    }
+
+    public function rex(): int
+    {
+        return $this->rex;
+    }
+
+    public function hasRex(): bool
+    {
+        return $this->rex !== 0;
+    }
+
+    public function rexW(): bool
+    {
+        return ($this->rex & 0x08) !== 0;
+    }
+
+    public function rexR(): bool
+    {
+        return ($this->rex & 0x04) !== 0;
+    }
+
+    public function rexX(): bool
+    {
+        return ($this->rex & 0x02) !== 0;
+    }
+
+    public function rexB(): bool
+    {
+        return ($this->rex & 0x01) !== 0;
+    }
+
+    public function clearRex(): void
+    {
+        $this->rex = 0;
     }
 }
