@@ -9,6 +9,10 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\Intel\x86_64\RexPrefix;
 use PHPMachineEmulator\Instruction\Intel\x86_64\Movsxd;
+use PHPMachineEmulator\Instruction\Intel\x86_64\Push64;
+use PHPMachineEmulator\Instruction\Intel\x86_64\Pop64;
+use PHPMachineEmulator\Instruction\Intel\x86_64\Mov64;
+use PHPMachineEmulator\Instruction\Intel\x86_64\Arithmetic64;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\Traits\RuntimeAwareTrait;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -69,15 +73,20 @@ class x86_64 implements InstructionListInterface
 
     public function getInstructionByOperationCode(int $opcode): InstructionInterface
     {
-        // Always check 64-bit specific opcodes first.
-        // The instruction's process() method will check actual CPU mode
-        // and behave accordingly (e.g., REX prefix vs INC/DEC).
-        $list64 = $this->instructionList64();
-        if (isset($list64[$opcode])) {
-            return $list64[$opcode];
+        // Check if we're in 64-bit mode (Long Mode and not Compatibility Mode)
+        $isIn64BitMode = $this->runtime !== null
+            && $this->runtime->context()->cpu()->isLongMode()
+            && !$this->runtime->context()->cpu()->isCompatibilityMode();
+
+        // Only use 64-bit specific instructions when actually in 64-bit mode
+        if ($isIn64BitMode) {
+            $list64 = $this->instructionList64();
+            if (isset($list64[$opcode])) {
+                return $list64[$opcode];
+            }
         }
 
-        // Delegate to x86 for non-64-bit-specific opcodes
+        // Delegate to x86 for non-64-bit mode or non-64-bit-specific opcodes
         return $this->x86->getInstructionByOperationCode($opcode);
     }
 
@@ -104,8 +113,11 @@ class x86_64 implements InstructionListInterface
         $instructions64 = [
             RexPrefix::class,       // 0x40-0x4F: REX prefixes
             Movsxd::class,          // 0x63: MOVSXD r64, r/m32
+            Push64::class,          // 0x50-0x57: PUSH r64
+            Pop64::class,           // 0x58-0x5F: POP r64
+            Mov64::class,           // MOV with 64-bit operands
+            Arithmetic64::class,    // ADD/SUB/CMP/AND/OR/XOR with 64-bit operands
             // Syscall::class,      // 0x0F 0x05: SYSCALL (handled in TwoBytePrefix)
-            // Sysret::class,       // 0x0F 0x07: SYSRET (handled in TwoBytePrefix)
         ];
 
         foreach ($instructions64 as $className) {

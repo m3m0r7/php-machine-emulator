@@ -283,4 +283,154 @@ trait Instructable64
             default => $this->writeMemory64($runtime, $linearAddress, $value),
         };
     }
+
+    /**
+     * Calculate effective address with 64-bit addressing (including RIP-relative).
+     */
+    protected function effectiveAddressAndSegment64(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): array
+    {
+        $cpu = $runtime->context()->cpu();
+        $mod = $modRegRM->mode();
+        $rm = $modRegRM->registerOrMemoryAddress();
+
+        // In 64-bit mode, segment overrides are generally ignored (except FS/GS)
+        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+
+        // Apply REX.B to rm field
+        if ($cpu->rexB()) {
+            $rm |= 0b1000;
+        }
+
+        // mod == 11: register-to-register (no memory access)
+        if ($mod === 0b11) {
+            return [0, $segment];
+        }
+
+        // Check for SIB byte (rm == 4 in 64-bit mode still means SIB)
+        $needsSib = ($rm & 0b111) === 0b100;
+
+        if ($needsSib) {
+            return $this->decodeSib64($runtime, $reader, $mod);
+        }
+
+        // Check for RIP-relative addressing (mod == 00, rm == 5)
+        if ($mod === 0b00 && ($rm & 0b111) === 0b101) {
+            // RIP-relative addressing in 64-bit mode
+            $disp32 = $reader->int32();
+            $rip = $runtime->memory()->offset();
+            $address = ($rip + $disp32) & 0xFFFFFFFFFFFFFFFF;
+            return [$address, $segment];
+        }
+
+        // Get base register value
+        $baseRegType = $this->getRegisterType64($rm);
+        $base = $runtime->memoryAccessor()->fetch($baseRegType)->asBytesBySize(64);
+
+        // Add displacement based on mod
+        $displacement = match ($mod) {
+            0b00 => 0,
+            0b01 => $this->signExtend8to64($reader->byte()),
+            0b10 => $this->signExtend32to64($reader->int32()),
+            default => 0,
+        };
+
+        $address = ($base + $displacement) & 0xFFFFFFFFFFFFFFFF;
+        return [$address, $segment];
+    }
+
+    /**
+     * Decode SIB byte for 64-bit addressing.
+     */
+    private function decodeSib64(RuntimeInterface $runtime, EnhanceStreamReader $reader, int $mod): array
+    {
+        $cpu = $runtime->context()->cpu();
+        $sib = $reader->byte();
+
+        $scale = ($sib >> 6) & 0b11;
+        $index = ($sib >> 3) & 0b111;
+        $base = $sib & 0b111;
+
+        // Apply REX.X to index, REX.B to base
+        if ($cpu->rexX()) {
+            $index |= 0b1000;
+        }
+        if ($cpu->rexB()) {
+            $base |= 0b1000;
+        }
+
+        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+
+        // Calculate base
+        $baseValue = 0;
+        if ($mod === 0b00 && ($base & 0b111) === 0b101) {
+            // No base register, disp32 follows
+            $baseValue = $this->signExtend32to64($reader->int32());
+        } else {
+            $baseRegType = $this->getRegisterType64($base);
+            $baseValue = $runtime->memoryAccessor()->fetch($baseRegType)->asBytesBySize(64);
+
+            // Add displacement
+            $baseValue += match ($mod) {
+                0b01 => $this->signExtend8to64($reader->byte()),
+                0b10 => $this->signExtend32to64($reader->int32()),
+                default => 0,
+            };
+        }
+
+        // Calculate index (index == 4 without REX.X means no index)
+        $indexValue = 0;
+        if ($index !== 0b0100) {
+            $indexRegType = $this->getRegisterType64($index);
+            $indexValue = $runtime->memoryAccessor()->fetch($indexRegType)->asBytesBySize(64);
+            $indexValue <<= $scale;
+        }
+
+        $address = ($baseValue + $indexValue) & 0xFFFFFFFFFFFFFFFF;
+        return [$address, $segment];
+    }
+
+    /**
+     * Sign-extend 8-bit value to 64-bit.
+     */
+    private function signExtend8to64(int $value): int
+    {
+        if (($value & 0x80) !== 0) {
+            return $value | 0xFFFFFFFFFFFFFF00;
+        }
+        return $value & 0xFF;
+    }
+
+    /**
+     * Sign-extend 32-bit value to 64-bit.
+     */
+    private function signExtend32to64(int $value): int
+    {
+        if (($value & 0x80000000) !== 0) {
+            return $value | 0xFFFFFFFF00000000;
+        }
+        return $value & 0xFFFFFFFF;
+    }
+
+    /**
+     * Push value onto stack (64-bit mode).
+     */
+    protected function push64(RuntimeInterface $runtime, int $value): void
+    {
+        $rsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(64);
+        $rsp = ($rsp - 8) & 0xFFFFFFFFFFFFFFFF;
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::ESP, $rsp, 64);
+        $this->writeMemory64($runtime, $rsp, $value);
+    }
+
+    /**
+     * Pop value from stack (64-bit mode).
+     */
+    protected function pop64(RuntimeInterface $runtime): int
+    {
+        $rsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(64);
+        $value = $this->readMemory64($runtime, $rsp);
+        $rsp = ($rsp + 8) & 0xFFFFFFFFFFFFFFFF;
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::ESP, $rsp, 64);
+        return $value;
+    }
 }
