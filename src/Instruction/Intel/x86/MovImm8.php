@@ -41,7 +41,6 @@ class MovImm8 implements InstructionInterface
 
             $runtime
                 ->memoryAccessor()
-                ->enableUpdateFlags(false)
                 ->writeBySize($register, $value, $opSize);
 
             return ExecutionStatus::SUCCESS;
@@ -51,7 +50,6 @@ class MovImm8 implements InstructionInterface
             // NOTE: move instruction for high-bit registers (AH/CH/DH/BH)
             $runtime
                 ->memoryAccessor()
-                ->enableUpdateFlags(false)
                 ->writeToHighBit(
                     $register,
                     $enhancedStreamReader
@@ -65,7 +63,6 @@ class MovImm8 implements InstructionInterface
         // NOTE: move instruction for low-bit registers (AL/CL/DL/BL)
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->writeToLowBit(
                 $register,
                 $enhancedStreamReader

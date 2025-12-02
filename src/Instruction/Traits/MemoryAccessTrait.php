@@ -57,8 +57,6 @@ trait MemoryAccessTrait
     protected function writeMemory8(RuntimeInterface $runtime, int $address, int $value): void
     {
         $ma = $runtime->memoryAccessor();
-        $previousFlagState = $ma->shouldUpdateFlags();
-        $ma->enableUpdateFlags(false);
         try {
             $physical = $this->translateLinear($runtime, $address, true);
             if ($this->writeMmio($runtime, $physical, $value & 0xFF, 8)) {
@@ -67,8 +65,6 @@ trait MemoryAccessTrait
             $ma->writeRawByte($physical, $value & 0xFF);
         } catch (\Throwable) {
             // Address out of bounds - ignore write to unmapped memory
-        } finally {
-            $ma->enableUpdateFlags($previousFlagState);
         }
     }
 
@@ -405,7 +401,7 @@ trait MemoryAccessTrait
     protected function writePhysical32(RuntimeInterface $runtime, int $address, int $value): void
     {
         $runtime->memoryAccessor()->allocate($address, 4, safe: false);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($address, $value, 32);
+        $runtime->memoryAccessor()->writeBySize($address, $value, 32);
     }
 
     /**

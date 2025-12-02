@@ -105,10 +105,10 @@ class Mov64 implements InstructionInterface
         $regType = $this->getRegisterType64($regCode);
 
         if ($is64Bit) {
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $value, 64);
         } else {
             // 32-bit write zero-extends to 64-bit
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value & 0xFFFFFFFF, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $value & 0xFFFFFFFF, 64);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -133,11 +133,11 @@ class Mov64 implements InstructionInterface
         if ($is64Bit) {
             // Read 64-bit immediate
             $imm = $reader->int64();
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $imm, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $imm, 64);
         } else {
             // Read 32-bit immediate, zero-extend
             $imm = $reader->int32() & 0xFFFFFFFF;
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $imm, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $imm, 64);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -174,7 +174,7 @@ class Mov64 implements InstructionInterface
             }
 
             $regType = $this->getRegisterType64($rmCode);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value, $is64Bit ? 64 : 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $value, $is64Bit ? 64 : 64);
         } else {
             // Memory mode: calculate address, then read immediate
             $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);

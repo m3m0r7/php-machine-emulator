@@ -34,7 +34,7 @@ class Movsg implements InstructionInterface
 
         $segment = $modRegRM->destination() + ($runtime->register())::getRaisedSegmentRegister();
         $selector = $runtime->memoryAccessor()->fetch($modRegRM->source())->asByte();
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($segment, $selector);
+        $runtime->memoryAccessor()->write16Bit($segment, $selector);
 
         if ($runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);

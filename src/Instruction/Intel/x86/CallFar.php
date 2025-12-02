@@ -39,8 +39,8 @@ class CallFar implements InstructionInterface
         }
 
         // push return CS:IP (address of next instruction)
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $currentCs, $size);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $returnOffset, $size);
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $currentCs, $size);
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $returnOffset, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {
             if ($runtime->context()->cpu()->isProtectedMode()) {

@@ -244,7 +244,7 @@ trait SegmentTrait
     protected function writeCodeSegment(RuntimeInterface $runtime, int $selector, ?int $overrideCpl = null, ?array $descriptor = null): void
     {
         $normalized = $selector & 0xFFFF;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $normalized);
+        $runtime->memoryAccessor()->write16Bit(RegisterType::CS, $normalized);
         $ctx = $runtime->context()->cpu();
         if ($ctx->isProtectedMode()) {
             $descriptor ??= $this->readSegmentDescriptor($runtime, $normalized);

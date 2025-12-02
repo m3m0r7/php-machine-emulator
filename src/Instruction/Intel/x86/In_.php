@@ -44,7 +44,7 @@ class In_ implements InstructionInterface
         if ($isByte) {
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $value);
         } elseif ($opSize === 32) {
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $value, 32);
+            $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $value, 32);
         } else {
             $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $value);
         }

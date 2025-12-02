@@ -34,11 +34,11 @@ class Leave implements InstructionInterface
 
         // Set SP = BP (release local variable space)
         $bp = $ma->fetch(RegisterType::EBP)->asBytesBySize($stackSize);
-        $ma->enableUpdateFlags(false)->writeBySize(RegisterType::ESP, $bp, $stackSize);
+        $ma->writeBySize(RegisterType::ESP, $bp, $stackSize);
 
         // Pop BP (restore caller's frame pointer)
         $oldBp = $ma->pop(RegisterType::ESP, $stackSize)->asBytesBySize($stackSize);
-        $ma->enableUpdateFlags(false)->writeBySize(RegisterType::EBP, $oldBp, $stackSize);
+        $ma->writeBySize(RegisterType::EBP, $oldBp, $stackSize);
 
         return ExecutionStatus::SUCCESS;
     }

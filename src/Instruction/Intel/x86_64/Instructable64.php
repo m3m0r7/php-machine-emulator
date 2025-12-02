@@ -69,7 +69,7 @@ trait Instructable64
             if ($size === 64) {
                 $regCode = $cpu->rexB() ? ($register | 0b1000) : $register;
                 $regType = $this->getRegisterType64($regCode);
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value, 64);
+                $runtime->memoryAccessor()->writeBySize($regType, $value, 64);
                 return;
             }
 
@@ -78,7 +78,7 @@ trait Instructable64
                 $regCode = $cpu->rexB() ? ($register | 0b1000) : $register;
                 $regType = $this->getRegisterType64($regCode);
                 // Zero-extend: clear upper 32 bits
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value & 0xFFFFFFFF, 64);
+                $runtime->memoryAccessor()->writeBySize($regType, $value & 0xFFFFFFFF, 64);
                 return;
             }
 
@@ -108,16 +108,16 @@ trait Instructable64
     /**
      * Write 8-bit register with 64-bit mode support.
      */
-    protected function write8BitRegister(RuntimeInterface $runtime, int $register, int $value, bool $updateFlags = true): void
+    protected function write8BitRegister(RuntimeInterface $runtime, int $register, int $value): void
     {
         $cpu = $runtime->context()->cpu();
 
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
-            $this->write8BitRegister64($runtime, $register, $value, true, $cpu->rexB(), $updateFlags);
+            $this->write8BitRegister64($runtime, $register, $value, true, $cpu->rexB());
             return;
         }
 
-        $this->baseWrite8BitRegister($runtime, $register, $value, $updateFlags);
+        $this->baseWrite8BitRegister($runtime, $register, $value);
     }
 
     /**
@@ -197,14 +197,14 @@ trait Instructable64
 
         if ($size === 64) {
             $regType = $this->getRegisterType64($regCode);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $value, 64);
             return;
         }
 
         // In 64-bit mode, 32-bit writes zero-extend
         if ($size === 32 && $cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             $regType = $this->getRegisterType64($regCode);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value & 0xFFFFFFFF, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $value & 0xFFFFFFFF, 64);
             return;
         }
 
@@ -258,14 +258,14 @@ trait Instructable64
 
             if ($size === 64) {
                 $regType = $this->getRegisterType64($rmCode);
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value, 64);
+                $runtime->memoryAccessor()->writeBySize($regType, $value, 64);
                 return;
             }
 
             // In 64-bit mode, 32-bit writes zero-extend
             if ($size === 32 && $cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
                 $regType = $this->getRegisterType64($rmCode);
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value & 0xFFFFFFFF, 64);
+                $runtime->memoryAccessor()->writeBySize($regType, $value & 0xFFFFFFFF, 64);
                 return;
             }
 
@@ -418,7 +418,7 @@ trait Instructable64
     {
         $rsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(64);
         $rsp = ($rsp - 8) & 0xFFFFFFFFFFFFFFFF;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::ESP, $rsp, 64);
+        $runtime->memoryAccessor()->writeBySize(RegisterType::ESP, $rsp, 64);
         $this->writeMemory64($runtime, $rsp, $value);
     }
 
@@ -430,7 +430,7 @@ trait Instructable64
         $rsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(64);
         $value = $this->readMemory64($runtime, $rsp);
         $rsp = ($rsp + 8) & 0xFFFFFFFFFFFFFFFF;
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::ESP, $rsp, 64);
+        $runtime->memoryAccessor()->writeBySize(RegisterType::ESP, $rsp, 64);
         return $value;
     }
 }

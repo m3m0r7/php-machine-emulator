@@ -57,11 +57,11 @@ class Syscall implements InstructionInterface
 
         // Save RIP (next instruction address) to RCX
         $rip = $runtime->memory()->offset();
-        $memAccessor->enableUpdateFlags(false)->writeBySize(RegisterType::ECX, $rip, 64);
+        $memAccessor->writeBySize(RegisterType::ECX, $rip, 64);
 
         // Save RFLAGS to R11
         $rflags = $this->readRflags($runtime);
-        $memAccessor->enableUpdateFlags(false)->writeBySize(RegisterType::R11, $rflags, 64);
+        $memAccessor->writeBySize(RegisterType::R11, $rflags, 64);
 
         // Read MSRs (simplified - in real implementation, these would be stored in CPU context)
         $star = $this->readMsr($runtime, self::IA32_STAR);
@@ -74,8 +74,8 @@ class Syscall implements InstructionInterface
         $syscallSs = $syscallCs + 8;
 
         // Update CS and SS
-        $memAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $syscallCs);
-        $memAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::SS, $syscallSs);
+        $memAccessor->write16Bit(RegisterType::CS, $syscallCs);
+        $memAccessor->write16Bit(RegisterType::SS, $syscallSs);
 
         // Mask RFLAGS with FMASK (clear bits that are set in FMASK)
         $newRflags = $rflags & ~$fmask;
@@ -128,7 +128,7 @@ class Syscall implements InstructionInterface
         };
 
         // Set return value in RAX
-        $memAccessor->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $result & 0xFFFFFFFFFFFFFFFF, 64);
+        $memAccessor->writeBySize(RegisterType::EAX, $result & 0xFFFFFFFFFFFFFFFF, 64);
 
         // For exit syscalls, return EXIT status
         if ($syscallNum === 60 || $syscallNum === 231) {
@@ -193,8 +193,8 @@ class Syscall implements InstructionInterface
         $sysretSs = $sysretCs + 8;
 
         // Update CS and SS
-        $memAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $sysretCs);
-        $memAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::SS, $sysretSs);
+        $memAccessor->write16Bit(RegisterType::CS, $sysretCs);
+        $memAccessor->write16Bit(RegisterType::SS, $sysretSs);
 
         // Return to ring 3
         $cpu->setCpl(3);

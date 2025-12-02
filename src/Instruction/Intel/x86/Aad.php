@@ -49,8 +49,8 @@ class Aad implements InstructionInterface
         $result = ($al + ($ah * $base)) & 0xFF;
 
         // AH = 0
-        $ma->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0);
-        $ma->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $result);
+        $ma->writeToHighBit(RegisterType::EAX, 0);
+        $ma->writeToLowBit(RegisterType::EAX, $result);
 
         // Update SF, ZF, PF
         $ma->setSignFlag(($result & 0x80) !== 0);

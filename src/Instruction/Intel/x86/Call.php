@@ -56,7 +56,6 @@ class Call implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->push(RegisterType::ESP, $returnToPush, $opSize);
 
         if ($runtime->option()->shouldChangeOffset()) {

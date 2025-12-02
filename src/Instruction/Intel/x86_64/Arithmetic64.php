@@ -175,10 +175,10 @@ class Arithmetic64 implements InstructionInterface
         // Write result (except for CMP)
         if ($operation !== 'CMP') {
             if ($size === 64) {
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $result, 64);
+                $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $result, 64);
             } else {
                 // 32-bit write zero-extends
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $result & 0xFFFFFFFF, 64);
+                $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $result & 0xFFFFFFFF, 64);
             }
         }
 
@@ -269,10 +269,10 @@ class Arithmetic64 implements InstructionInterface
     {
         $regType = $this->getRegisterType64($regCode);
         if ($size === 64) {
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $value, 64);
         } else {
             // 32-bit write zero-extends to 64-bit
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value & 0xFFFFFFFF, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $value & 0xFFFFFFFF, 64);
         }
     }
 

@@ -28,7 +28,7 @@ class System implements InterruptInterface
     private function a20(RuntimeInterface $runtime): void
     {
         $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         if ($al === 0x01) {
             $runtime->context()->cpu()->enableA20(true);
@@ -44,7 +44,7 @@ class System implements InterruptInterface
      */
     private function getExtendedMemorySize(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         // Return ~63MB of extended memory (max for this function is 64MB - 1KB)
         // This is capped at 0xFFFF (65535 KB)
         $ma->writeBySize(RegisterType::EAX, 0xFC00, 16); // ~63MB
@@ -56,7 +56,7 @@ class System implements InterruptInterface
      */
     private function getSystemConfiguration(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         // Build system configuration table in low memory
         $tableAddr = 0x0000F000; // ROM BIOS area
@@ -102,7 +102,7 @@ class System implements InterruptInterface
     private function wait(RuntimeInterface $runtime): void
     {
         // In emulation, we just return immediately (no real delay)
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $ma->setCarryFlag(false);
     }
 
@@ -111,7 +111,7 @@ class System implements InterruptInterface
      */
     private function moveExtendedMemory(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         $cx = $ma->fetch(RegisterType::ECX)->asBytesBySize(16);
         $es = $ma->fetch(RegisterType::ES)->asByte();
@@ -153,7 +153,7 @@ class System implements InterruptInterface
 
     private function memoryE820(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
@@ -261,14 +261,14 @@ class System implements InterruptInterface
 
     private function unsupported(RuntimeInterface $runtime, int $ah): void
     {
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x86);
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x86);
         $runtime->memoryAccessor()->setCarryFlag(true);
         $runtime->option()->logger()->warning(sprintf('INT 15h function AH=0x%02X not implemented', $ah));
     }
 
     private function fail(RuntimeInterface $runtime, int $errorCode): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $ma->writeToHighBit(RegisterType::EAX, $errorCode);
         $ma->setCarryFlag(true);
     }

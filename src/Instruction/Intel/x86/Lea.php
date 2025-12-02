@@ -37,7 +37,6 @@ class Lea implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->writeBySize(
                 $regCode,
                 $address & $mask,

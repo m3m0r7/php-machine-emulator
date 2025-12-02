@@ -47,7 +47,6 @@ class Loopz implements InstructionInterface
 
         // Write decremented value back
         $runtime->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->writeBySize(RegisterType::ECX, $counter, $size);
 
         // Jump if counter is non-zero AND ZF is set

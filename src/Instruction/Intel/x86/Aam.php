@@ -54,8 +54,8 @@ class Aam implements InstructionInterface
         // AL = AL MOD base
         $newAl = $al % $base;
 
-        $ma->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, $ah);
-        $ma->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $newAl);
+        $ma->writeToHighBit(RegisterType::EAX, $ah);
+        $ma->writeToLowBit(RegisterType::EAX, $newAl);
 
         // Update SF, ZF, PF based on AL
         $ma->setSignFlag(($newAl & 0x80) !== 0);

@@ -28,7 +28,7 @@ class Stosw implements InstructionInterface
         $address = $this->translateLinear($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
 
         $runtime->memoryAccessor()->allocate($address, safe: false);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($address, $value, $opSize);
+        $runtime->memoryAccessor()->writeBySize($address, $value, $opSize);
 
         $step = $this->stepForElement($runtime, $width);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $step);

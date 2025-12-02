@@ -313,7 +313,6 @@ class Runtime implements RuntimeInterface
                         $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
                         throw $e;
                     } finally {
-                        $this->memoryAccessor->enableUpdateFlags(true);
                         $this->context->cpu()->clearTransientOverrides();
                     }
                 }
@@ -338,7 +337,6 @@ class Runtime implements RuntimeInterface
             $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
             throw $e;
         } finally {
-            $this->memoryAccessor->enableUpdateFlags(true);
             $this->context->cpu()->clearTransientOverrides();
         }
     }
@@ -381,7 +379,7 @@ class Runtime implements RuntimeInterface
         }
 
         $loadSegment = $this->bootStream->loadSegment();
-        $this->memoryAccessor->enableUpdateFlags(false)->write16Bit(RegisterType::CS, $loadSegment);
+        $this->memoryAccessor->write16Bit(RegisterType::CS, $loadSegment);
         $this->machine->option()->logger()->debug(
             sprintf('Initialized CS to 0x%04X for bootable stream', $loadSegment)
         );

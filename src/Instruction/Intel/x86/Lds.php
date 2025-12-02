@@ -54,15 +54,13 @@ class Lds implements InstructionInterface
         $segmentReg = $opcode === 0xC4 ? RegisterType::ES : RegisterType::DS;
 
         // Write offset to destination register
-        $ma->enableUpdateFlags(false)
-            ->writeBySize($modRegRM->registerOrOPCode(), $offset, $size);
+        $ma->writeBySize($modRegRM->registerOrOPCode(), $offset, $size);
 
         // Write segment to segment register
-        $ma->enableUpdateFlags(false)
-            ->write16Bit(
-                ($runtime->register())::addressBy($segmentReg),
-                $segment,
-            );
+        $ma->write16Bit(
+            ($runtime->register())::addressBy($segmentReg),
+            $segment,
+        );
 
         return ExecutionStatus::SUCCESS;
     }

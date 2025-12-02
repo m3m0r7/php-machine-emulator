@@ -138,7 +138,7 @@ trait ModRmTrait
     protected function writeRm32(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($modRegRM->registerOrMemoryAddress(), $value, 32);
+            $runtime->memoryAccessor()->writeBySize($modRegRM->registerOrMemoryAddress(), $value, 32);
             return;
         }
 
@@ -165,7 +165,7 @@ trait ModRmTrait
     protected function writeRm64(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($modRegRM->registerOrMemoryAddress(), $value, 64);
+            $runtime->memoryAccessor()->writeBySize($modRegRM->registerOrMemoryAddress(), $value, 64);
             return;
         }
 
@@ -177,7 +177,7 @@ trait ModRmTrait
     abstract protected function readRegisterBySize(RuntimeInterface $runtime, int|\PHPMachineEmulator\Instruction\RegisterType $register, int $size): int;
     abstract protected function writeRegisterBySize(RuntimeInterface $runtime, int|\PHPMachineEmulator\Instruction\RegisterType $register, int $value, int $size): void;
     abstract protected function read8BitRegister(RuntimeInterface $runtime, int $register): int;
-    abstract protected function write8BitRegister(RuntimeInterface $runtime, int $register, int $value, bool $updateFlags = true): void;
+    abstract protected function write8BitRegister(RuntimeInterface $runtime, int $register, int $value): void;
     abstract protected function rmLinearAddress(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, \PHPMachineEmulator\Instruction\RegisterType|null $segmentOverride = null): int;
     abstract protected function readMemory8(RuntimeInterface $runtime, int $address): int;
     abstract protected function readMemory16(RuntimeInterface $runtime, int $address): int;

@@ -115,14 +115,10 @@ trait RegisterAccessTrait
     /**
      * Write value to an 8-bit register.
      */
-    protected function write8BitRegister(RuntimeInterface $runtime, int $register, int $value, bool $updateFlags = true): void
+    protected function write8BitRegister(RuntimeInterface $runtime, int $register, int $value): void
     {
         [$registerType, $isHigh] = $this->decode8BitRegister($register);
         $memoryAccessor = $runtime->memoryAccessor();
-
-        if (!$updateFlags) {
-            $memoryAccessor->enableUpdateFlags(false);
-        }
 
         if ($isHigh) {
             $memoryAccessor->writeToHighBit($registerType, $value);   // AH/CH/DH/BH
@@ -134,14 +130,10 @@ trait RegisterAccessTrait
     /**
      * Write value to an 8-bit register in 64-bit mode.
      */
-    protected function write8BitRegister64(RuntimeInterface $runtime, int $register, int $value, bool $hasRex, bool $rexB, bool $updateFlags = true): void
+    protected function write8BitRegister64(RuntimeInterface $runtime, int $register, int $value, bool $hasRex, bool $rexB): void
     {
         [$registerType, $isHigh, $isExtended] = $this->decode8BitRegister64($register, $hasRex, $rexB);
         $memoryAccessor = $runtime->memoryAccessor();
-
-        if (!$updateFlags) {
-            $memoryAccessor->enableUpdateFlags(false);
-        }
 
         if ($isExtended) {
             $memoryAccessor->writeToLowBit($registerType, $value);
@@ -191,20 +183,20 @@ trait RegisterAccessTrait
         // If RegisterType is passed, use it directly; MemoryAccessor accepts both
         if ($register instanceof RegisterType) {
             match ($size) {
-                8 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit($register, $value),
-                16 => $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($register, $value),
-                32 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, 32),
-                64 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, 64),
-                default => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, $size),
+                8 => $runtime->memoryAccessor()->writeToLowBit($register, $value),
+                16 => $runtime->memoryAccessor()->write16Bit($register, $value),
+                32 => $runtime->memoryAccessor()->writeBySize($register, $value, 32),
+                64 => $runtime->memoryAccessor()->writeBySize($register, $value, 64),
+                default => $runtime->memoryAccessor()->writeBySize($register, $value, $size),
             };
             return;
         }
         match ($size) {
             8 => $this->write8BitRegister($runtime, $register, $value),
-            16 => $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($register, $value),
-            32 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, 32),
-            64 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, 64),
-            default => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, $size),
+            16 => $runtime->memoryAccessor()->write16Bit($register, $value),
+            32 => $runtime->memoryAccessor()->writeBySize($register, $value, 32),
+            64 => $runtime->memoryAccessor()->writeBySize($register, $value, 64),
+            default => $runtime->memoryAccessor()->writeBySize($register, $value, $size),
         };
     }
 
@@ -230,7 +222,7 @@ trait RegisterAccessTrait
         };
         $maskedValue = $value & $mask;
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $maskedValue, $addressSize);
+        $runtime->memoryAccessor()->writeBySize($register, $maskedValue, $addressSize);
     }
 
     /**

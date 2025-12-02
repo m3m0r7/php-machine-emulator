@@ -51,7 +51,7 @@ class Outs implements InstructionInterface
 
         $this->writePort($runtime, $port, $value, $width);
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::ESI, $src + $delta, $runtime->context()->cpu()->addressSize());
+        $runtime->memoryAccessor()->writeBySize(RegisterType::ESI, $src + $delta, $runtime->context()->cpu()->addressSize());
 
         return ExecutionStatus::SUCCESS;
     }

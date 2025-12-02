@@ -29,7 +29,7 @@ class Inc implements InstructionInterface
         // Preserve CF - INC does not affect carry flag
         $savedCf = $ma->shouldCarryFlag();
 
-        $ma->enableUpdateFlags(false)->writeBySize($reg, $result, $size);
+        $ma->writeBySize($reg, $result, $size);
         $ma->updateFlags($result, $size);
 
         // Restore CF

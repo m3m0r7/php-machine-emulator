@@ -64,14 +64,14 @@ class Enter implements InstructionInterface
         }
 
         // Set BP to frame pointer
-        $ma->enableUpdateFlags(false)->writeBySize(RegisterType::EBP, $framePtr, $stackSize);
+        $ma->writeBySize(RegisterType::EBP, $framePtr, $stackSize);
 
         // Allocate local variable space
         $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($stackSize);
         $newSp = ($stackSize === 32)
             ? ($sp - $size) & 0xFFFFFFFF
             : ($sp - $size) & 0xFFFF;
-        $ma->enableUpdateFlags(false)->writeBySize(RegisterType::ESP, $newSp, $stackSize);
+        $ma->writeBySize(RegisterType::ESP, $newSp, $stackSize);
 
         return ExecutionStatus::SUCCESS;
     }

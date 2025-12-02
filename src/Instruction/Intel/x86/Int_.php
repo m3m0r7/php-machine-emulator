@@ -131,11 +131,10 @@ class Int_ implements InstructionInterface
             ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
             ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
 
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $ma->push(RegisterType::ESP, $flags, 16);
         $ma->push(RegisterType::ESP, $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte(), 16);
         $ma->push(RegisterType::ESP, $returnOffset, 16);
-        $runtime->memoryAccessor()->enableUpdateFlags(true);
 
         // Clear IF like real INT.
         $runtime->memoryAccessor()->setInterruptFlag(false);
@@ -256,13 +255,13 @@ class Int_ implements InstructionInterface
             $newEsp = $this->readMemory32($runtime, $tssBase + $espOffset);
             $newSs = $this->readMemory16($runtime, $tssBase + $ssOffset);
 
-            $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+            $ma = $runtime->memoryAccessor();
             $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
             $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $operandSize);
         }
 
         // Push EFLAGS, CS, EIP
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $flags =
             ($ma->shouldCarryFlag() ? 1 : 0) |
             0x2 | // reserved bit always set

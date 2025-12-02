@@ -31,7 +31,6 @@ class PushImm implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->push(RegisterType::ESP, $value, $size);
 
         return ExecutionStatus::SUCCESS;

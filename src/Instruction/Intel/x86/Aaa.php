@@ -61,8 +61,8 @@ class Aaa implements InstructionInterface
         $al = $al & 0x0F;
 
         // Write back the results
-        $ma->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $al);
-        $ma->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, $ah);
+        $ma->writeToLowBit(RegisterType::EAX, $al);
+        $ma->writeToHighBit(RegisterType::EAX, $ah);
 
         // Note: OF, SF, ZF, PF are undefined after AAA
 

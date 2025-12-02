@@ -28,8 +28,6 @@ interface MemoryAccessorInterface
     public function readControlRegister(int $index): int;
     public function writeControlRegister(int $index, int $value): void;
 
-    public function enableUpdateFlags(bool $which): self;
-
     public function shouldZeroFlag(): bool;
     public function shouldSignFlag(): bool;
     public function shouldOverflowFlag(): bool;

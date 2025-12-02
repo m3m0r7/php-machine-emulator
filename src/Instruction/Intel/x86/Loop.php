@@ -46,7 +46,6 @@ class Loop implements InstructionInterface
         if ($operand === -2 && $counter > 1) {
             // This is a delay loop - skip it entirely
             $runtime->memoryAccessor()
-                ->enableUpdateFlags(false)
                 ->writeBySize(RegisterType::ECX, 0, $size);
             return ExecutionStatus::SUCCESS;
         }
@@ -346,17 +345,17 @@ class Loop implements InstructionInterface
 
         // Update EDI (destination pointer) - STOSB increments/decrements
         $newDest = ($destAddr + ($counter * $step)) & 0xFFFFFFFF;
-        $ma->enableUpdateFlags(false)->writeBySize(RegisterType::EDI, $newDest, 32);
+        $ma->writeBySize(RegisterType::EDI, $newDest, 32);
 
         // Update AL to last byte copied (for compatibility)
         if ($counter > 0) {
             $lastSource = ($sourceAddr + (($counter - 1) * $step)) & 0xFFFFFFFF;
             $lastByte = $this->readMemory8($runtime, $lastSource);
-            $ma->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $lastByte);
+            $ma->writeToLowBit(RegisterType::EAX, $lastByte);
         }
 
         // Set ECX to 0 (loop finished)
-        $ma->enableUpdateFlags(false)->writeBySize(RegisterType::ECX, 0, $size);
+        $ma->writeBySize(RegisterType::ECX, 0, $size);
 
         // Set instruction pointer to after the LOOP instruction
         if ($runtime->option()->shouldChangeOffset()) {

@@ -41,7 +41,6 @@ class Pushf implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->push(RegisterType::ESP, $flags, $size);
 
         return ExecutionStatus::SUCCESS;

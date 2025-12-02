@@ -54,7 +54,7 @@ class Disk implements InterruptInterface
     {
         // BIOS reset simply clears errors/carry.
         $runtime->memoryAccessor()->setCarryFlag(false);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
     }
 
     private function getDriveParameters(RuntimeInterface $runtime): void
@@ -74,15 +74,15 @@ class Disk implements InterruptInterface
             $cylinders = 1024;
         }
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00); // AH = 0 (success)
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectors); // AL = sectors per track
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00); // AH = 0 (success)
+        $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectors); // AL = sectors per track
 
         $cl = ($sectors & 0x3F) | ((($cylinders >> 8) & 0x03) << 6);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::ECX, $cl);           // CL
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::ECX, $cylinders - 1);    // CH (max cylinder number)
+        $runtime->memoryAccessor()->writeToLowBit(RegisterType::ECX, $cl);           // CL
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::ECX, $cylinders - 1);    // CH (max cylinder number)
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EDX, $heads - 1);    // DH (max head number)
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EDX, $dl < 0x80 ? 0x01 : 0x01);  // DL = number of drives
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EDX, $heads - 1);    // DH (max head number)
+        $runtime->memoryAccessor()->writeToLowBit(RegisterType::EDX, $dl < 0x80 ? 0x01 : 0x01);  // DL = number of drives
 
         $runtime->memoryAccessor()->setCarryFlag(false);
     }
@@ -201,8 +201,8 @@ class Disk implements InterruptInterface
         $bootStream->setOffset($savedBootOffset);
 
         // update AL with sectors read, AH = 0, clear CF
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorsToRead);
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
+        $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorsToRead);
         $runtime->memoryAccessor()->setCarryFlag(false);
 
         // Track mapping for later addressMap lookups (best-effort)
@@ -214,7 +214,7 @@ class Disk implements InterruptInterface
 
     private function extensionsPresent(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         // EDD version 3.0, features: bit0 (extended disk access), bit1 (EDD)
         $ma->writeToHighBit(RegisterType::EAX, 0x30); // AH = version
         $ma->write16Bit(RegisterType::BX, 0xAA55);
@@ -356,8 +356,8 @@ class Disk implements InterruptInterface
                 ));
             }
 
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorCount);
+            $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
+            $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorCount);
             $runtime->memoryAccessor()->setCarryFlag(false);
 
             // Track mapping for later addressMap lookups
@@ -400,8 +400,8 @@ class Disk implements InterruptInterface
 
         $bootStream->setOffset($savedBootOffset);
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorCount);
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
+        $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorCount);
         $runtime->memoryAccessor()->setCarryFlag(false);
 
         // Track mapping for later addressMap lookups (best-effort)
@@ -436,7 +436,7 @@ class Disk implements InterruptInterface
             $totalSectors = 0x0010_0000; // ~512MB worth
         }
 
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         // size
         $ma->allocate($buffer, 0x1E, safe: false);
@@ -543,8 +543,8 @@ class Disk implements InterruptInterface
         $bufferAddress = $this->segmentLinearAddress($runtime, $es, $bx, $addressSize);
 
         // Write is a no-op for read-only media, but we accept the data
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $sectorsToWrite);
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
+        $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorsToWrite);
         $runtime->memoryAccessor()->setCarryFlag(false);
     }
 
@@ -569,14 +569,14 @@ class Disk implements InterruptInterface
         }
 
         // Write is a no-op for read-only media, but we accept the data
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
         $runtime->memoryAccessor()->setCarryFlag(false);
     }
 
     private function getDiskType(RuntimeInterface $runtime): void
     {
         $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         if ($dl >= 0x80) {
             // Hard disk - return type 3
@@ -601,7 +601,7 @@ class Disk implements InterruptInterface
      */
     private function handleBootInfo(RuntimeInterface $runtime, int $al): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $bootStream = $runtime->bootStream();
         $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
 
@@ -681,7 +681,7 @@ class Disk implements InterruptInterface
     private function fail(RuntimeInterface $runtime, int $status): void
     {
         $runtime->option()->logger()->error(sprintf('INT 13h failed with status 0x%02X', $status));
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, $status);
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, $status);
         $runtime->memoryAccessor()->setCarryFlag(true);
     }
 

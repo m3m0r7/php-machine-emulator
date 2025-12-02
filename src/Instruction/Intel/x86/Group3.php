@@ -179,7 +179,7 @@ class Group3 implements InstructionInterface
 
         $operand = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
         $acc = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         if ($opSize === 16) {
             $product = ($acc & 0xFFFF) * ($operand & 0xFFFF);
@@ -243,7 +243,6 @@ class Group3 implements InstructionInterface
         $mask = $this->maskForSize($opSize);
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->writeBySize(RegisterType::EAX, $product & $mask, $opSize)
             ->writeBySize(
                 RegisterType::EDX,
@@ -307,7 +306,6 @@ class Group3 implements InstructionInterface
                     RegisterType::EAX,
                     $quotient & 0xFFFF,
                 )
-                ->enableUpdateFlags(false)
                 ->write16Bit(
                     RegisterType::EDX,
                     $remainder & 0xFFFF,
@@ -324,7 +322,6 @@ class Group3 implements InstructionInterface
             }
 
             $ma
-                ->enableUpdateFlags(false)
                 ->writeBySize(RegisterType::EAX, $quotient & 0xFFFFFFFF, 32)
                 ->writeBySize(RegisterType::EDX, $remainder & 0xFFFFFFFF, 32);
         }
@@ -380,7 +377,6 @@ class Group3 implements InstructionInterface
 
                 $ma
                     ->write16Bit(RegisterType::EAX, $quotient & 0xFFFF)
-                    ->enableUpdateFlags(false)
                     ->write16Bit(RegisterType::EDX, $remainder & 0xFFFF);
             } else {
                 $axRaw = $ma->fetch(RegisterType::EAX)->asBytesBySize(32);
@@ -397,7 +393,6 @@ class Group3 implements InstructionInterface
                 }
 
                 $ma
-                    ->enableUpdateFlags(false)
                     ->writeBySize(RegisterType::EAX, $quotient & 0xFFFFFFFF, 32)
                     ->writeBySize(RegisterType::EDX, $remainder & 0xFFFFFFFF, 32);
             }

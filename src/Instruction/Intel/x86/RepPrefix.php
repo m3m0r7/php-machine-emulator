@@ -122,7 +122,7 @@ class RepPrefix implements InstructionInterface
             if ($size === 8) {
                 $ma->writeRawByte($address, $value);
             } else {
-                $ma->enableUpdateFlags(false)->writeBySize($address, $value, $size);
+                $ma->writeBySize($address, $value, $size);
             }
             $di += $step;
         }
@@ -155,7 +155,7 @@ class RepPrefix implements InstructionInterface
             if ($size === 8) {
                 $ma->writeRawByte($destAddr, $value);
             } else {
-                $ma->enableUpdateFlags(false)->writeBySize($destAddr, $value, $size);
+                $ma->writeBySize($destAddr, $value, $size);
             }
 
             $si += $step;

@@ -32,7 +32,7 @@ class PushSeg implements InstructionInterface
         };
 
         $value = $runtime->memoryAccessor()->fetch($seg)->asByte();
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(
+        $runtime->memoryAccessor()->push(
             RegisterType::ESP,
             $value,
             $runtime->context()->cpu()->operandSize(),

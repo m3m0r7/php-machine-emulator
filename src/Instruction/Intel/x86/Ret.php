@@ -25,7 +25,7 @@ class Ret implements InstructionInterface
 
         $size = $runtime->context()->cpu()->operandSize();
 
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $espBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize($size);
         $returnIp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 

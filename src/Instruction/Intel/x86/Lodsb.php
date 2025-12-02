@@ -38,7 +38,6 @@ class Lodsb implements InstructionInterface
         ));
 
         $runtime->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->writeToLowBit(
                 RegisterType::EAX,
                 $value,

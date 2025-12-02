@@ -28,7 +28,6 @@ class AndImm8 implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->writeToLowBit(RegisterType::EAX, $result);
 
         // AND always clears CF and OF, updates SF/ZF/PF based on result

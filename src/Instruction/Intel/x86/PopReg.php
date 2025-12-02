@@ -23,7 +23,6 @@ class PopReg implements InstructionInterface
         $size = $runtime->context()->cpu()->operandSize();
         $stackedValue = $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->pop(RegisterType::ESP, $size)
             ->asBytesBySize($size);
 
@@ -40,7 +39,6 @@ class PopReg implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->writeBySize(
                 $targetReg,
                 $stackedValue,

@@ -115,7 +115,7 @@ class Group5 implements InstructionInterface
         $target = $this->readRm($runtime, $reader, $modRegRM, $size);
         $pos = $runtime->memory()->offset();
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $pos, $runtime->context()->cpu()->operandSize());
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $pos, $runtime->context()->cpu()->operandSize());
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime->memory()->setOffset($target);
@@ -175,8 +175,8 @@ class Group5 implements InstructionInterface
         }
 
         // push return CS:IP on current stack
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $currentCs, $size);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $returnOffset, $size);
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $currentCs, $size);
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $returnOffset, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {
             if ($runtime->context()->cpu()->isProtectedMode()) {
@@ -230,7 +230,7 @@ class Group5 implements InstructionInterface
     {
         $size = $runtime->context()->cpu()->operandSize();
         $value = $this->readRm($runtime, $reader, $modRegRM, $size);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $value, $size);
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $value, $size);
         return ExecutionStatus::SUCCESS;
     }
 

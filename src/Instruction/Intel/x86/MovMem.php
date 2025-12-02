@@ -57,7 +57,7 @@ class MovMem implements InstructionInterface
             ));
         }
 
-        $this->write8BitRegister($runtime, $modRegRM->destination(), $value, updateFlags: false);
+        $this->write8BitRegister($runtime, $modRegRM->destination(), $value);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -29,7 +29,6 @@ class PushReg implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
             ->push(RegisterType::ESP, $fetchResult, $size);
 
         return ExecutionStatus::SUCCESS;

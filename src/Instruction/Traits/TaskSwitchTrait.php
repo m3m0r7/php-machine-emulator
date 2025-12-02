@@ -134,7 +134,7 @@ trait TaskSwitchTrait
         $newCpl = $this->computeCplForTransfer($runtime, $targetSelector, $targetDesc);
         $privilegeChange = $newCpl < $cpl;
 
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $oldSs = $ma->fetch(RegisterType::SS)->asByte();
         $oldEsp = $ma->fetch(RegisterType::ESP)->asBytesBySize($opSize);
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
@@ -263,7 +263,7 @@ trait TaskSwitchTrait
 
         // Load new TSS state (basic parts).
         $newBase = $newDesc['base'];
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $runtime->memoryAccessor()->writeControlRegister(3, $this->readMemory32($runtime, $newBase + $tss32['cr3']));
         $newEip = $this->readMemory32($runtime, $newBase + $tss32['eip']);
         $newEflags = $this->readMemory32($runtime, $newBase + $tss32['eflags']);

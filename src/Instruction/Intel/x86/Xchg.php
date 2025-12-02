@@ -38,8 +38,8 @@ class Xchg implements InstructionInterface
                 ));
             }
 
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $rv, $opSize);
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($target, $ax, $opSize);
+            $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $rv, $opSize);
+            $runtime->memoryAccessor()->writeBySize($target, $ax, $opSize);
             return ExecutionStatus::SUCCESS;
         }
 
@@ -61,11 +61,11 @@ class Xchg implements InstructionInterface
 
             // Write swapped values
             if ($isRegister8) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $reg, updateFlags: false);
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $reg);
             } else {
                 $this->writeMemory8($runtime, $linearAddress8, $reg);
             }
-            $this->write8BitRegister($runtime, $modRegRM->registerOrOPCode(), $rm, updateFlags: false);
+            $this->write8BitRegister($runtime, $modRegRM->registerOrOPCode(), $rm);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -106,7 +106,7 @@ class Xchg implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddress, $reg);
             }
         }
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($modRegRM->registerOrOPCode(), $rm, $opSize);
+        $runtime->memoryAccessor()->writeBySize($modRegRM->registerOrOPCode(), $rm, $opSize);
 
         return ExecutionStatus::SUCCESS;
     }

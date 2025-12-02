@@ -72,8 +72,7 @@ class Video implements InterruptInterface
 
         $runtime
             ->memoryAccessor()
-            ->enableUpdateFlags(false)
-            ->writeBySize(
+                        ->writeBySize(
                 $runtime->video()->videoTypeFlagAddress(),
                 // NOTE: Store width, height, and video type in a single flag address.
                 // width: 16 bits (bits 48..63)
@@ -109,9 +108,9 @@ class Video implements InterruptInterface
     protected function getCursorPosition(RuntimeInterface $runtime): void
     {
         $edx = ($this->cursorRow << 8) | ($this->cursorCol & 0xFF);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EDX, $edx);
+        $runtime->memoryAccessor()->write16Bit(RegisterType::EDX, $edx);
         // BH = page number (0), BL = attribute. Set BX to 0 for page 0
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EBX, 0);
+        $runtime->memoryAccessor()->write16Bit(RegisterType::EBX, 0);
     }
 
     protected function getCurrentVideoMode(RuntimeInterface $runtime): void
@@ -120,7 +119,7 @@ class Video implements InterruptInterface
         // Write AH (high byte of EAX low word) with 0x20 (text mode, 8x16 font)
         // Combined: AH:AL = 0x2003 for mode 3
         $axValue = (0x20 << 8) | ($this->currentMode & 0xFF);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $axValue);
+        $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $axValue);
     }
 
     protected function handlePaletteControl(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
@@ -204,7 +203,7 @@ class Video implements InterruptInterface
         $ax = $fetchResult->asByte();
         $ah = ($ax >> 8) & 0xFF;
         $al = $ax & 0xFF;
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         if (!self::$vbeInitialized) {
             $this->initVbeStructures($runtime);
@@ -283,7 +282,7 @@ class Video implements InterruptInterface
 
     private function vbeGetInfo(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $addr = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize()));
         // Zero 512 bytes
         for ($i = 0; $i < 512; $i++) {
@@ -304,7 +303,7 @@ class Video implements InterruptInterface
 
     private function vbeGetModeInfo(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $mode = $ma->fetch(RegisterType::ECX)->asBytesBySize(16) & 0xFFFF;
         $dest = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize()));
         // Only one mode: 0x141
@@ -322,7 +321,7 @@ class Video implements InterruptInterface
 
     private function vbeSetMode(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $mode = $ma->fetch(RegisterType::EBX)->asBytesBySize(16) & 0x1FF;
         if ($mode === 0x141) {
             $this->currentMode = $mode;
@@ -334,7 +333,7 @@ class Video implements InterruptInterface
 
     private function vbeGetCurrentMode(RuntimeInterface $runtime): void
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $ma->write16Bit(RegisterType::BX, $this->currentMode & 0x1FF);
         $ma->write16Bit(RegisterType::AX, 0x004F);
     }

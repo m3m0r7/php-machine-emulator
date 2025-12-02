@@ -19,7 +19,7 @@ class Popf implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
         $size = $runtime->context()->cpu()->operandSize();
         $flags = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 

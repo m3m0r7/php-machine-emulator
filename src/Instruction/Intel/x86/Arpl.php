@@ -39,7 +39,7 @@ class Arpl implements InstructionInterface
         $destRpl = $dest & 0x3;
         $srcRpl = $src & 0x3;
 
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         if ($destRpl < $srcRpl) {
             $newVal = ($dest & ~0x3) | $srcRpl;

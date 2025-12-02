@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel;
 
-use PHPMachineEmulator\Exception\OperationNotFoundException;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\Intel\x86_64\RexPrefix;

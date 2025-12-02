@@ -72,7 +72,7 @@ class AddImm8 implements InstructionInterface
         if ($isByte) {
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $result);
         } else {
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $result, $size);
+            $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $result, $size);
         }
 
         $runtime

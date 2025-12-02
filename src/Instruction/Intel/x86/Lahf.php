@@ -33,7 +33,7 @@ class Lahf implements InstructionInterface
             ($ma->shouldSignFlag() ? 0x80 : 0);          // bit 7: SF
 
         // Write to AH (high byte of AX), not AL
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, $flags);
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, $flags);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -30,7 +30,7 @@ class Lodsw implements InstructionInterface
             ? $this->readMemory32($runtime, $address)
             : $this->readMemory16($runtime, $address);
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $value, $opSize);
+        $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $value, $opSize);
 
         $step = $this->stepForElement($runtime, $width);
         $this->writeIndex($runtime, RegisterType::ESI, $si + $step);

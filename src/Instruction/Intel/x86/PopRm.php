@@ -30,7 +30,7 @@ class PopRm implements InstructionInterface
         }
 
         $opSize = $runtime->context()->cpu()->operandSize();
-        $value = $runtime->memoryAccessor()->enableUpdateFlags(false)->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+        $value = $runtime->memoryAccessor()->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
 
         if ($opSize === 32) {
             $this->writeRm($runtime, $reader, $modRegRM, $value, 32);

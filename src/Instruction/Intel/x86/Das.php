@@ -52,7 +52,7 @@ class Das implements InstructionInterface
         }
 
         // Write back the result
-        $ma->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $al);
+        $ma->writeToLowBit(RegisterType::EAX, $al);
 
         // Update flags (QEMU style)
         $ma->setAuxiliaryCarryFlag($af);

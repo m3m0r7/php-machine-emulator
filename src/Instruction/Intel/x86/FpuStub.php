@@ -97,7 +97,7 @@ class FpuStub implements InstructionInterface
         $next = $reader->streamReader()->byte();
         if ($next === 0xE3) {
             // FNINIT
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte());
+            $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte());
             return ExecutionStatus::SUCCESS;
         }
 
@@ -142,7 +142,7 @@ class FpuStub implements InstructionInterface
         $next = $reader->streamReader()->byte();
         if ($next === 0xE0) {
             // FNSTSW AX
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, 0);
+            $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, 0);
             return ExecutionStatus::SUCCESS;
         }
 

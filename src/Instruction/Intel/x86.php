@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel;
 
-use PHPMachineEmulator\Exception\OperationNotFoundException;
+use PHPMachineEmulator\Exception\InvalidOpcodeException;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\AddImm8;
@@ -185,9 +185,7 @@ class x86 implements InstructionListInterface
 
     public function getInstructionByOperationCode(int $opcode): InstructionInterface
     {
-        return $this->instructionList()[$opcode] ?? throw new OperationNotFoundException(
-            sprintf('Operation not found: 0x%04X', $opcode),
-        );
+        return $this->instructionList()[$opcode] ?? throw new InvalidOpcodeException($opcode);
     }
 
     public function tryMatchMultiByteOpcode(array $bytes): ?array

@@ -24,7 +24,6 @@ class MemoryAccessor implements MemoryAccessorInterface
     protected bool $carryFlag = false;
     protected bool $parityFlag = false;
     protected bool $auxiliaryCarryFlag = false;
-    protected bool $enableUpdateFlags = false;
     protected bool $directionFlag = false;
     protected bool $interruptFlag = false;
     protected bool $instructionFetch = false;
@@ -247,11 +246,6 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $wroteValue = ($value ?? 0) & 0b11111111;
 
-
-        if ($this->enableUpdateFlags) {
-            $this->updateFlags($value);
-        }
-
         $this->processObservers(
             $address,
             $previousValue === null
@@ -260,18 +254,6 @@ class MemoryAccessor implements MemoryAccessorInterface
             $wroteValue,
         );
     }
-
-    public function enableUpdateFlags(bool $which): self
-    {
-        $this->enableUpdateFlags = $which;
-        return $this;
-    }
-
-    public function shouldUpdateFlags(): bool
-    {
-        return $this->enableUpdateFlags;
-    }
-
 
     public function updateFlags(int|null $value, int $size = 16): self
     {
@@ -818,14 +800,11 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     private function handlePaeLargePage(int $pde, int $pdeAddr, int $linear, bool $isWrite, bool $user, bool $nxe): int
     {
-        $prevFlag = $this->enableUpdateFlags;
-        $this->enableUpdateFlags = false;
         $pde |= 0x20;
         if ($isWrite) {
             $pde |= 0x40;
         }
         $this->writePhysical64($pdeAddr, $pde);
-        $this->enableUpdateFlags = $prevFlag;
 
         if ($this->shouldInstructionFetch() && $nxe && (($pde >> 63) & 0x1)) {
             $err = 0x01 | ($user ? 0b100 : 0) | 0x10;
@@ -842,14 +821,11 @@ class MemoryAccessor implements MemoryAccessorInterface
         $this->checkPageEntryUserAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
         $this->checkPageEntryWriteAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
 
-        $prevFlag = $this->enableUpdateFlags;
-        $this->enableUpdateFlags = false;
         $pde |= 0x20;
         if ($isWrite) {
             $pde |= 0x40;
         }
         $this->writePhysical32($pdeAddr, $pde);
-        $this->enableUpdateFlags = $prevFlag;
 
         $phys = ($pde & 0xFFC00000) + ($linear & 0x3FFFFF);
         return $phys & 0xFFFFFFFF;
@@ -857,8 +833,6 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     private function updateAccessedDirtyBits64(int $pdeAddr, int $pde, int $pteAddr, int $pte, bool $isWrite): void
     {
-        $prevFlag = $this->enableUpdateFlags;
-        $this->enableUpdateFlags = false;
         $pde |= 0x20;
         $this->writePhysical64($pdeAddr, $pde);
         $pte |= 0x20;
@@ -866,13 +840,10 @@ class MemoryAccessor implements MemoryAccessorInterface
             $pte |= 0x40;
         }
         $this->writePhysical64($pteAddr, $pte);
-        $this->enableUpdateFlags = $prevFlag;
     }
 
     private function updateAccessedDirtyBits32(int $pdeAddr, int $pde, int $pteAddr, int $pte, bool $isWrite): void
     {
-        $prevFlag = $this->enableUpdateFlags;
-        $this->enableUpdateFlags = false;
         $pde |= 0x20;
         $this->writePhysical32($pdeAddr, $pde);
         $pte |= 0x20;
@@ -880,7 +851,6 @@ class MemoryAccessor implements MemoryAccessorInterface
             $pte |= 0x40;
         }
         $this->writePhysical32($pteAddr, $pte);
-        $this->enableUpdateFlags = $prevFlag;
     }
 
     private function checkExecuteDisable64(int $pte, int $linear, bool $user, bool $nxe): void

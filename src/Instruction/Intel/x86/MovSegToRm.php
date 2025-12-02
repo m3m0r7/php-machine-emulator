@@ -29,7 +29,7 @@ class MovSegToRm implements InstructionInterface
         $value = $runtime->memoryAccessor()->fetch($seg)->asByte();
 
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($modRegRM->registerOrMemoryAddress(), $value);
+            $runtime->memoryAccessor()->write16Bit($modRegRM->registerOrMemoryAddress(), $value);
         } else {
             $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
             $runtime->memoryAccessor()->allocate($address, safe: false);

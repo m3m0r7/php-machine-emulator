@@ -50,7 +50,7 @@ class Pop64 implements InstructionInterface
 
         // Write to register
         $regType = $this->getRegisterType64($regCode);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($regType, $value, 64);
+        $runtime->memoryAccessor()->writeBySize($regType, $value, 64);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -70,7 +70,7 @@ class Keyboard implements InterruptInterface
 
             default:
                 // Unsupported function, return 0
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, 0);
+                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, 0);
                 break;
         }
     }
@@ -121,7 +121,7 @@ class Keyboard implements InterruptInterface
                     ));
 
                     // AH = scan code, AL = ASCII
-                    $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $keyCode & 0xFFFF);
+                    $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode & 0xFFFF);
                     return;
                 }
             } else {
@@ -146,7 +146,7 @@ class Keyboard implements InterruptInterface
                 $this->lastKeyTime = $currentTimeMs;
 
                 // Key available: ZF=0, AX=keycode
-                $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $keyCode & 0xFFFF);
+                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode & 0xFFFF);
                 // Clear ZF (key available)
                 $runtime->memoryAccessor()->setZeroFlag(false);
             } else {

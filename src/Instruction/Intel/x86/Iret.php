@@ -20,7 +20,7 @@ class Iret implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $opSize = $runtime->context()->cpu()->operandSize();
-        $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $ma = $runtime->memoryAccessor();
 
         $ip = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
         $cs = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);

@@ -7,7 +7,7 @@ namespace PHPMachineEmulator\Runtime;
 use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Backtrace\Frame\FrameProxy;
 use PHPMachineEmulator\Backtrace\Stream\StreamReaderProxy;
-use PHPMachineEmulator\Exception\OperationNotFoundException;
+use PHPMachineEmulator\Exception\InvalidOpcodeException;
 use PHPMachineEmulator\Frame\FrameSetInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\MachineInterface;
@@ -86,7 +86,7 @@ class DebugRuntime extends Runtime implements RuntimeInterface
             $result = parent::execute($opcodes);
             $class = new \ReflectionClass($instruction);
             $mnemonic = $class->getShortName();
-        } catch (OperationNotFoundException) {
+        } catch (InvalidOpcodeException) {
             $mnemonic = 'Unknown';
         }
 

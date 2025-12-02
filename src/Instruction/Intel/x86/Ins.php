@@ -51,7 +51,7 @@ class Ins implements InstructionInterface
             default => null,
         };
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EDI, $dest + $delta, $runtime->context()->cpu()->addressSize());
+        $runtime->memoryAccessor()->writeBySize(RegisterType::EDI, $dest + $delta, $runtime->context()->cpu()->addressSize());
 
         return ExecutionStatus::SUCCESS;
     }

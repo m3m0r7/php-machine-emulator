@@ -33,7 +33,7 @@ class CbwCwd implements InstructionInterface
                 $ax = $ma->fetch(RegisterType::EAX)->asByte();
                 $signBit = ($ax & 0x8000) !== 0;
                 $eax = $signBit ? (0xFFFF0000 | $ax) : $ax;
-                $ma->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $eax, 32);
+                $ma->writeBySize(RegisterType::EAX, $eax, 32);
             }
             return ExecutionStatus::SUCCESS;
         }
@@ -48,7 +48,7 @@ class CbwCwd implements InstructionInterface
             // CDQ: sign-extend EAX into EDX:EAX
             $eax = $ma->fetch(RegisterType::EAX)->asBytesBySize(32);
             $edx = ($eax & 0x80000000) ? 0xFFFFFFFF : 0x00000000;
-            $ma->enableUpdateFlags(false)->writeBySize(RegisterType::EDX, $edx, 32);
+            $ma->writeBySize(RegisterType::EDX, $edx, 32);
         }
 
         return ExecutionStatus::SUCCESS;

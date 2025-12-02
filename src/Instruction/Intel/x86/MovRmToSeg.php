@@ -33,7 +33,7 @@ class MovRmToSeg implements InstructionInterface
             $value
         ));
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($seg, $value);
+        $runtime->memoryAccessor()->write16Bit($seg, $value);
 
         if ($seg === RegisterType::SS) {
             $esp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(
