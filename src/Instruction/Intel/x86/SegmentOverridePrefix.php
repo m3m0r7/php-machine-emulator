@@ -20,7 +20,7 @@ class SegmentOverridePrefix implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $segment = $this->map()[$opcode];
-        $runtime->setSegmentOverride($segment);
+        $runtime->context()->cpu()->setSegmentOverride($segment);
 
         // Execute the following opcode with the override applied.
         $nextOpcode = $runtime->memory()->byte();

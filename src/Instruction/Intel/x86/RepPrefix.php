@@ -133,7 +133,7 @@ class RepPrefix implements InstructionInterface
     private function bulkMovs(RuntimeInterface $runtime, int $count, int $size, int $step): void
     {
         $ma = $runtime->memoryAccessor();
-        $sourceSegment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $sourceSegment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $di = $this->readIndex($runtime, RegisterType::EDI);

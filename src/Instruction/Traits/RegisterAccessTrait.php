@@ -155,11 +155,21 @@ trait RegisterAccessTrait
     /**
      * Read value from a register by size.
      *
-     * @param int $register The register code
+     * @param int|RegisterType $register The register code or RegisterType
      * @param int $size Operand size (8, 16, 32, or 64)
      */
-    protected function readRegisterBySize(RuntimeInterface $runtime, int $register, int $size): int
+    protected function readRegisterBySize(RuntimeInterface $runtime, int|RegisterType $register, int $size): int
     {
+        // If RegisterType is passed, use it directly; MemoryAccessor accepts both
+        if ($register instanceof RegisterType) {
+            return match ($size) {
+                8 => $runtime->memoryAccessor()->fetch($register)->asLowBit(),
+                16 => $runtime->memoryAccessor()->fetch($register)->asByte(),
+                32 => $runtime->memoryAccessor()->fetch($register)->asBytesBySize(32),
+                64 => $runtime->memoryAccessor()->fetch($register)->asBytesBySize(64),
+                default => $runtime->memoryAccessor()->fetch($register)->asBytesBySize($size),
+            };
+        }
         return match ($size) {
             8 => $this->read8BitRegister($runtime, $register),
             16 => $runtime->memoryAccessor()->fetch($register)->asByte(),
@@ -172,12 +182,23 @@ trait RegisterAccessTrait
     /**
      * Write value to a register by size.
      *
-     * @param int $register The register code
+     * @param int|RegisterType $register The register code or RegisterType
      * @param int $value The value to write
      * @param int $size Operand size (8, 16, 32, or 64)
      */
-    protected function writeRegisterBySize(RuntimeInterface $runtime, int $register, int $value, int $size): void
+    protected function writeRegisterBySize(RuntimeInterface $runtime, int|RegisterType $register, int $value, int $size): void
     {
+        // If RegisterType is passed, use it directly; MemoryAccessor accepts both
+        if ($register instanceof RegisterType) {
+            match ($size) {
+                8 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit($register, $value),
+                16 => $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($register, $value),
+                32 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, 32),
+                64 => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, 64),
+                default => $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize($register, $value, $size),
+            };
+            return;
+        }
         match ($size) {
             8 => $this->write8BitRegister($runtime, $register, $value),
             16 => $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit($register, $value),

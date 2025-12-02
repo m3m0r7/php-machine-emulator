@@ -174,8 +174,8 @@ trait ModRmTrait
     }
 
     // Abstract methods that must be implemented by using class/trait
-    abstract protected function readRegisterBySize(RuntimeInterface $runtime, int $register, int $size): int;
-    abstract protected function writeRegisterBySize(RuntimeInterface $runtime, int $register, int $value, int $size): void;
+    abstract protected function readRegisterBySize(RuntimeInterface $runtime, int|\PHPMachineEmulator\Instruction\RegisterType $register, int $size): int;
+    abstract protected function writeRegisterBySize(RuntimeInterface $runtime, int|\PHPMachineEmulator\Instruction\RegisterType $register, int $value, int $size): void;
     abstract protected function read8BitRegister(RuntimeInterface $runtime, int $register): int;
     abstract protected function write8BitRegister(RuntimeInterface $runtime, int $register, int $value, bool $updateFlags = true): void;
     abstract protected function rmLinearAddress(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, \PHPMachineEmulator\Instruction\RegisterType|null $segmentOverride = null): int;

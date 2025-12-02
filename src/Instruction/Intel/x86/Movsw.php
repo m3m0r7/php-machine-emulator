@@ -24,7 +24,7 @@ class Movsw implements InstructionInterface
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
-        $sourceSegment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $sourceSegment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         $address = $this->segmentOffsetAddress($runtime, $sourceSegment, $si);
         $value = $opSize === 32

@@ -20,14 +20,17 @@ interface RuntimeInterface
     public function start(): void;
     public function addressMap(): AddressMapInterface;
     public function memoryAccessor(): MemoryAccessorInterface;
-    public function execute(int $opcode): ExecutionStatus;
+    /**
+     * Execute an instruction.
+     *
+     * @param int|int[] $opcodes Single opcode or array of opcode bytes
+     */
+    public function execute(int|array $opcodes): ExecutionStatus;
     public function shutdown(callable $callback): self;
     public function register(): RegisterInterface;
     public function frame(): FrameInterface;
     public function option(): OptionInterface;
     public function video(): VideoInterface;
-    public function segmentOverride(): ?\PHPMachineEmulator\Instruction\RegisterType;
-    public function setSegmentOverride(?\PHPMachineEmulator\Instruction\RegisterType $segment): void;
     public function memory(): ?MemoryStream;
     public function bootStream(): ?BootableStreamInterface;
 }

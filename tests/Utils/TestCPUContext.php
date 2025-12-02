@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\ApicState;
 use PHPMachineEmulator\Instruction\Intel\x86\Cmos;
 use PHPMachineEmulator\Instruction\Intel\x86\KeyboardController;
 use PHPMachineEmulator\Instruction\Intel\x86\PicState;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeCPUContextInterface;
 
 class TestCPUContext implements RuntimeCPUContextInterface
@@ -32,6 +33,7 @@ class TestCPUContext implements RuntimeCPUContextInterface
     private bool $nt = false;
     private int $interruptDeliveryBlock = 0;
     private int $rex = 0;
+    private ?RegisterType $segmentOverride = null;
     private PicState $picState;
     private ApicState $apicState;
     private KeyboardController $keyboardController;
@@ -137,6 +139,18 @@ class TestCPUContext implements RuntimeCPUContextInterface
     {
         $this->operandSizeOverride = false;
         $this->addressSizeOverride = false;
+        $this->segmentOverride = null;
+        $this->clearRex();
+    }
+
+    public function setSegmentOverride(?RegisterType $segment): void
+    {
+        $this->segmentOverride = $segment;
+    }
+
+    public function segmentOverride(): ?RegisterType
+    {
+        return $this->segmentOverride;
     }
 
     public function setGdtr(int $base, int $limit): void

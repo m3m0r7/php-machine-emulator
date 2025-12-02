@@ -25,7 +25,7 @@ class MovMoffset implements InstructionInterface
             ? $enhancedStreamReader->dword()
             : $enhancedStreamReader->short();
         $opSize = $runtime->context()->cpu()->operandSize();
-        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
         $linearOffset = $this->segmentOffsetAddress($runtime, $segment, $offset);
 
         $ip = $runtime->memory()->offset();

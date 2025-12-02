@@ -20,7 +20,7 @@ class Lodsb implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $si = $this->readIndex($runtime, RegisterType::ESI);
-        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         $linearAddr = $this->segmentOffsetAddress($runtime, $segment, $si);
         $value = $this->readMemory8($runtime, $linearAddr);

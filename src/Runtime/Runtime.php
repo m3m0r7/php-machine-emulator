@@ -39,7 +39,6 @@ class Runtime implements RuntimeInterface
     protected TickerRegistryInterface $tickerRegistry;
     protected InterruptDeliveryHandlerInterface $interruptDeliveryHandler;
     protected array $shutdown = [];
-    protected ?RegisterType $segmentOverride = null;
     protected int $instructionCount = 0;
     protected MemoryStream $memory;
 
@@ -145,24 +144,53 @@ class Runtime implements RuntimeInterface
     {
         $this->initialize();
 
+        $instructionList = $this->architectureProvider->instructionList();
+        $maxOpcodeLength = $instructionList->getMaxOpcodeLength();
+
         while (!$this->memory->isEOF()) {
             $this->instructionCount++;
             $this->tickTimers();
             $ipBefore = $this->memory->offset();
             $this->memoryAccessor->setInstructionFetch(true);
-            $opcode = $this->memory->byte();
+
+            // Read first byte
+            $firstByte = $this->memory->byte();
+            $opcodes = [$firstByte];
+
+            // Try to match multi-byte opcodes
+            if ($maxOpcodeLength > 1 && !$this->memory->isEOF()) {
+                $startPos = $this->memory->offset();
+                $peekBytes = [$firstByte];
+
+                // Peek ahead for potential multi-byte opcode
+                for ($i = 1; $i < $maxOpcodeLength && !$this->memory->isEOF(); $i++) {
+                    $peekBytes[] = $this->memory->byte();
+                    $matched = $instructionList->tryMatchMultiByteOpcode($peekBytes);
+                    if ($matched !== null) {
+                        $opcodes = $peekBytes;
+                        break;
+                    }
+                }
+
+                // If no multi-byte match found, rewind to after first byte
+                if (count($opcodes) === 1) {
+                    $this->memory->setOffset($startPos);
+                }
+            }
+
             $this->memoryAccessor->setInstructionFetch(false);
 
             // Debug: trace ALL opcodes with full register state
             $cf = $this->memoryAccessor->shouldCarryFlag() ? 1 : 0;
             $eax = $this->memoryAccessor->fetch(\PHPMachineEmulator\Instruction\RegisterType::EAX)->asBytesBySize(32);
             $edx = $this->memoryAccessor->fetch(\PHPMachineEmulator\Instruction\RegisterType::EDX)->asBytesBySize(32);
+            $opcodeStr = implode(' ', array_map(fn($b) => sprintf('0x%02X', $b), $opcodes));
             $this->machine->option()->logger()->debug(sprintf(
-                'EXEC: IP=0x%04X op=0x%02X CF=%d EAX=0x%08X EDX=0x%08X',
-                $ipBefore, $opcode, $cf, $eax, $edx
+                'EXEC: IP=0x%04X op=%s CF=%d EAX=0x%08X EDX=0x%08X',
+                $ipBefore, $opcodeStr, $cf, $eax, $edx
             ));
 
-            $result = $this->execute($opcode);
+            $result = $this->execute($opcodes);
             if ($result === ExecutionStatus::EXIT) {
                 $this->machine->option()->logger()->info('Exited program');
                 $this->processShutdownCallbacks();
@@ -258,30 +286,48 @@ class Runtime implements RuntimeInterface
             ->video();
     }
 
-    public function segmentOverride(): ?RegisterType
+    /**
+     * Execute an instruction.
+     *
+     * @param int|int[] $opcodes Single opcode or array of opcode bytes
+     */
+    public function execute(int|array $opcodes): ExecutionStatus
     {
-        return $this->segmentOverride;
-    }
+        $instructionList = $this->architectureProvider->instructionList();
 
-    public function setSegmentOverride(?RegisterType $segment): void
-    {
-        $this->segmentOverride = $segment;
-    }
+        // Handle array of opcodes (multi-byte)
+        if (is_array($opcodes)) {
+            if (count($opcodes) > 1) {
+                $matched = $instructionList->tryMatchMultiByteOpcode($opcodes);
+                if ($matched !== null) {
+                    [$instruction, $opcodeKey] = $matched;
+                    try {
+                        return $instruction->process($this, $opcodeKey);
+                    } catch (FaultException $e) {
+                        $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
+                        if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {
+                            return ExecutionStatus::SUCCESS;
+                        }
+                        throw $e;
+                    } catch (ExecutionException $e) {
+                        $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
+                        throw $e;
+                    } finally {
+                        $this->memoryAccessor->enableUpdateFlags(true);
+                        $this->context->cpu()->clearTransientOverrides();
+                    }
+                }
+            }
+            // Single-element array or no match - use first byte
+            $opcode = $opcodes[0];
+        } else {
+            $opcode = $opcodes;
+        }
 
-    public function execute(int $opcode): ExecutionStatus
-    {
-        // $this->machine->option()->logger()->debug(sprintf('Reached the opcode is 0x%04X', $opcode));
-
-        $instruction = $this
-            ->architectureProvider
-            ->instructionList()
-            ->getInstructionByOperationCode($opcode);
-
-        // $this->machine->option()->logger()->info(sprintf('Process the instruction %s', get_class($instruction)));
+        $instruction = $instructionList->getInstructionByOperationCode($opcode);
 
         try {
-            return $instruction
-                ->process($this, $opcode);
+            return $instruction->process($this, $opcode);
         } catch (FaultException $e) {
             $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
             if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {
@@ -292,9 +338,7 @@ class Runtime implements RuntimeInterface
             $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
             throw $e;
         } finally {
-            $this->memoryAccessor
-                ->enableUpdateFlags(true);
-            $this->segmentOverride = null;
+            $this->memoryAccessor->enableUpdateFlags(true);
             $this->context->cpu()->clearTransientOverrides();
         }
     }

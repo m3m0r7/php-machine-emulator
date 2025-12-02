@@ -73,20 +73,29 @@ class InstructionListRuntime extends Runtime implements RuntimeInterface
         $this->table->render();
     }
 
-    public function execute(int $opcode): ExecutionStatus
+    public function execute(int|array $opcodes): ExecutionStatus
     {
         assert($this->streamReader instanceof StreamReaderProxy);
         assert($this->frame instanceof FrameProxy);
 
         $result = ExecutionStatus::SUCCESS;
+        $opcodeArray = is_array($opcodes) ? $opcodes : [$opcodes];
+        $firstOpcode = $opcodeArray[0];
 
         try {
-            $instruction = $this
-                ->architectureProvider
-                ->instructionList()
-                ->getInstructionByOperationCode($opcode);
+            $instructionList = $this->architectureProvider->instructionList();
+            if (count($opcodeArray) > 1) {
+                $matched = $instructionList->tryMatchMultiByteOpcode($opcodeArray);
+                if ($matched !== null) {
+                    $instruction = $matched[0];
+                } else {
+                    $instruction = $instructionList->getInstructionByOperationCode($firstOpcode);
+                }
+            } else {
+                $instruction = $instructionList->getInstructionByOperationCode($firstOpcode);
+            }
 
-            $result = parent::execute($opcode);
+            $result = parent::execute($opcodes);
             $class = new \ReflectionClass($instruction);
             $mnemonic = $class->getShortName();
         } catch (OperationNotFoundException) {
@@ -99,6 +108,7 @@ class InstructionListRuntime extends Runtime implements RuntimeInterface
             1,
         );
 
+        $opcodeStr = implode(' ', array_map(fn($b) => sprintf('0x%02X', $b), $opcodeArray));
         $this
             ->table
             ->addRow([
@@ -108,7 +118,7 @@ class InstructionListRuntime extends Runtime implements RuntimeInterface
                         ->offset()
                 ),
                 $mnemonic,
-                sprintf('0x%02X', $opcode),
+                $opcodeStr,
                 count($operands),
                 implode(
                     ", ",

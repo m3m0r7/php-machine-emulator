@@ -105,7 +105,6 @@ use PHPMachineEmulator\Instruction\Intel\x86\OperandSizePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\AddressSizePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\SegmentOverridePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\LockPrefix;
-use PHPMachineEmulator\Instruction\Intel\x86\TwoBytePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\CbwCwd;
 use PHPMachineEmulator\Instruction\Intel\x86\Aaa;
 use PHPMachineEmulator\Instruction\Intel\x86\Aad;
@@ -127,6 +126,40 @@ use PHPMachineEmulator\Instruction\Intel\x86\Sti;
 use PHPMachineEmulator\Instruction\Intel\x86\Stosb;
 use PHPMachineEmulator\Instruction\Intel\x86\TestImmAl;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\BitOp;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bsf;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bsr;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bswap;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\CacheOp;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Clts;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Cmovcc;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Cmpxchg;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Cmpxchg8b;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Cpuid;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Emms;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Fxsave;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Group0;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Group6;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\ImulRegRm;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\JccNear;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Lxs;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovFromCr;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovToCr;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movsx;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movzx;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\NopModrm;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PopFsGs;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PushFsGs;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Rdmsr;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Rdtsc;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Setcc;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Shld;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Shrd;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Sysenter;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Sysexit;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Ud2;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Wrmsr;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Xadd;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\Traits\RuntimeAwareTrait;
 
@@ -136,6 +169,14 @@ class x86 implements InstructionListInterface
 
     protected ?RegisterInterface $register = null;
     protected array $instructionList = [];
+
+    /**
+     * Multi-byte opcode map: [length][byte1][byte2]... => [instruction, opcodeKey]
+     * @var array<int, array>
+     */
+    protected array $multiByteOpcodes = [];
+
+    protected int $maxOpcodeLength = 1;
 
     public function register(): RegisterInterface
     {
@@ -149,9 +190,51 @@ class x86 implements InstructionListInterface
         );
     }
 
-    public function instructionList(): array
+    public function tryMatchMultiByteOpcode(array $bytes): ?array
     {
-        static $instructionList = [
+        $this->instructionList(); // ensure initialized
+
+        $length = count($bytes);
+        if ($length < 2) {
+            return null;
+        }
+
+        // Try to match from longest to shortest
+        for ($len = min($length, $this->maxOpcodeLength); $len >= 2; $len--) {
+            $key = $this->bytesToKey(array_slice($bytes, 0, $len));
+            if (isset($this->multiByteOpcodes[$key])) {
+                return $this->multiByteOpcodes[$key];
+            }
+        }
+
+        return null;
+    }
+
+    public function getMaxOpcodeLength(): int
+    {
+        $this->instructionList(); // ensure initialized
+        return $this->maxOpcodeLength;
+    }
+
+    /**
+     * Convert a byte array to a unique key for indexing.
+     * Example: [0x0F, 0x20] => 0x0F20
+     *
+     * @param int[] $bytes
+     * @return int
+     */
+    protected function bytesToKey(array $bytes): int
+    {
+        $key = 0;
+        foreach ($bytes as $byte) {
+            $key = ($key << 8) | ($byte & 0xFF);
+        }
+        return $key;
+    }
+
+    protected function instructionListClasses(): array
+    {
+        return [
             AddImm8::class,
             Call::class,
             Cli::class,
@@ -251,7 +334,6 @@ class x86 implements InstructionListInterface
             AddressSizePrefix::class,
             SegmentOverridePrefix::class,
             LockPrefix::class,
-            TwoBytePrefix::class,
             CbwCwd::class,
             Aaa::class,
             Aad::class,
@@ -271,18 +353,69 @@ class x86 implements InstructionListInterface
             Xor_::class,
             ImulImmediate::class,
             FpuStub::class,
+            // Two-byte instructions (0x0F prefix)
+            MovFromCr::class,
+            MovToCr::class,
+            Cpuid::class,
+            Rdtsc::class,
+            Movzx::class,
+            Movsx::class,
+            JccNear::class,
+            Setcc::class,
+            Cmovcc::class,
+            Bswap::class,
+            Cmpxchg::class,
+            Xadd::class,
+            ImulRegRm::class,
+            Shld::class,
+            Shrd::class,
+            Bsf::class,
+            Bsr::class,
+            BitOp::class,
+            PushFsGs::class,
+            PopFsGs::class,
+            Lxs::class,
+            Clts::class,
+            Rdmsr::class,
+            Wrmsr::class,
+            Sysenter::class,
+            Sysexit::class,
+            Cmpxchg8b::class,
+            Group0::class,
+            Group6::class,
+            NopModrm::class,
+            Ud2::class,
+            CacheOp::class,
+            Emms::class,
+            Fxsave::class,
         ];
+    }
 
+    public function instructionList(): array
+    {
         if (!empty($this->instructionList)) {
             return $this->instructionList;
         }
 
-        foreach ($instructionList as $className) {
+        foreach ($this->instructionListClasses() as $className) {
             $instance = new $className($this);
             assert($instance instanceof InstructionInterface);
 
             foreach ($instance->opcodes() as $opcode) {
-                $this->instructionList[$opcode] = $instance;
+                if (is_array($opcode)) {
+                    // Multi-byte opcode
+                    $length = count($opcode);
+                    if ($length > $this->maxOpcodeLength) {
+                        $this->maxOpcodeLength = $length;
+                    }
+                    $key = $this->bytesToKey($opcode);
+                    $this->multiByteOpcodes[$key] = [$instance, $key];
+                    // Also register by first byte for fallback lookup
+                    $this->instructionList[$opcode[0]] ??= $instance;
+                } else {
+                    // Single-byte opcode
+                    $this->instructionList[$opcode] = $instance;
+                }
             }
 
             // Allow class-name lookup for auxiliary dispatch (e.g., faults calling INT).

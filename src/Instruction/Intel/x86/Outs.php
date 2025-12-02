@@ -39,7 +39,7 @@ class Outs implements InstructionInterface
         $delta = $count * ($isByte ? 1 : ($opSize === 32 ? 4 : 2));
 
         $src = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($runtime->context()->cpu()->addressSize());
-        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
         $segBase = $runtime->memoryAccessor()->fetch($segment)->asByte();
         $linearAddr = ($segBase << 4) + $src;
         $value = match ($width) {

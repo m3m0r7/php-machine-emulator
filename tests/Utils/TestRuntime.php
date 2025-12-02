@@ -28,7 +28,6 @@ class TestRuntime implements RuntimeInterface
     private MemoryStream $memoryStream;
     private Register $register;
     private \PHPMachineEmulator\OptionInterface $option;
-    private ?RegisterType $segmentOverride = null;
 
     public function __construct(int $memorySize = 0x10000)
     {
@@ -77,7 +76,7 @@ class TestRuntime implements RuntimeInterface
         return $this->memoryAccessor;
     }
 
-    public function execute(int $opcode): ExecutionStatus
+    public function execute(int|array $opcodes): ExecutionStatus
     {
         return ExecutionStatus::SUCCESS;
     }
@@ -110,16 +109,6 @@ class TestRuntime implements RuntimeInterface
     public function video(): VideoInterface
     {
         return new TestVideo();
-    }
-
-    public function segmentOverride(): ?RegisterType
-    {
-        return $this->segmentOverride;
-    }
-
-    public function setSegmentOverride(?RegisterType $segment): void
-    {
-        $this->segmentOverride = $segment;
     }
 
     public function memory(): ?MemoryStream

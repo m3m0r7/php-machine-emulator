@@ -65,6 +65,12 @@ interface RuntimeCPUContextInterface
     public function ldtr(): array;
 
     // ========================================
+    // Segment override
+    // ========================================
+    public function setSegmentOverride(?\PHPMachineEmulator\Instruction\RegisterType $segment): void;
+    public function segmentOverride(): ?\PHPMachineEmulator\Instruction\RegisterType;
+
+    // ========================================
     // Address line and paging
     // ========================================
     public function clearTransientOverrides(): void;

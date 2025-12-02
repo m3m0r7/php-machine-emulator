@@ -41,7 +41,7 @@ class Ins implements InstructionInterface
         $value = $this->readPort($runtime, $port, $width);
 
         $dest = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize());
-        $segment = $runtime->segmentOverride() ?? RegisterType::ES;
+        $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::ES;
         $segBase = $runtime->memoryAccessor()->fetch($segment)->asByte();
         $linearAddr = ($segBase << 4) + $dest;
         match ($width) {

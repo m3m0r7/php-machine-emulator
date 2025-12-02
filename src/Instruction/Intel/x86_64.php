@@ -99,6 +99,27 @@ class x86_64 implements InstructionListInterface
     }
 
     /**
+     * Try to match a multi-byte opcode sequence.
+     * Delegates to the underlying x86 implementation.
+     *
+     * @param int[] $bytes The opcode bytes to match
+     * @return array|null [InstructionInterface, opcodeKey] or null if no match
+     */
+    public function tryMatchMultiByteOpcode(array $bytes): ?array
+    {
+        return $this->x86->tryMatchMultiByteOpcode($bytes);
+    }
+
+    /**
+     * Get the maximum opcode length supported.
+     * Delegates to the underlying x86 implementation.
+     */
+    public function getMaxOpcodeLength(): int
+    {
+        return $this->x86->getMaxOpcodeLength();
+    }
+
+    /**
      * Build 64-bit mode specific instruction list.
      *
      * These instructions override or replace 32-bit instructions when in 64-bit mode.

@@ -23,7 +23,7 @@ class Lodsw implements InstructionInterface
         $width = $opSize === 32 ? 4 : 2;
         $si = $this->readIndex($runtime, RegisterType::ESI);
 
-        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         $address = $this->segmentOffsetAddress($runtime, $segment, $si);
         $value = $opSize === 32

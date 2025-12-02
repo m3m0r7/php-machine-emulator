@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\ApicState;
 use PHPMachineEmulator\Instruction\Intel\x86\Cmos;
 use PHPMachineEmulator\Instruction\Intel\x86\KeyboardController;
 use PHPMachineEmulator\Instruction\Intel\x86\PicState;
+use PHPMachineEmulator\Instruction\RegisterType;
 
 /**
  * CPU context for x86/x64 emulation.
@@ -61,6 +62,9 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
 
     // Interrupt handling
     private int $interruptDeliveryBlock = 0;
+
+    // Segment override
+    private ?RegisterType $segmentOverride = null;
 
     // Hardware state
     private PicState $picState;
@@ -276,7 +280,18 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     {
         $this->operandSizeOverride = false;
         $this->addressSizeOverride = false;
+        $this->segmentOverride = null;
         $this->clearRex();
+    }
+
+    public function setSegmentOverride(?RegisterType $segment): void
+    {
+        $this->segmentOverride = $segment;
+    }
+
+    public function segmentOverride(): ?RegisterType
+    {
+        return $this->segmentOverride;
     }
 
     // ========================================

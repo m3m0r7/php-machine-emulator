@@ -24,7 +24,7 @@ class Cmpsw implements InstructionInterface
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
-        $sourceSegment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $sourceSegment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         $leftAddress = $this->segmentOffsetAddress($runtime, $sourceSegment, $si);
         $rightAddress = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);

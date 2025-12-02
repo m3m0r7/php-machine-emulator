@@ -294,7 +294,7 @@ trait Instructable64
         $rm = $modRegRM->registerOrMemoryAddress();
 
         // In 64-bit mode, segment overrides are generally ignored (except FS/GS)
-        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         // Apply REX.B to rm field
         if ($cpu->rexB()) {
@@ -358,7 +358,7 @@ trait Instructable64
             $base |= 0b1000;
         }
 
-        $segment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         // Calculate base
         $baseValue = 0;

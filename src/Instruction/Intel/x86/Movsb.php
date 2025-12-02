@@ -22,7 +22,7 @@ class Movsb implements InstructionInterface
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
-        $sourceSegment = $runtime->segmentOverride() ?? RegisterType::DS;
+        $sourceSegment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         $value = $this->readMemory8(
             $runtime,
