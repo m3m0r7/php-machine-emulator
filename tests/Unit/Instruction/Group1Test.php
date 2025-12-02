@@ -531,7 +531,161 @@ class Group1Test extends InstructionTestCase
         $this->executeBytes([0x83, 0xC0, 0x01]); // ADD EAX, 1
 
         $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX));
-        // This should set overflow flag (implementation dependent)
+        $this->assertTrue($this->getOverflowFlag()); // Signed overflow occurred
+    }
+
+    // ========================================
+    // Overflow Flag (OF) Tests
+    // ========================================
+
+    public function testAddOverflowFlagPositivePlusPositive(): void
+    {
+        // 0x7FFFFFFF + 0x7FFFFFFF = overflow (two positives produce negative)
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0x81, 0xC0, 0xFF, 0xFF, 0xFF, 0x7F]); // ADD EAX, 0x7FFFFFFF
+
+        $this->assertSame(0xFFFFFFFE, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
+        $this->assertFalse($this->getCarryFlag()); // No unsigned overflow
+    }
+
+    public function testAddOverflowFlagNegativePlusNegative(): void
+    {
+        // 0x80000000 + 0x80000000 = overflow (two negatives produce positive)
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0x81, 0xC0, 0x00, 0x00, 0x00, 0x80]); // ADD EAX, 0x80000000
+
+        $this->assertSame(0x00000000, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
+        $this->assertTrue($this->getCarryFlag()); // Unsigned overflow also occurred
+    }
+
+    public function testAddNoOverflowFlagDifferentSigns(): void
+    {
+        // Positive + Negative should never overflow
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0x83, 0xC0, 0xFF]); // ADD EAX, -1 (0xFFFFFFFF)
+
+        $this->assertSame(0x7FFFFFFE, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testSubOverflowFlagPositiveMinusNegative(): void
+    {
+        // 0x7FFFFFFF - (-1) = overflow (positive - negative = negative result)
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0x83, 0xE8, 0xFF]); // SUB EAX, -1 (0xFFFFFFFF)
+
+        $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testSubOverflowFlagNegativeMinusPositive(): void
+    {
+        // 0x80000000 - 1 = overflow (negative - positive = positive result)
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0x83, 0xE8, 0x01]); // SUB EAX, 1
+
+        $this->assertSame(0x7FFFFFFF, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testSubNoOverflowFlagSameSigns(): void
+    {
+        // Same signs should not overflow
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0x83, 0xE8, 0x01]); // SUB EAX, 1
+
+        $this->assertSame(0x7FFFFFFE, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testCmpOverflowFlag(): void
+    {
+        // CMP should set OF same as SUB
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0x83, 0xF8, 0x01]); // CMP EAX, 1
+
+        // 0x80000000 - 1 = 0x7FFFFFFF (overflow)
+        $this->assertTrue($this->getOverflowFlag());
+        $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX)); // unchanged
+    }
+
+    public function testAndClearsOverflowFlag(): void
+    {
+        // AND should always clear OF
+        // First set OF via an ADD that overflows
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0x83, 0xC0, 0x01]); // ADD EAX, 1
+        $this->assertTrue($this->getOverflowFlag()); // Verify OF is set
+
+        // Now AND should clear it
+        $this->executeBytes([0x83, 0xE0, 0xFF]); // AND EAX, 0xFF
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testOrClearsOverflowFlag(): void
+    {
+        // OR should always clear OF
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0x83, 0xC0, 0x01]); // ADD EAX, 1
+        $this->assertTrue($this->getOverflowFlag());
+
+        $this->executeBytes([0x83, 0xC8, 0x00]); // OR EAX, 0
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testXorClearsOverflowFlag(): void
+    {
+        // XOR should always clear OF
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0x83, 0xC0, 0x01]); // ADD EAX, 1
+        $this->assertTrue($this->getOverflowFlag());
+
+        $this->executeBytes([0x83, 0xF0, 0x00]); // XOR EAX, 0
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testAddOverflowFlag8Bit(): void
+    {
+        // 8-bit overflow: 0x7F + 1 = 0x80 (positive + positive = negative)
+        $this->setRegister(RegisterType::EAX, 0x0000007F);
+        $this->executeBytes([0x80, 0xC0, 0x01]); // ADD AL, 1
+
+        $this->assertSame(0x80, $this->getRegister(RegisterType::EAX, 8));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testSubOverflowFlag8Bit(): void
+    {
+        // 8-bit overflow: 0x80 - 1 = 0x7F (negative - positive = positive)
+        $this->setRegister(RegisterType::EAX, 0x00000080);
+        $this->executeBytes([0x80, 0xE8, 0x01]); // SUB AL, 1
+
+        $this->assertSame(0x7F, $this->getRegister(RegisterType::EAX, 8));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testAdcOverflowFlag(): void
+    {
+        // ADC with overflow
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->setCarryFlag(true);
+        $this->executeBytes([0x83, 0xD0, 0x00]); // ADC EAX, 0 (just adds carry)
+
+        $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testSbbOverflowFlag(): void
+    {
+        // SBB with overflow: 0x80000000 - 0 - 1 (borrow) = 0x7FFFFFFF
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->setCarryFlag(true);
+        $this->executeBytes([0x83, 0xD8, 0x00]); // SBB EAX, 0 (just subtracts borrow)
+
+        $this->assertSame(0x7FFFFFFF, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
     }
 
     public function testZeroFlagOnResult(): void

@@ -107,15 +107,29 @@ class Int_ implements InstructionInterface
         $offset = $this->readMemory16($runtime, $vectorAddress);
         $segment = $this->readMemory16($runtime, $vectorAddress + 2);
 
+        // If IVT entry is not initialized (0:0), skip the interrupt
+        // This handles cases where the interrupt handler is not set up
+        if ($segment === 0 && $offset === 0) {
+            $runtime->option()->logger()->debug(sprintf(
+                'INT vector 0x%02X: IVT entry is null [0000:0000], skipping interrupt',
+                $vector
+            ));
+            $this->nestedCount[$key]--;
+            return;
+        }
+
         // Push state (FLAGS, CS, IP)
+        $ma = $runtime->memoryAccessor();
         $flags =
-            ($runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0) |
-            ($runtime->memoryAccessor()->shouldParityFlag() ? (1 << 2) : 0) |
-            ($runtime->memoryAccessor()->shouldZeroFlag() ? (1 << 6) : 0) |
-            ($runtime->memoryAccessor()->shouldSignFlag() ? (1 << 7) : 0) |
-            ($runtime->memoryAccessor()->shouldOverflowFlag() ? (1 << 11) : 0) |
-            ($runtime->memoryAccessor()->shouldDirectionFlag() ? (1 << 10) : 0) |
-            ($runtime->memoryAccessor()->shouldInterruptFlag() ? (1 << 9) : 0);
+            ($ma->shouldCarryFlag() ? 1 : 0) |
+            0x2 | // reserved bit always set
+            ($ma->shouldParityFlag() ? (1 << 2) : 0) |
+            ($ma->shouldAuxiliaryCarryFlag() ? (1 << 4) : 0) |
+            ($ma->shouldZeroFlag() ? (1 << 6) : 0) |
+            ($ma->shouldSignFlag() ? (1 << 7) : 0) |
+            ($ma->shouldInterruptFlag() ? (1 << 9) : 0) |
+            ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
+            ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
 
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $ma->push(RegisterType::ESP, $flags, 16);
@@ -251,13 +265,14 @@ class Int_ implements InstructionInterface
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $flags =
             ($ma->shouldCarryFlag() ? 1 : 0) |
-            0x2 | // reserved bit
+            0x2 | // reserved bit always set
             ($ma->shouldParityFlag() ? (1 << 2) : 0) |
+            ($ma->shouldAuxiliaryCarryFlag() ? (1 << 4) : 0) |
             ($ma->shouldZeroFlag() ? (1 << 6) : 0) |
             ($ma->shouldSignFlag() ? (1 << 7) : 0) |
-            ($ma->shouldOverflowFlag() ? (1 << 11) : 0) |
+            ($ma->shouldInterruptFlag() ? (1 << 9) : 0) |
             ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
-            ($ma->shouldInterruptFlag() ? (1 << 9) : 0);
+            ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
 
         if ($privilegeChange) {
             // On privilege change, old SS/ESP are pushed after loading the new stack.

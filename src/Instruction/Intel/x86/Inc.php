@@ -25,8 +25,20 @@ class Inc implements InstructionInterface
         $value = $ma->fetch($reg)->asBytesBySize($size);
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value + 1) & $mask;
+
+        // Preserve CF - INC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+
         $ma->enableUpdateFlags(false)->writeBySize($reg, $result, $size);
         $ma->updateFlags($result, $size);
+
+        // Restore CF
+        $ma->setCarryFlag($savedCf);
+
+        // OF for INC: set when result is SIGN_MASK (0x80, 0x8000, 0x80000000)
+        // This happens when incrementing from max positive to min negative
+        $signMask = 1 << ($size - 1);
+        $ma->setOverflowFlag($result === $signMask);
 
         return ExecutionStatus::SUCCESS;
     }

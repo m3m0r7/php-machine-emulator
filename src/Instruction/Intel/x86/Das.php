@@ -29,16 +29,19 @@ class Das implements InstructionInterface
         $al = $ma->fetch(RegisterType::EAX)->asLowBit();
         $oldAl = $al;
         $oldCf = $ma->shouldCarryFlag();
+        $oldAf = $ma->shouldAuxiliaryCarryFlag();
+        $af = false;
         $cf = false;
 
         // If the lower nibble of AL is greater than 9 or AF is set,
         // subtract 6 from AL and set AF
-        if (($al & 0x0F) > 9 || $ma->shouldAuxiliaryCarryFlag()) {
+        if (($al & 0x0F) > 9 || $oldAf) {
+            $af = true;
+            // CF is set if AL < 6 OR original CF was set (QEMU behavior)
+            if ($al < 6 || $oldCf) {
+                $cf = true;
+            }
             $al = ($al - 6) & 0xFF;
-            $ma->setAuxiliaryCarryFlag(true);
-            $cf = $oldCf || ($oldAl < 6); // Check for borrow
-        } else {
-            $ma->setAuxiliaryCarryFlag(false);
         }
 
         // If the original AL was greater than 0x99 or CF was set,
@@ -51,7 +54,8 @@ class Das implements InstructionInterface
         // Write back the result
         $ma->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $al);
 
-        // Update flags
+        // Update flags (QEMU style)
+        $ma->setAuxiliaryCarryFlag($af);
         $ma->setCarryFlag($cf);
         $ma->setZeroFlag($al === 0);
         $ma->setSignFlag(($al & 0x80) !== 0);

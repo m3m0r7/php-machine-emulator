@@ -29,8 +29,14 @@ class PopRm implements InstructionInterface
             throw new ExecutionException('POP r/m16 with invalid digit');
         }
 
-        $value = $runtime->memoryAccessor()->enableUpdateFlags(false)->pop(RegisterType::ESP)->asByte();
-        $this->writeRm16($runtime, $reader, $modRegRM, $value);
+        $opSize = $runtime->context()->cpu()->operandSize();
+        $value = $runtime->memoryAccessor()->enableUpdateFlags(false)->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+
+        if ($opSize === 32) {
+            $this->writeRm($runtime, $reader, $modRegRM, $value, 32);
+        } else {
+            $this->writeRm16($runtime, $reader, $modRegRM, $value);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

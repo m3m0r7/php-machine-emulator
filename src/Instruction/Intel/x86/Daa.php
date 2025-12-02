@@ -29,19 +29,18 @@ class Daa implements InstructionInterface
         $al = $ma->fetch(RegisterType::EAX)->asLowBit();
         $oldAl = $al;
         $oldCf = $ma->shouldCarryFlag();
+        $oldAf = $ma->shouldAuxiliaryCarryFlag();
+        $af = false;
         $cf = false;
 
         // If the lower nibble of AL is greater than 9 or AF is set,
         // add 6 to AL and set AF
-        if (($al & 0x0F) > 9 || $ma->shouldAuxiliaryCarryFlag()) {
+        if (($al & 0x0F) > 9 || $oldAf) {
             $al = ($al + 6) & 0xFF;
-            $ma->setAuxiliaryCarryFlag(true);
-            $cf = $oldCf || ($al < $oldAl); // Check for carry from addition
-        } else {
-            $ma->setAuxiliaryCarryFlag(false);
+            $af = true;
         }
 
-        // If the upper nibble of AL is greater than 9 or CF is set,
+        // If the original AL was > 0x99 or CF was set,
         // add 0x60 to AL and set CF
         if ($oldAl > 0x99 || $oldCf) {
             $al = ($al + 0x60) & 0xFF;
@@ -51,7 +50,8 @@ class Daa implements InstructionInterface
         // Write back the result
         $ma->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $al);
 
-        // Update flags
+        // Update flags (QEMU style)
+        $ma->setAuxiliaryCarryFlag($af);
         $ma->setCarryFlag($cf);
         $ma->setZeroFlag($al === 0);
         $ma->setSignFlag(($al & 0x80) !== 0);

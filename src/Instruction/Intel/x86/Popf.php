@@ -23,9 +23,11 @@ class Popf implements InstructionInterface
         $size = $runtime->context()->cpu()->operandSize();
         $flags = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
+        // Restore flags directly without using updateFlags
         $ma->setCarryFlag(($flags & 0x1) !== 0);
-        $ma->updateFlags(($flags & (1 << 6)) ? 0 : 1, $size); // zero flag
         $ma->setParityFlag(($flags & (1 << 2)) !== 0);
+        $ma->setAuxiliaryCarryFlag(($flags & (1 << 4)) !== 0);
+        $ma->setZeroFlag(($flags & (1 << 6)) !== 0);
         $ma->setSignFlag(($flags & (1 << 7)) !== 0);
         $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
         $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);

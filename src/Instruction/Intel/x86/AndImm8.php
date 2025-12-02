@@ -23,16 +23,19 @@ class AndImm8 implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $operand = $runtime->memory()->byte();
+        $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
+        $result = $al & $operand;
 
         $runtime
             ->memoryAccessor()
-            ->writeToLowBit(
-                RegisterType::EAX,
-                $runtime
-                    ->memoryAccessor()
-                    ->fetch(RegisterType::EAX)
-                    ->asLowBit() & $operand,
-            );
+            ->enableUpdateFlags(false)
+            ->writeToLowBit(RegisterType::EAX, $result);
+
+        // AND always clears CF and OF, updates SF/ZF/PF based on result
+        $runtime->memoryAccessor()
+            ->updateFlags($result, 8)
+            ->setCarryFlag(false)
+            ->setOverflowFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }

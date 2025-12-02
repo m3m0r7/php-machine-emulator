@@ -57,6 +57,8 @@ class TwoBytePrefix implements InstructionInterface
             0x35 => $this->sysexit($runtime),
             0xB6 => $this->movzx($runtime, $reader, true),
             0xB7 => $this->movzx($runtime, $reader, false),
+            0xBE => $this->movsx($runtime, $reader, true),
+            0xBF => $this->movsx($runtime, $reader, false),
             0xAF => $this->imulRegRm($runtime, $reader),
             0xA4 => $this->shld($runtime, $reader, true),
             0xA5 => $this->shld($runtime, $reader, false),
@@ -252,10 +254,25 @@ class TwoBytePrefix implements InstructionInterface
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : (($opSize === 16) ? 0xFFFF : 0xFF);
 
+        // Pre-compute address to avoid consuming displacement twice
+        $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+        $linearAddr = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+
         $acc = $isByte
             ? $ma->fetch(RegisterType::EAX)->asLowBit()
             : $ma->fetch(RegisterType::EAX)->asBytesBySize($opSize);
-        $dest = $isByte ? $this->readRm8($runtime, $reader, $modrm) : $this->readRm($runtime, $reader, $modrm, $opSize);
+
+        // Read dest using pre-computed address
+        if ($isByte) {
+            $dest = $isRegister
+                ? $this->read8BitRegister($runtime, $modrm->registerOrMemoryAddress())
+                : $this->readMemory8($runtime, $linearAddr);
+        } else {
+            $dest = $isRegister
+                ? $this->readRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $opSize)
+                : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
+        }
+
         $src = $isByte
             ? $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), 8)
             : $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), $opSize);
@@ -265,9 +282,24 @@ class TwoBytePrefix implements InstructionInterface
 
         if ($dest === ($acc & $mask)) {
             $ma->setZeroFlag(true);
-            $isByte
-                ? $this->writeRm8($runtime, $reader, $modrm, $src)
-                : $this->writeRm($runtime, $reader, $modrm, $src, $opSize);
+            // Write src using pre-computed address
+            if ($isByte) {
+                if ($isRegister) {
+                    $this->write8BitRegister($runtime, $modrm->registerOrMemoryAddress(), $src);
+                } else {
+                    $this->writeMemory8($runtime, $linearAddr, $src);
+                }
+            } else {
+                if ($isRegister) {
+                    $this->writeRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $src, $opSize);
+                } else {
+                    if ($opSize === 32) {
+                        $this->writeMemory32($runtime, $linearAddr, $src);
+                    } else {
+                        $this->writeMemory16($runtime, $linearAddr, $src);
+                    }
+                }
+            }
         } else {
             $ma->setZeroFlag(false);
             if ($isByte) {
@@ -287,7 +319,21 @@ class TwoBytePrefix implements InstructionInterface
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : (($opSize === 16) ? 0xFFFF : 0xFF);
 
-        $dest = $isByte ? $this->readRm8($runtime, $reader, $modrm) : $this->readRm($runtime, $reader, $modrm, $opSize);
+        // Pre-compute address to avoid consuming displacement twice
+        $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+        $linearAddr = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+
+        // Read dest using pre-computed address
+        if ($isByte) {
+            $dest = $isRegister
+                ? $this->read8BitRegister($runtime, $modrm->registerOrMemoryAddress())
+                : $this->readMemory8($runtime, $linearAddr);
+        } else {
+            $dest = $isRegister
+                ? $this->readRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $opSize)
+                : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
+        }
+
         $src = $isByte
             ? $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), 8)
             : $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), $opSize);
@@ -296,9 +342,24 @@ class TwoBytePrefix implements InstructionInterface
         $result = $sum & $mask;
         $ma->setCarryFlag($sum > $mask)->updateFlags($result, $opSize);
 
-        $isByte
-            ? $this->writeRm8($runtime, $reader, $modrm, $result)
-            : $this->writeRm($runtime, $reader, $modrm, $result, $opSize);
+        // Write result using pre-computed address
+        if ($isByte) {
+            if ($isRegister) {
+                $this->write8BitRegister($runtime, $modrm->registerOrMemoryAddress(), $result);
+            } else {
+                $this->writeMemory8($runtime, $linearAddr, $result);
+            }
+        } else {
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $result, $opSize);
+            } else {
+                if ($opSize === 32) {
+                    $this->writeMemory32($runtime, $linearAddr, $result);
+                } else {
+                    $this->writeMemory16($runtime, $linearAddr, $result);
+                }
+            }
+        }
 
         // Source register receives original destination value.
         if ($isByte) {
@@ -351,12 +412,22 @@ class TwoBytePrefix implements InstructionInterface
         $modrm = $reader->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+
+        // x86 encoding order: ModR/M -> SIB -> displacement -> immediate
+        // Read dest first (consumes displacement), THEN read immediate
+        $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+        $linearAddr = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+
+        // NOW read immediate (after displacement has been consumed)
         $count = $imm ? ($reader->streamReader()->byte() & 0x1F) : ($runtime->memoryAccessor()->fetch(RegisterType::ECX)->asLowBit() & 0x1F);
         if ($count === 0) {
             return ExecutionStatus::SUCCESS;
         }
 
-        $dest = $this->readRm($runtime, $reader, $modrm, $opSize) & $mask;
+        $dest = $isRegister
+            ? $this->readRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $opSize)
+            : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
+        $dest &= $mask;
         $src = $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), $opSize) & $mask;
         $result = (($dest << $count) | ($src >> ($opSize - $count))) & $mask;
         $cf = ($dest >> ($opSize - $count)) & 0x1;
@@ -370,7 +441,16 @@ class TwoBytePrefix implements InstructionInterface
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $ma->setCarryFlag($cf === 1)->updateFlags($result, $opSize);
         $ma->setOverflowFlag($of);
-        $this->writeRm($runtime, $reader, $modrm, $result, $opSize);
+
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $result, $opSize);
+        } else {
+            if ($opSize === 32) {
+                $this->writeMemory32($runtime, $linearAddr, $result);
+            } else {
+                $this->writeMemory16($runtime, $linearAddr, $result);
+            }
+        }
         return ExecutionStatus::SUCCESS;
     }
 
@@ -379,12 +459,22 @@ class TwoBytePrefix implements InstructionInterface
         $modrm = $reader->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+
+        // x86 encoding order: ModR/M -> SIB -> displacement -> immediate
+        // Read dest first (consumes displacement), THEN read immediate
+        $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+        $linearAddr = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+
+        // NOW read immediate (after displacement has been consumed)
         $count = $imm ? ($reader->streamReader()->byte() & 0x1F) : ($runtime->memoryAccessor()->fetch(RegisterType::ECX)->asLowBit() & 0x1F);
         if ($count === 0) {
             return ExecutionStatus::SUCCESS;
         }
 
-        $dest = $this->readRm($runtime, $reader, $modrm, $opSize) & $mask;
+        $dest = $isRegister
+            ? $this->readRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $opSize)
+            : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
+        $dest &= $mask;
         $src = $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), $opSize) & $mask;
         $result = (($dest >> $count) | ($src << ($opSize - $count))) & $mask;
         $cf = ($dest >> ($count - 1)) & 0x1;
@@ -398,7 +488,16 @@ class TwoBytePrefix implements InstructionInterface
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
         $ma->setCarryFlag($cf === 1)->updateFlags($result, $opSize);
         $ma->setOverflowFlag($of);
-        $this->writeRm($runtime, $reader, $modrm, $result, $opSize);
+
+        if ($isRegister) {
+            $this->writeRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $result, $opSize);
+        } else {
+            if ($opSize === 32) {
+                $this->writeMemory32($runtime, $linearAddr, $result);
+            } else {
+                $this->writeMemory16($runtime, $linearAddr, $result);
+            }
+        }
         return ExecutionStatus::SUCCESS;
     }
 
@@ -538,6 +637,32 @@ class TwoBytePrefix implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
+    private function movsx(RuntimeInterface $runtime, EnhanceStreamReader $reader, bool $isByte): ExecutionStatus
+    {
+        $modrm = $reader->byteAsModRegRM();
+        $opSize = $runtime->context()->cpu()->operandSize();
+        $value = $isByte
+            ? $this->readRm8($runtime, $reader, $modrm)
+            : $this->readRm16($runtime, $reader, $modrm);
+
+        // Sign extend the value
+        if ($isByte) {
+            // Sign extend 8-bit to 16/32-bit
+            if ($value & 0x80) {
+                $value = $opSize === 32 ? ($value | 0xFFFFFF00) : ($value | 0xFF00);
+            }
+        } else {
+            // Sign extend 16-bit to 32-bit
+            if ($opSize === 32 && ($value & 0x8000)) {
+                $value = $value | 0xFFFF0000;
+            }
+        }
+
+        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $this->writeRegisterBySize($runtime, $modrm->registerOrOPCode(), $value & $mask, $opSize);
+        return ExecutionStatus::SUCCESS;
+    }
+
     private function imulRegRm(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
     {
         $modrm = $reader->byteAsModRegRM();
@@ -635,6 +760,13 @@ class TwoBytePrefix implements InstructionInterface
         $opSize = $runtime->context()->cpu()->operandSize();
         $maskBits = $opSize === 32 ? 0x1F : 0x0F;
 
+        $isReg = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+
+        // x86 encoding order: ModR/M -> SIB -> displacement -> immediate
+        // Consume displacement FIRST (for memory operand), THEN read immediate
+        $baseAddr = $isReg ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+
+        // NOW determine op and bitIndex (immediate read after displacement)
         if ($immediate) {
             $imm = $reader->streamReader()->byte() & 0xFF;
             $subop = $op ?? match ($modrm->registerOrOPCode() & 0x7) {
@@ -653,7 +785,6 @@ class TwoBytePrefix implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $isReg = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
         $bitWithin = $bitIndex & $maskBits;
 
         if ($isReg) {
@@ -673,7 +804,6 @@ class TwoBytePrefix implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $baseAddr = $this->rmLinearAddress($runtime, $reader, $modrm);
         $elemSizeBytes = $opSize === 32 ? 4 : 2;
         $elemIndex = intdiv($bitIndex, $opSize);
         $targetAddr = $baseAddr + ($elemIndex * $elemSizeBytes);

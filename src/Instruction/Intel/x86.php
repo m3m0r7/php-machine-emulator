@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\AddImm8;
 use PHPMachineEmulator\Instruction\Intel\x86\AndImm8;
+use PHPMachineEmulator\Instruction\Intel\x86\Arpl;
 use PHPMachineEmulator\Instruction\Intel\x86\Call;
 use PHPMachineEmulator\Instruction\Intel\x86\Cli;
 use PHPMachineEmulator\Instruction\Intel\x86\CmpImmAX;
@@ -22,31 +23,37 @@ use PHPMachineEmulator\Instruction\Intel\x86\Inc;
 use PHPMachineEmulator\Instruction\Intel\x86\ImulImmediate;
 use PHPMachineEmulator\Instruction\Intel\x86\Ins;
 use PHPMachineEmulator\Instruction\Intel\x86\Int_;
+use PHPMachineEmulator\Instruction\Intel\x86\Int1;
 use PHPMachineEmulator\Instruction\Intel\x86\Int3;
+use PHPMachineEmulator\Instruction\Intel\x86\Into;
 use PHPMachineEmulator\Instruction\Intel\x86\Ja;
 use PHPMachineEmulator\Instruction\Intel\x86\Jbe;
 use PHPMachineEmulator\Instruction\Intel\x86\Jc;
+use PHPMachineEmulator\Instruction\Intel\x86\Jcxz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnc;
 use PHPMachineEmulator\Instruction\Intel\x86\Jno;
 use PHPMachineEmulator\Instruction\Intel\x86\Js;
 use PHPMachineEmulator\Instruction\Intel\x86\Jns;
+use PHPMachineEmulator\Instruction\Intel\x86\Jp;
+use PHPMachineEmulator\Instruction\Intel\x86\Jnp;
 use PHPMachineEmulator\Instruction\Intel\x86\Jmp;
 use PHPMachineEmulator\Instruction\Intel\x86\JmpShort;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jg;
+use PHPMachineEmulator\Instruction\Intel\x86\Jge;
 use PHPMachineEmulator\Instruction\Intel\x86\Jl;
 use PHPMachineEmulator\Instruction\Intel\x86\Jle;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsw;
 use PHPMachineEmulator\Instruction\Intel\x86\Loop;
 use PHPMachineEmulator\Instruction\Intel\x86\Loopne;
+use PHPMachineEmulator\Instruction\Intel\x86\Loopz;
 use PHPMachineEmulator\Instruction\Intel\x86\Mov;
 use PHPMachineEmulator\Instruction\Intel\x86\MovImm8;
 use PHPMachineEmulator\Instruction\Intel\x86\MovMem;
 use PHPMachineEmulator\Instruction\Intel\x86\MovFrom8BitReg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsg;
-use PHPMachineEmulator\Instruction\Intel\x86\Movsx;
 use PHPMachineEmulator\Instruction\Intel\x86\MovRm16;
 use PHPMachineEmulator\Instruction\Intel\x86\MovImmToRm;
 use PHPMachineEmulator\Instruction\Intel\x86\MovMoffset;
@@ -69,6 +76,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Pushf;
 use PHPMachineEmulator\Instruction\Intel\x86\Popf;
 use PHPMachineEmulator\Instruction\Intel\x86\Lahf;
 use PHPMachineEmulator\Instruction\Intel\x86\Sahf;
+use PHPMachineEmulator\Instruction\Intel\x86\Salc;
 use PHPMachineEmulator\Instruction\Intel\x86\CallFar;
 use PHPMachineEmulator\Instruction\Intel\x86\JmpFar;
 use PHPMachineEmulator\Instruction\Intel\x86\Iret;
@@ -99,13 +107,16 @@ use PHPMachineEmulator\Instruction\Intel\x86\SegmentOverridePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\LockPrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoBytePrefix;
 use PHPMachineEmulator\Instruction\Intel\x86\CbwCwd;
+use PHPMachineEmulator\Instruction\Intel\x86\Aaa;
+use PHPMachineEmulator\Instruction\Intel\x86\Aad;
+use PHPMachineEmulator\Instruction\Intel\x86\Aam;
+use PHPMachineEmulator\Instruction\Intel\x86\Aas;
 use PHPMachineEmulator\Instruction\Intel\x86\Daa;
 use PHPMachineEmulator\Instruction\Intel\x86\Das;
 use PHPMachineEmulator\Instruction\Intel\x86\Enter;
 use PHPMachineEmulator\Instruction\Intel\x86\Leave;
 use PHPMachineEmulator\Instruction\Intel\x86\Nop;
 use PHPMachineEmulator\Instruction\Intel\x86\In_;
-use PHPMachineEmulator\Instruction\Intel\x86\Or_;
 use PHPMachineEmulator\Instruction\Intel\x86\Out_;
 use PHPMachineEmulator\Instruction\Intel\x86\Outs;
 use PHPMachineEmulator\Instruction\Intel\x86\Bound;
@@ -149,28 +160,36 @@ class x86 implements InstructionListInterface
             Group1::class,
             Group2::class,
             Group3::class,
+            Arpl::class,
             Hlt::class,
             Inc::class,
             Int_::class,
+            Int1::class,
             Int3::class,
+            Into::class,
             Ja::class,
             Jbe::class,
             Jc::class,
+            Jcxz::class,
             Jnc::class,
             Jno::class,
             Js::class,
             Jns::class,
+            Jp::class,
+            Jnp::class,
             Jmp::class,
             JmpShort::class,
             Jnz::class,
             Jz::class,
             Jg::class,
+            Jge::class,
             Jl::class,
             Jle::class,
             Lodsb::class,
             Lodsw::class,
             Loop::class,
             Loopne::class,
+            Loopz::class,
             In_::class,
             Mov::class,
             MovImm8::class,
@@ -183,9 +202,7 @@ class x86 implements InstructionListInterface
             Lds::class,
             Xchg::class,
             Movsg::class,
-            Movsx::class,
             Nop::class,
-            Or_::class,
             Out_::class,
             PopReg::class,
             PopRm::class,
@@ -203,6 +220,7 @@ class x86 implements InstructionListInterface
             Popf::class,
             Lahf::class,
             Sahf::class,
+            Salc::class,
             CallFar::class,
             JmpFar::class,
             Iret::class,
@@ -235,6 +253,10 @@ class x86 implements InstructionListInterface
             LockPrefix::class,
             TwoBytePrefix::class,
             CbwCwd::class,
+            Aaa::class,
+            Aad::class,
+            Aam::class,
+            Aas::class,
             Daa::class,
             Das::class,
             Enter::class,

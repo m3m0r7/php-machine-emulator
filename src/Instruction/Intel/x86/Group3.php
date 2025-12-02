@@ -55,15 +55,18 @@ class Group3 implements InstructionInterface
     protected function test(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         $size = $isByte ? 8 : $opSize;
+        // x86 encoding order: ModR/M -> displacement -> immediate
+        // readRm consumes displacement, so must be called BEFORE reading immediate
+        $value = $this->readRm($runtime, $streamReader, $modRegRM, $size);
         $immediate = $isByte
             ? $streamReader->streamReader()->byte()
             : ($opSize === 32 ? $streamReader->dword() : $streamReader->short());
-        $value = $this->readRm($runtime, $streamReader, $modRegRM, $size);
 
         $runtime
             ->memoryAccessor()
             ->updateFlags($value & $immediate, $size)
-            ->setCarryFlag(false);
+            ->setCarryFlag(false)
+            ->setOverflowFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -102,7 +105,7 @@ class Group3 implements InstructionInterface
             }
         }
 
-        $runtime->memoryAccessor()->setCarryFlag(false);
+        // NOT does NOT affect any flags (unlike NEG)
         return ExecutionStatus::SUCCESS;
     }
 
@@ -148,7 +151,16 @@ class Group3 implements InstructionInterface
             }
         }
 
-        $runtime->memoryAccessor()->setCarryFlag($value !== 0);
+        // NEG sets flags: CF=1 if operand was non-zero, OF=1 if operand was most negative value
+        $mostNegative = match ($size) {
+            8 => 0x80,
+            16 => 0x8000,
+            default => 0x80000000,
+        };
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $size)
+            ->setCarryFlag($value !== 0)
+            ->setOverflowFlag($value === $mostNegative);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -278,9 +290,6 @@ class Group3 implements InstructionInterface
 
             $quotient = (int) ($dividee / $divider);
             $remainder = $dividee % $divider;
-            if ($quotient > 0xFFFF) {
-                throw new FaultException(0x00, 0, 'Divide overflow');
-            }
             if ($quotient > 0xFFFF) {
                 throw new FaultException(0x00, 0, 'Divide overflow');
             }

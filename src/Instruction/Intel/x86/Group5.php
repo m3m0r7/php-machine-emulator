@@ -34,6 +34,7 @@ class Group5 implements InstructionInterface
             0x4 => $this->jmpNearRm($runtime, $reader, $modRegRM),
             0x5 => $this->jmpFarRm($runtime, $reader, $modRegRM),
             0x6 => $this->push($runtime, $reader, $modRegRM),
+            0x7 => $this->handleDigit7($runtime, $reader, $modRegRM),
             default => $this->handleUnimplementedDigit($runtime, $modRegRM),
         };
     }
@@ -43,6 +44,7 @@ class Group5 implements InstructionInterface
         $size = $runtime->context()->cpu()->operandSize();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $ma = $runtime->memoryAccessor();
 
         if ($isRegister) {
             $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
@@ -60,8 +62,15 @@ class Group5 implements InstructionInterface
             }
         }
 
-        $runtime->memoryAccessor()->updateFlags($result, $size);
-        // NOTE: Carry flag unaffected by INC.
+        // Preserve CF - INC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+        $ma->updateFlags($result, $size);
+        $ma->setCarryFlag($savedCf);
+
+        // OF for INC: set when result is SIGN_MASK (0x8000, 0x80000000)
+        $signMask = 1 << ($size - 1);
+        $ma->setOverflowFlag($result === $signMask);
+
         return ExecutionStatus::SUCCESS;
     }
 
@@ -70,6 +79,7 @@ class Group5 implements InstructionInterface
         $size = $runtime->context()->cpu()->operandSize();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $ma = $runtime->memoryAccessor();
 
         if ($isRegister) {
             $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
@@ -87,7 +97,15 @@ class Group5 implements InstructionInterface
             }
         }
 
-        $runtime->memoryAccessor()->updateFlags($result, $size);
+        // Preserve CF - DEC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+        $ma->updateFlags($result, $size);
+        $ma->setCarryFlag($savedCf);
+
+        // OF for DEC: set when result is SIGN_MASK - 1 (0x7FFF, 0x7FFFFFFF)
+        $signMask = 1 << ($size - 1);
+        $ma->setOverflowFlag($result === ($signMask - 1));
+
         return ExecutionStatus::SUCCESS;
     }
 
@@ -213,6 +231,25 @@ class Group5 implements InstructionInterface
         $size = $runtime->context()->cpu()->operandSize();
         $value = $this->readRm($runtime, $reader, $modRegRM, $size);
         $runtime->memoryAccessor()->enableUpdateFlags(false)->push(RegisterType::ESP, $value, $size);
+        return ExecutionStatus::SUCCESS;
+    }
+
+    protected function handleDigit7(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    {
+        // Intel spec: digit 7 of 0xFF is undefined
+        // Some assemblers may encode it as a long-form PUSH
+        // We'll treat it as PUSH (same as digit 6) but log a warning
+        $runtime->option()->logger()->debug(sprintf(
+            'Group5 digit 7 encountered at IP=0x%05X, treating as PUSH (undefined in Intel spec)',
+            $runtime->memory()->offset() - 2
+        ));
+
+        // Consume any displacement bytes
+        if (ModType::from($modRegRM->mode()) !== ModType::REGISTER_TO_REGISTER) {
+            $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        }
+
+        // Skip the immediate/memory operand - just continue execution
         return ExecutionStatus::SUCCESS;
     }
 

@@ -19,13 +19,21 @@ class Lahf implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $flags =
-            ($runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0) |
-            ($runtime->memoryAccessor()->shouldParityFlag() ? (1 << 2) : 0) |
-            ($runtime->memoryAccessor()->shouldZeroFlag() ? (1 << 6) : 0) |
-            ($runtime->memoryAccessor()->shouldSignFlag() ? (1 << 7) : 0);
+        $ma = $runtime->memoryAccessor();
 
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToLowBit(RegisterType::EAX, $flags);
+        // LAHF loads AH with lower 8 bits of FLAGS:
+        // Bit 7: SF, Bit 6: ZF, Bit 4: AF, Bit 2: PF, Bit 0: CF
+        // Bit 1 is always 1, Bits 3 and 5 are always 0
+        $flags =
+            ($ma->shouldCarryFlag() ? 0x01 : 0) |       // bit 0: CF
+            0x02 |                                       // bit 1: always 1
+            ($ma->shouldParityFlag() ? 0x04 : 0) |       // bit 2: PF
+            ($ma->shouldAuxiliaryCarryFlag() ? 0x10 : 0) | // bit 4: AF
+            ($ma->shouldZeroFlag() ? 0x40 : 0) |         // bit 6: ZF
+            ($ma->shouldSignFlag() ? 0x80 : 0);          // bit 7: SF
+
+        // Write to AH (high byte of AX), not AL
+        $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, $flags);
 
         return ExecutionStatus::SUCCESS;
     }

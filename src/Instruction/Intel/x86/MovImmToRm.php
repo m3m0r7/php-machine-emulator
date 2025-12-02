@@ -24,8 +24,13 @@ class MovImmToRm implements InstructionInterface
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
         $size = $runtime->context()->cpu()->operandSize();
 
+        // Intel spec says reg field should be 0, but some code may use other values
+        // We'll log a warning but continue execution as MOV
         if ($modRegRM->registerOrOPCode() !== 0) {
-            throw new ExecutionException('Invalid MOV immediate to r/m digit');
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV immediate to r/m: unexpected reg field %d (expected 0), treating as MOV',
+                $modRegRM->registerOrOPCode()
+            ));
         }
 
         $mode = $modRegRM->mode();

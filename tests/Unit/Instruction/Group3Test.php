@@ -158,6 +158,95 @@ class Group3Test extends InstructionTestCase
     }
 
     // ========================================
+    // NEG Overflow Flag Tests
+    // ========================================
+
+    public function testNegOverflowFlagMostNegative32(): void
+    {
+        // NEG 0x80000000 should set OF (most negative 32-bit value)
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0xF7, 0xD8]); // NEG EAX
+
+        $this->assertTrue($this->getOverflowFlag());
+        $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testNegOverflowFlagMostNegative8(): void
+    {
+        // NEG 0x80 should set OF (most negative 8-bit value)
+        $this->setRegister(RegisterType::EAX, 0x00000080);
+        $this->executeBytes([0xF6, 0xD8]); // NEG AL
+
+        $this->assertTrue($this->getOverflowFlag());
+        $this->assertSame(0x80, $this->getRegister(RegisterType::EAX, 8));
+    }
+
+    public function testNegNoOverflowFlagNormal(): void
+    {
+        // NEG of normal value should not set OF
+        $this->setRegister(RegisterType::EAX, 0x00000001);
+        $this->executeBytes([0xF7, 0xD8]); // NEG EAX
+
+        $this->assertFalse($this->getOverflowFlag());
+        $this->assertSame(0xFFFFFFFF, $this->getRegister(RegisterType::EAX));
+    }
+
+    public function testNegNoOverflowFlagZero(): void
+    {
+        // NEG 0 should not set OF
+        $this->setRegister(RegisterType::EAX, 0x00000000);
+        $this->executeBytes([0xF7, 0xD8]); // NEG EAX
+
+        $this->assertFalse($this->getOverflowFlag());
+        $this->assertFalse($this->getCarryFlag()); // CF=0 when operand is 0
+    }
+
+    public function testNegSetsZeroFlag(): void
+    {
+        // NEG 0 should set ZF
+        $this->setRegister(RegisterType::EAX, 0x00000000);
+        $this->executeBytes([0xF7, 0xD8]); // NEG EAX
+
+        $this->assertTrue($this->getZeroFlag());
+    }
+
+    public function testNegSetsSignFlag(): void
+    {
+        // NEG of positive should produce negative (SF=1)
+        $this->setRegister(RegisterType::EAX, 0x00000001);
+        $this->executeBytes([0xF7, 0xD8]); // NEG EAX
+
+        $this->assertTrue($this->getSignFlag());
+        $this->assertSame(0xFFFFFFFF, $this->getRegister(RegisterType::EAX));
+    }
+
+    // ========================================
+    // TEST Overflow Flag Tests
+    // ========================================
+
+    public function testTestClearsOverflowFlag(): void
+    {
+        // First set OF via a NEG that overflows
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0xF7, 0xD8]); // NEG EAX
+        $this->assertTrue($this->getOverflowFlag()); // Verify OF is set
+
+        // Now TEST should clear it
+        $this->executeBytes([0xF7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]); // TEST EAX, 0xFFFFFFFF
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testTestClearsCarryFlag(): void
+    {
+        // TEST should always clear CF
+        $this->setCarryFlag(true);
+        $this->setRegister(RegisterType::EAX, 0x12345678);
+        $this->executeBytes([0xF7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]); // TEST EAX, 0xFFFFFFFF
+
+        $this->assertFalse($this->getCarryFlag());
+    }
+
+    // ========================================
     // MUL Tests - digit 4
     // ========================================
 

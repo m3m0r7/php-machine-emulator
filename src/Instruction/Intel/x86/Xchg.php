@@ -47,10 +47,24 @@ class Xchg implements InstructionInterface
         $modRegRM = $reader->byteAsModRegRM();
 
         if ($opcode === 0x86) {
-            $rm = $this->readRm8($runtime, $reader, $modRegRM);
+            // For XCHG r8, r/m8: must calculate address ONCE to avoid consuming displacement twice
+            $isRegister8 = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+            $linearAddress8 = $isRegister8 ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
+
+            // Read values
+            if ($isRegister8) {
+                $rm = $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
+            } else {
+                $rm = $this->readMemory8($runtime, $linearAddress8);
+            }
             $reg = $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
 
-            $this->writeRm8($runtime, $reader, $modRegRM, $reg);
+            // Write swapped values
+            if ($isRegister8) {
+                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $reg, updateFlags: false);
+            } else {
+                $this->writeMemory8($runtime, $linearAddress8, $reg);
+            }
             $this->write8BitRegister($runtime, $modRegRM->registerOrOPCode(), $rm, updateFlags: false);
 
             return ExecutionStatus::SUCCESS;

@@ -30,7 +30,19 @@ class Scasw implements InstructionInterface
 
         $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
 
-        $runtime->memoryAccessor()->updateFlags($ax - $value, $opSize)->setCarryFlag($ax < $value);
+        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $signBit = $opSize === 32 ? 31 : 15;
+        $calc = $ax - $value;
+        $result = $calc & $mask;
+        // OF for CMP/SCAS: set if signs of operands differ and result sign equals subtrahend sign
+        $signA = ($ax >> $signBit) & 1;
+        $signB = ($value >> $signBit) & 1;
+        $signR = ($result >> $signBit) & 1;
+        $of = ($signA !== $signB) && ($signB === $signR);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $opSize)
+            ->setCarryFlag($calc < 0)
+            ->setOverflowFlag($of);
 
         $step = $this->stepForElement($runtime, $width);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $step);

@@ -180,15 +180,25 @@ trait AddressingTrait
             }
         }
 
+        // In 32-bit mode, all values and calculations must be masked to 32 bits
+        // The index value from a register might appear as a large positive number in PHP
+        // but should be treated as a signed 32-bit value for address calculation
         $mask = $runtime->context()->cpu()->isProtectedMode() ? 0xFFFFFFFF : 0xFFFFF;
-        $offset = ($baseVal + $indexVal * $scale + $disp) & $mask;
+
+        // Mask all components to 32 bits before calculation
+        $baseVal32 = $baseVal & 0xFFFFFFFF;
+        $indexVal32 = $indexVal & 0xFFFFFFFF;
+        $scaledIndex = ($indexVal32 * $scale) & 0xFFFFFFFF;
+
+        // Perform addition with 32-bit wraparound
+        $offset = ($baseVal32 + $scaledIndex + $disp) & $mask;
 
         // Debug: log 32-bit SIB addressing when base is EDI
         if ($rm === 0b100 && isset($sib) && $sib->base() === 0b111) {
             $runtime->option()->logger()->debug(sprintf(
                 'effectiveAddress32 SIB [EDI+index]: base=0x%08X index=0x%08X scale=%d offset=0x%08X',
-                $baseVal,
-                $indexVal,
+                $baseVal32,
+                $indexVal32,
                 $scale,
                 $offset
             ));

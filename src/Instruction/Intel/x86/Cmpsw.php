@@ -36,7 +36,19 @@ class Cmpsw implements InstructionInterface
             ? $this->readMemory32($runtime, $rightAddress)
             : $this->readMemory16($runtime, $rightAddress);
 
-        $runtime->memoryAccessor()->updateFlags($left - $right, $opSize)->setCarryFlag($left < $right);
+        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $signBit = $opSize === 32 ? 31 : 15;
+        $calc = $left - $right;
+        $result = $calc & $mask;
+        // OF for CMP/CMPS: set if signs of operands differ and result sign equals subtrahend sign
+        $signA = ($left >> $signBit) & 1;
+        $signB = ($right >> $signBit) & 1;
+        $signR = ($result >> $signBit) & 1;
+        $of = ($signA !== $signB) && ($signB === $signR);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $opSize)
+            ->setCarryFlag($calc < 0)
+            ->setOverflowFlag($of);
 
         $step = $this->stepForElement($runtime, $width);
         $this->writeIndex($runtime, RegisterType::ESI, $si + $step);

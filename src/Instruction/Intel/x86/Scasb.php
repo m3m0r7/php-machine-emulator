@@ -27,8 +27,17 @@ class Scasb implements InstructionInterface
         );
         $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
 
-
-        $runtime->memoryAccessor()->updateFlags($al - $value, 8)->setCarryFlag($al < $value);
+        $calc = $al - $value;
+        $result = $calc & 0xFF;
+        // OF for CMP/SCAS: set if signs of operands differ and result sign equals subtrahend sign
+        $signA = ($al >> 7) & 1;
+        $signB = ($value >> 7) & 1;
+        $signR = ($result >> 7) & 1;
+        $of = ($signA !== $signB) && ($signB === $signR);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, 8)
+            ->setCarryFlag($calc < 0)
+            ->setOverflowFlag($of);
 
         $step = $this->stepForElement($runtime, 1);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $step);

@@ -35,6 +35,7 @@ class Group4 implements InstructionInterface
     protected function inc(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $ma = $runtime->memoryAccessor();
 
         if ($isRegister) {
             $value = $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
@@ -48,7 +49,14 @@ class Group4 implements InstructionInterface
             $this->writeMemory8($runtime, $address, $result);
         }
 
-        $runtime->memoryAccessor()->updateFlags($result, 8); // CF unaffected in INC
+        // Preserve CF - INC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+        $ma->updateFlags($result, 8);
+        $ma->setCarryFlag($savedCf);
+
+        // OF for INC: set when result is 0x80 (incrementing 0x7F to 0x80)
+        $ma->setOverflowFlag($result === 0x80);
+
         $runtime->option()->logger()->debug(sprintf('INC r/m8: %d -> %d (rm=%d)', $value, $result, $modRegRM->registerOrMemoryAddress()));
         return ExecutionStatus::SUCCESS;
     }
@@ -56,6 +64,7 @@ class Group4 implements InstructionInterface
     protected function dec(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+        $ma = $runtime->memoryAccessor();
 
         if ($isRegister) {
             $value = $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
@@ -69,7 +78,14 @@ class Group4 implements InstructionInterface
             $this->writeMemory8($runtime, $address, $result);
         }
 
-        $runtime->memoryAccessor()->updateFlags($result, 8);
+        // Preserve CF - DEC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+        $ma->updateFlags($result, 8);
+        $ma->setCarryFlag($savedCf);
+
+        // OF for DEC: set when result is 0x7F (decrementing 0x80 to 0x7F)
+        $ma->setOverflowFlag($result === 0x7F);
+
         return ExecutionStatus::SUCCESS;
     }
 }

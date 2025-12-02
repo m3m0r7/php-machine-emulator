@@ -373,4 +373,114 @@ class IncDecTest extends InstructionTestCase
         $this->assertSame(0, $this->getRegister(RegisterType::EAX));
         $this->assertTrue($this->getZeroFlag());
     }
+
+    // ========================================
+    // Overflow Flag Tests
+    // ========================================
+
+    /**
+     * INC sets OF when result is 0x80000000 (incrementing 0x7FFFFFFF to 0x80000000)
+     * This is the max positive value becoming the min negative value
+     */
+    public function testIncSetsOverflowFlagOnPositiveToNegative(): void
+    {
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0x40]); // INC EAX
+
+        $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    /**
+     * INC does NOT set OF for normal increments
+     */
+    public function testIncClearsOverflowFlagNormalCase(): void
+    {
+        $this->setRegister(RegisterType::EAX, 0x00000001);
+        $this->executeBytes([0x40]); // INC EAX
+
+        $this->assertSame(0x00000002, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    /**
+     * INC does NOT set OF when wrapping from 0xFFFFFFFF to 0x00000000
+     * This is unsigned overflow, not signed overflow
+     */
+    public function testIncDoesNotSetOverflowFlagOnWrap(): void
+    {
+        $this->setRegister(RegisterType::EAX, 0xFFFFFFFF);
+        $this->executeBytes([0x40]); // INC EAX
+
+        $this->assertSame(0x00000000, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    /**
+     * DEC sets OF when result is 0x7FFFFFFF (decrementing 0x80000000 to 0x7FFFFFFF)
+     * This is the min negative value becoming the max positive value
+     */
+    public function testDecSetsOverflowFlagOnNegativeToPositive(): void
+    {
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0x48]); // DEC EAX
+
+        $this->assertSame(0x7FFFFFFF, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    /**
+     * DEC does NOT set OF for normal decrements
+     */
+    public function testDecClearsOverflowFlagNormalCase(): void
+    {
+        $this->setRegister(RegisterType::EAX, 0x00000002);
+        $this->executeBytes([0x48]); // DEC EAX
+
+        $this->assertSame(0x00000001, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    /**
+     * DEC does NOT set OF when wrapping from 0x00000000 to 0xFFFFFFFF
+     * This is unsigned underflow, not signed overflow
+     */
+    public function testDecDoesNotSetOverflowFlagOnWrap(): void
+    {
+        $this->setRegister(RegisterType::EAX, 0x00000000);
+        $this->executeBytes([0x48]); // DEC EAX
+
+        $this->assertSame(0xFFFFFFFF, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    /**
+     * INC in 16-bit mode sets OF when result is 0x8000
+     */
+    public function testIncSetsOverflowFlag16Bit(): void
+    {
+        // Set operand size to 16-bit
+        $this->cpuContext->setDefaultOperandSize(16);
+
+        $this->setRegister(RegisterType::EAX, 0x7FFF);
+        $this->executeBytes([0x40]); // INC AX
+
+        $this->assertSame(0x8000, $this->getRegister(RegisterType::EAX) & 0xFFFF);
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    /**
+     * DEC in 16-bit mode sets OF when result is 0x7FFF
+     */
+    public function testDecSetsOverflowFlag16Bit(): void
+    {
+        // Set operand size to 16-bit
+        $this->cpuContext->setDefaultOperandSize(16);
+
+        $this->setRegister(RegisterType::EAX, 0x8000);
+        $this->executeBytes([0x48]); // DEC AX
+
+        $this->assertSame(0x7FFF, $this->getRegister(RegisterType::EAX) & 0xFFFF);
+        $this->assertTrue($this->getOverflowFlag());
+    }
 }

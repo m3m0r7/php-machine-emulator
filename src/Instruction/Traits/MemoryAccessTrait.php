@@ -56,11 +56,20 @@ trait MemoryAccessTrait
      */
     protected function writeMemory8(RuntimeInterface $runtime, int $address, int $value): void
     {
-        $physical = $this->translateLinear($runtime, $address, true);
-        if ($this->writeMmio($runtime, $physical, $value & 0xFF, 8)) {
-            return;
+        $ma = $runtime->memoryAccessor();
+        $previousFlagState = $ma->shouldUpdateFlags();
+        $ma->enableUpdateFlags(false);
+        try {
+            $physical = $this->translateLinear($runtime, $address, true);
+            if ($this->writeMmio($runtime, $physical, $value & 0xFF, 8)) {
+                return;
+            }
+            $ma->writeRawByte($physical, $value & 0xFF);
+        } catch (\Throwable) {
+            // Address out of bounds - ignore write to unmapped memory
+        } finally {
+            $ma->enableUpdateFlags($previousFlagState);
         }
-        $runtime->memoryAccessor()->writeRawByte($physical, $value & 0xFF);
     }
 
     /**
@@ -330,12 +339,12 @@ trait MemoryAccessTrait
             return $mmio;
         }
 
-        $value = $runtime->memoryAccessor()->readRawByte($address);
-        if ($value !== null) {
-            return $value;
-        }
-
         try {
+            $value = $runtime->memoryAccessor()->readRawByte($address);
+            if ($value !== null) {
+                return $value;
+            }
+
             $memory = $runtime->memory();
             $currentOffset = $memory->offset();
             $memory->setOffset($address);
@@ -343,6 +352,7 @@ trait MemoryAccessTrait
             $memory->setOffset($currentOffset);
             return $byte;
         } catch (\Throwable) {
+            // Address out of bounds - return 0 (unmapped memory)
             return 0;
         }
     }

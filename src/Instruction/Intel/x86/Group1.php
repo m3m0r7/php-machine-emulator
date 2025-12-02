@@ -74,21 +74,29 @@ class Group1 implements InstructionInterface
             $original = $isReg
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
-            $result = $original + ($operand & 0xFF);
+            $op = $operand & 0xFF;
+            $result = $original + $op;
             $maskedResult = $result & 0xFF;
             if ($isReg) {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $maskedResult);
             }
+            // OF for ADD: set if signs of operands are same but result sign differs
+            $signA = ($original >> 7) & 1;
+            $signB = ($op >> 7) & 1;
+            $signR = ($maskedResult >> 7) & 1;
+            $of = ($signA === $signB) && ($signA !== $signR);
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
-                ->setCarryFlag($result > 0xFF);
+                ->setCarryFlag($result > 0xFF)
+                ->setOverflowFlag($of);
 
             return ExecutionStatus::SUCCESS;
         }
 
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $signBit = $opSize === 32 ? 31 : 15;
         $original = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
@@ -107,9 +115,15 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $maskedResult);
             }
         }
+        // OF for ADD: set if signs of operands are same but result sign differs
+        $signA = ($original >> $signBit) & 1;
+        $signB = ($unsignedOperand >> $signBit) & 1;
+        $signR = ($maskedResult >> $signBit) & 1;
+        $of = ($signA === $signB) && ($signA !== $signR);
         $runtime->memoryAccessor()
             ->updateFlags($maskedResult, $opSize)
-            ->setCarryFlag($result > $mask);
+            ->setCarryFlag($result > $mask)
+            ->setOverflowFlag($of);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -128,7 +142,8 @@ class Group1 implements InstructionInterface
             }
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
-                ->setCarryFlag(false);
+                ->setCarryFlag(false)
+                ->setOverflowFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -150,7 +165,8 @@ class Group1 implements InstructionInterface
         }
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
-            ->setCarryFlag(false);
+            ->setCarryFlag(false)
+            ->setOverflowFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -163,21 +179,29 @@ class Group1 implements InstructionInterface
             $left = $isReg
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
-            $result = $left + ($operand & 0xFF) + $carry;
+            $op = $operand & 0xFF;
+            $result = $left + $op + $carry;
             $maskedResult = $result & 0xFF;
             if ($isReg) {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $maskedResult);
             }
+            // OF for ADC: set if signs of operands are same but result sign differs
+            $signA = ($left >> 7) & 1;
+            $signB = ($op >> 7) & 1;
+            $signR = ($maskedResult >> 7) & 1;
+            $of = ($signA === $signB) && ($signA !== $signR);
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
-                ->setCarryFlag($result > 0xFF);
+                ->setCarryFlag($result > 0xFF)
+                ->setOverflowFlag($of);
 
             return ExecutionStatus::SUCCESS;
         }
 
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $signBit = $opSize === 32 ? 31 : 15;
         $left = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
@@ -194,9 +218,15 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $maskedResult);
             }
         }
+        // OF for ADC: set if signs of operands are same but result sign differs
+        $signA = ($left >> $signBit) & 1;
+        $signB = ($unsignedOperand >> $signBit) & 1;
+        $signR = ($maskedResult >> $signBit) & 1;
+        $of = ($signA === $signB) && ($signA !== $signR);
         $runtime->memoryAccessor()
             ->updateFlags($maskedResult, $opSize)
-            ->setCarryFlag($result > $mask);
+            ->setCarryFlag($result > $mask)
+            ->setOverflowFlag($of);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -209,21 +239,29 @@ class Group1 implements InstructionInterface
             $left = $isReg
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
-            $calc = $left - ($operand & 0xFF) - $borrow;
+            $op = $operand & 0xFF;
+            $calc = $left - $op - $borrow;
             $result = $calc & 0xFF;
             if ($isReg) {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
+            // OF for SUB/SBB: set if signs of operands differ and result sign equals subtrahend sign
+            $signA = ($left >> 7) & 1;
+            $signB = ($op >> 7) & 1;
+            $signR = ($result >> 7) & 1;
+            $of = ($signA !== $signB) && ($signB === $signR);
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
-                ->setCarryFlag($calc < 0);
+                ->setCarryFlag($calc < 0)
+                ->setOverflowFlag($of);
 
             return ExecutionStatus::SUCCESS;
         }
 
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $signBit = $opSize === 32 ? 31 : 15;
         $left = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
@@ -241,9 +279,15 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $result);
             }
         }
+        // OF for SUB/SBB: set if signs of operands differ and result sign equals subtrahend sign
+        $signA = ($left >> $signBit) & 1;
+        $signB = ($unsignedOperand >> $signBit) & 1;
+        $signR = ($result >> $signBit) & 1;
+        $of = ($signA !== $signB) && ($signB === $signR);
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
-            ->setCarryFlag($calc < 0);
+            ->setCarryFlag($calc < 0)
+            ->setOverflowFlag($of);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -262,7 +306,8 @@ class Group1 implements InstructionInterface
             }
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
-                ->setCarryFlag(false);
+                ->setCarryFlag(false)
+                ->setOverflowFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -284,7 +329,8 @@ class Group1 implements InstructionInterface
         }
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
-            ->setCarryFlag(false);
+            ->setCarryFlag(false)
+            ->setOverflowFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -295,21 +341,29 @@ class Group1 implements InstructionInterface
             $left = $isReg
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
-            $calc = $left - ($operand & 0xFF);
+            $op = $operand & 0xFF;
+            $calc = $left - $op;
             $result = $calc & 0xFF;
             if ($isReg) {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
+            // OF for SUB: set if signs of operands differ and result sign equals subtrahend sign
+            $signA = ($left >> 7) & 1;
+            $signB = ($op >> 7) & 1;
+            $signR = ($result >> 7) & 1;
+            $of = ($signA !== $signB) && ($signB === $signR);
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
-                ->setCarryFlag($calc < 0);
+                ->setCarryFlag($calc < 0)
+                ->setOverflowFlag($of);
 
             return ExecutionStatus::SUCCESS;
         }
 
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $signBit = $opSize === 32 ? 31 : 15;
         $left = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
@@ -327,9 +381,15 @@ class Group1 implements InstructionInterface
                 $this->writeMemory16($runtime, $linearAddr, $result);
             }
         }
+        // OF for SUB: set if signs of operands differ and result sign equals subtrahend sign
+        $signA = ($left >> $signBit) & 1;
+        $signB = ($unsignedOperand >> $signBit) & 1;
+        $signR = ($result >> $signBit) & 1;
+        $of = ($signA !== $signB) && ($signB === $signR);
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
-            ->setCarryFlag($calc < 0);
+            ->setCarryFlag($calc < 0)
+            ->setOverflowFlag($of);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -348,7 +408,8 @@ class Group1 implements InstructionInterface
             }
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
-                ->setCarryFlag(false);
+                ->setCarryFlag(false)
+                ->setOverflowFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -370,7 +431,8 @@ class Group1 implements InstructionInterface
         }
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
-            ->setCarryFlag(false);
+            ->setCarryFlag(false)
+            ->setOverflowFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -378,29 +440,48 @@ class Group1 implements InstructionInterface
     protected function cmp(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
-            $leftHand = $isReg
+            $left = $isReg
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $linearAddr);
-            $leftHand &= 0xFF;
+            $left &= 0xFF;
+            $op = $operand & 0xFF;
+            $calc = $left - $op;
+            $result = $calc & 0xFF;
+            // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
+            $signA = ($left >> 7) & 1;
+            $signB = ($op >> 7) & 1;
+            $signR = ($result >> 7) & 1;
+            $of = ($signA !== $signB) && ($signB === $signR);
             $runtime
                 ->memoryAccessor()
-                ->updateFlags($leftHand - ($operand & 0xFF), 8)
-                ->setCarryFlag($leftHand < ($operand & 0xFF));
-            $runtime->option()->logger()->debug(sprintf('CMP r/m8, imm8: left=0x%02X right=0x%02X ZF=%d', $leftHand, $operand & 0xFF, $leftHand === ($operand & 0xFF) ? 1 : 0));
+                ->updateFlags($result, 8)
+                ->setCarryFlag($calc < 0)
+                ->setOverflowFlag($of);
+            $runtime->option()->logger()->debug(sprintf('CMP r/m8, imm8: left=0x%02X right=0x%02X ZF=%d', $left, $op, $left === $op ? 1 : 0));
 
             return ExecutionStatus::SUCCESS;
         }
 
-        $leftHand = $isReg
+        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $signBit = $opSize === 32 ? 31 : 15;
+        $left = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
-        $newCF = $leftHand < $operand;
-
+        // Convert sign-extended operand to unsigned for proper borrow calculation
+        $unsignedOperand = $operand & $mask;
+        $calc = $left - $unsignedOperand;
+        $result = $calc & $mask;
+        // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
+        $signA = ($left >> $signBit) & 1;
+        $signB = ($unsignedOperand >> $signBit) & 1;
+        $signR = ($result >> $signBit) & 1;
+        $of = ($signA !== $signB) && ($signB === $signR);
         $runtime
             ->memoryAccessor()
-            ->updateFlags($leftHand - $operand, $opSize)
-            ->setCarryFlag($newCF);
-        $runtime->option()->logger()->debug(sprintf('CMP r/m%d, imm: left=0x%04X right=0x%04X ZF=%d', $opSize, $leftHand, $operand, $leftHand === $operand ? 1 : 0));
+            ->updateFlags($result, $opSize)
+            ->setCarryFlag($calc < 0)
+            ->setOverflowFlag($of);
+        $runtime->option()->logger()->debug(sprintf('CMP r/m%d, imm: left=0x%04X right=0x%04X ZF=%d', $opSize, $left, $unsignedOperand, $left === $unsignedOperand ? 1 : 0));
 
         return ExecutionStatus::SUCCESS;
     }

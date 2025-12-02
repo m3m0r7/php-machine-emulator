@@ -19,11 +19,18 @@ class Sahf implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $flags = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
+        // SAHF stores AH into lower 8 bits of FLAGS
+        // Read from AH (high byte of AX), not AL
+        $flags = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asHighBit();
+        $ma = $runtime->memoryAccessor();
 
-        $runtime->memoryAccessor()->setCarryFlag(($flags & 0x1) !== 0);
-        $runtime->memoryAccessor()->enableUpdateFlags(false)->updateFlags(($flags & (1 << 6)) ? 0 : 1, 8);
-        $runtime->memoryAccessor()->enableUpdateFlags(false);
+        // Restore flags from AH:
+        // Bit 7: SF, Bit 6: ZF, Bit 4: AF, Bit 2: PF, Bit 0: CF
+        $ma->setCarryFlag(($flags & 0x01) !== 0);        // bit 0: CF
+        $ma->setParityFlag(($flags & 0x04) !== 0);       // bit 2: PF
+        $ma->setAuxiliaryCarryFlag(($flags & 0x10) !== 0); // bit 4: AF
+        $ma->setZeroFlag(($flags & 0x40) !== 0);         // bit 6: ZF
+        $ma->setSignFlag(($flags & 0x80) !== 0);         // bit 7: SF
 
         return ExecutionStatus::SUCCESS;
     }

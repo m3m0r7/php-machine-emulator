@@ -10,6 +10,8 @@ use PHPMachineEmulator\Instruction\Intel\x86\PopReg;
 use PHPMachineEmulator\Instruction\Intel\x86\PushImm;
 use PHPMachineEmulator\Instruction\Intel\x86\Pusha;
 use PHPMachineEmulator\Instruction\Intel\x86\Popa;
+use PHPMachineEmulator\Instruction\Intel\x86\Pushf;
+use PHPMachineEmulator\Instruction\Intel\x86\Popf;
 use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\RegisterType;
 
@@ -30,6 +32,8 @@ class PushPopTest extends InstructionTestCase
     private PushImm $pushImm;
     private Pusha $pusha;
     private Popa $popa;
+    private Pushf $pushf;
+    private Popf $popf;
 
     protected function setUp(): void
     {
@@ -44,6 +48,8 @@ class PushPopTest extends InstructionTestCase
         $this->pushImm = new PushImm($instructionList);
         $this->pusha = new Pusha($instructionList);
         $this->popa = new Popa($instructionList);
+        $this->pushf = new Pushf($instructionList);
+        $this->popf = new Popf($instructionList);
     }
 
     protected function getInstructionByOpcode(int $opcode): ?object
@@ -54,6 +60,8 @@ class PushPopTest extends InstructionTestCase
             $opcode === 0x68 || $opcode === 0x6A => $this->pushImm,
             $opcode === 0x60 => $this->pusha,
             $opcode === 0x61 => $this->popa,
+            $opcode === 0x9C => $this->pushf,
+            $opcode === 0x9D => $this->popf,
             default => null,
         };
     }
@@ -555,5 +563,210 @@ class PushPopTest extends InstructionTestCase
         // Flags should remain unchanged
         $this->assertTrue($this->getCarryFlag());
         $this->assertTrue($this->getZeroFlag());
+    }
+
+    // ========================================
+    // PUSHF (0x9C) Tests
+    // ========================================
+
+    public function testPushfPushesAllFlags(): void
+    {
+        $this->initStack(0x8000);
+
+        // Set all testable flags
+        $this->memoryAccessor->setCarryFlag(true);      // bit 0
+        $this->memoryAccessor->setParityFlag(true);     // bit 2
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true); // bit 4
+        $this->memoryAccessor->setZeroFlag(true);       // bit 6
+        $this->memoryAccessor->setSignFlag(true);       // bit 7
+        $this->memoryAccessor->setInterruptFlag(true);  // bit 9
+        $this->memoryAccessor->setDirectionFlag(true);  // bit 10
+        $this->memoryAccessor->setOverflowFlag(true);   // bit 11
+
+        $this->executeBytes([0x9C]); // PUSHF
+
+        $this->assertSame(0x7FFC, $this->getStackPointer());
+        $pushedFlags = $this->readMemory(0x7FFC, 32);
+
+        // Check each flag bit
+        $this->assertTrue(($pushedFlags & 0x0001) !== 0, 'CF should be set in pushed flags');
+        $this->assertTrue(($pushedFlags & 0x0002) !== 0, 'Reserved bit 1 should be set');
+        $this->assertTrue(($pushedFlags & 0x0004) !== 0, 'PF should be set in pushed flags');
+        $this->assertTrue(($pushedFlags & 0x0010) !== 0, 'AF should be set in pushed flags');
+        $this->assertTrue(($pushedFlags & 0x0040) !== 0, 'ZF should be set in pushed flags');
+        $this->assertTrue(($pushedFlags & 0x0080) !== 0, 'SF should be set in pushed flags');
+        $this->assertTrue(($pushedFlags & 0x0200) !== 0, 'IF should be set in pushed flags');
+        $this->assertTrue(($pushedFlags & 0x0400) !== 0, 'DF should be set in pushed flags');
+        $this->assertTrue(($pushedFlags & 0x0800) !== 0, 'OF should be set in pushed flags');
+    }
+
+    public function testPushfPushesOnlyAfFlag(): void
+    {
+        $this->initStack(0x8000);
+
+        // Clear all flags, set only AF
+        $this->memoryAccessor->setCarryFlag(false);
+        $this->memoryAccessor->setParityFlag(false);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true);
+        $this->memoryAccessor->setZeroFlag(false);
+        $this->memoryAccessor->setSignFlag(false);
+        $this->memoryAccessor->setInterruptFlag(false);
+        $this->memoryAccessor->setDirectionFlag(false);
+        $this->memoryAccessor->setOverflowFlag(false);
+
+        $this->executeBytes([0x9C]); // PUSHF
+
+        $pushedFlags = $this->readMemory(0x7FFC, 32);
+
+        // Only AF and reserved bit should be set
+        $this->assertFalse(($pushedFlags & 0x0001) !== 0, 'CF should be clear');
+        $this->assertTrue(($pushedFlags & 0x0010) !== 0, 'AF should be set');
+        $this->assertFalse(($pushedFlags & 0x0040) !== 0, 'ZF should be clear');
+    }
+
+    public function testPushfPushesClearedFlags(): void
+    {
+        $this->initStack(0x8000);
+
+        // Clear all flags
+        $this->memoryAccessor->setCarryFlag(false);
+        $this->memoryAccessor->setParityFlag(false);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(false);
+        $this->memoryAccessor->setZeroFlag(false);
+        $this->memoryAccessor->setSignFlag(false);
+        $this->memoryAccessor->setInterruptFlag(false);
+        $this->memoryAccessor->setDirectionFlag(false);
+        $this->memoryAccessor->setOverflowFlag(false);
+
+        $this->executeBytes([0x9C]); // PUSHF
+
+        $pushedFlags = $this->readMemory(0x7FFC, 32);
+
+        // Only reserved bit 1 should be set
+        $this->assertSame(0x0002, $pushedFlags & 0x0FD7, 'Only reserved bit should be set (ignoring IOPL/NT)');
+    }
+
+    // ========================================
+    // POPF (0x9D) Tests
+    // ========================================
+
+    public function testPopfRestoresAllFlags(): void
+    {
+        $this->initStack(0x7FFC);
+
+        // Push flags value with all testable flags set
+        // CF(1) | PF(4) | AF(16) | ZF(64) | SF(128) | IF(512) | DF(1024) | OF(2048)
+        $flags = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0040 | 0x0080 | 0x0200 | 0x0400 | 0x0800;
+        $this->writeMemory(0x7FFC, $flags, 32);
+
+        // Clear all flags before POPF
+        $this->memoryAccessor->setCarryFlag(false);
+        $this->memoryAccessor->setParityFlag(false);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(false);
+        $this->memoryAccessor->setZeroFlag(false);
+        $this->memoryAccessor->setSignFlag(false);
+        $this->memoryAccessor->setOverflowFlag(false);
+        $this->memoryAccessor->setDirectionFlag(false);
+        $this->memoryAccessor->setInterruptFlag(false);
+
+        $this->executeBytes([0x9D]); // POPF
+
+        // Verify all flags are restored
+        $this->assertTrue($this->getCarryFlag(), 'CF should be set');
+        $this->assertTrue($this->memoryAccessor->shouldParityFlag(), 'PF should be set');
+        $this->assertTrue($this->memoryAccessor->shouldAuxiliaryCarryFlag(), 'AF should be set');
+        $this->assertTrue($this->getZeroFlag(), 'ZF should be set');
+        $this->assertTrue($this->getSignFlag(), 'SF should be set');
+        $this->assertTrue($this->getOverflowFlag(), 'OF should be set');
+        $this->assertTrue($this->getDirectionFlag(), 'DF should be set');
+    }
+
+    public function testPopfClearsAllFlags(): void
+    {
+        $this->initStack(0x7FFC);
+
+        // Push flags value with only reserved bit set
+        $flags = 0x0002;
+        $this->writeMemory(0x7FFC, $flags, 32);
+
+        // Set all flags before POPF
+        $this->memoryAccessor->setCarryFlag(true);
+        $this->memoryAccessor->setParityFlag(true);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true);
+        $this->memoryAccessor->setZeroFlag(true);
+        $this->memoryAccessor->setSignFlag(true);
+        $this->memoryAccessor->setOverflowFlag(true);
+        $this->memoryAccessor->setDirectionFlag(true);
+
+        $this->executeBytes([0x9D]); // POPF
+
+        // Verify all flags are cleared
+        $this->assertFalse($this->getCarryFlag(), 'CF should be clear');
+        $this->assertFalse($this->memoryAccessor->shouldParityFlag(), 'PF should be clear');
+        $this->assertFalse($this->memoryAccessor->shouldAuxiliaryCarryFlag(), 'AF should be clear');
+        $this->assertFalse($this->getZeroFlag(), 'ZF should be clear');
+        $this->assertFalse($this->getSignFlag(), 'SF should be clear');
+        $this->assertFalse($this->getOverflowFlag(), 'OF should be clear');
+        $this->assertFalse($this->getDirectionFlag(), 'DF should be clear');
+    }
+
+    public function testPopfRestoresOnlyAf(): void
+    {
+        $this->initStack(0x7FFC);
+
+        // Push flags value with only AF set
+        $flags = 0x0012; // reserved bit + AF
+        $this->writeMemory(0x7FFC, $flags, 32);
+
+        // Clear AF, set CF before POPF
+        $this->memoryAccessor->setAuxiliaryCarryFlag(false);
+        $this->memoryAccessor->setCarryFlag(true);
+
+        $this->executeBytes([0x9D]); // POPF
+
+        $this->assertTrue($this->memoryAccessor->shouldAuxiliaryCarryFlag(), 'AF should be set');
+        $this->assertFalse($this->getCarryFlag(), 'CF should be clear');
+    }
+
+    public function testPushfPopfRoundtrip(): void
+    {
+        $this->initStack(0x8000);
+
+        // Set specific flag pattern
+        $this->memoryAccessor->setCarryFlag(true);
+        $this->memoryAccessor->setParityFlag(false);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true);
+        $this->memoryAccessor->setZeroFlag(false);
+        $this->memoryAccessor->setSignFlag(true);
+        $this->memoryAccessor->setOverflowFlag(false);
+        $this->memoryAccessor->setDirectionFlag(true);
+
+        // PUSHF
+        $this->executeBytes([0x9C]);
+
+        // Change all flags
+        $this->memoryAccessor->setCarryFlag(false);
+        $this->memoryAccessor->setParityFlag(true);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(false);
+        $this->memoryAccessor->setZeroFlag(true);
+        $this->memoryAccessor->setSignFlag(false);
+        $this->memoryAccessor->setOverflowFlag(true);
+        $this->memoryAccessor->setDirectionFlag(false);
+
+        // POPF
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0x9D));
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->byte();
+        $this->popf->process($this->runtime, 0x9D);
+
+        // Verify original pattern is restored
+        $this->assertTrue($this->getCarryFlag(), 'CF should be set');
+        $this->assertFalse($this->memoryAccessor->shouldParityFlag(), 'PF should be clear');
+        $this->assertTrue($this->memoryAccessor->shouldAuxiliaryCarryFlag(), 'AF should be set');
+        $this->assertFalse($this->getZeroFlag(), 'ZF should be clear');
+        $this->assertTrue($this->getSignFlag(), 'SF should be set');
+        $this->assertFalse($this->getOverflowFlag(), 'OF should be clear');
+        $this->assertTrue($this->getDirectionFlag(), 'DF should be set');
     }
 }

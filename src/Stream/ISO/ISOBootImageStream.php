@@ -32,13 +32,12 @@ class ISOBootImageStream implements BootableStreamInterface
         $this->bootData = $bootImage->data();
         $this->isNoEmulation = $bootImage->isNoEmulation();
 
-        // For No Emulation mode, BIOS only loads the first sector (2048 bytes)
-        // The boot code is responsible for loading the rest via INT 13h
-        if ($this->isNoEmulation) {
-            $this->fileSize = min(strlen($this->bootData), ISO9660::SECTOR_SIZE);
-        } else {
-            $this->fileSize = strlen($this->bootData);
-        }
+        // For No Emulation mode, the entire boot image (as specified in the Boot
+        // Info Table) should be loaded. ISOLINUX expects the full isolinux.bin
+        // to be available at load address (0x7C00). The Boot Info Table's bi_length
+        // field contains the actual size of the boot file.
+        // The El Torito sector count field is often not accurate for ISOLINUX.
+        $this->fileSize = strlen($this->bootData);
     }
 
     public function bootImage(): BootImage

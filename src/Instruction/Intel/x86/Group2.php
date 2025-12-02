@@ -36,7 +36,7 @@ class Group2 implements InstructionInterface
             0x1 => $this->rotateRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             0x2 => $this->rotateCarryLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             0x3 => $this->rotateCarryRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
-            0x4 => $this->shiftLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
+            0x4, 0x6 => $this->shiftLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize), // 0x6 is undocumented SAL alias
             0x5 => $this->shiftRightLogical($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             0x7 => $this->shiftRightArithmetic($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             default => throw new ExecutionException(
@@ -78,8 +78,16 @@ class Group2 implements InstructionInterface
             } else {
                 $this->writeMemory8($runtime, $address, $result);
             }
-            $runtime->memoryAccessor()->setCarryFlag($count > 0 ? ($result & 0x1) !== 0 : false);
-            $runtime->memoryAccessor()->updateFlags($result, 8);
+            // ROL only affects CF and OF, not SF/ZF/PF/AF
+            if ($count > 0) {
+                $cf = ($result & 0x1) !== 0;
+                $runtime->memoryAccessor()->setCarryFlag($cf);
+                // OF is only defined for count=1: OF = MSB XOR CF
+                if ($operand === 1) {
+                    $msb = ($result >> 7) & 1;
+                    $runtime->memoryAccessor()->setOverflowFlag($msb !== ($cf ? 1 : 0));
+                }
+            }
 
             return ExecutionStatus::SUCCESS;
         }
@@ -100,8 +108,16 @@ class Group2 implements InstructionInterface
                 $this->writeMemory16($runtime, $address, $result);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag($count > 0 ? ($result & 0x1) !== 0 : false);
-        $runtime->memoryAccessor()->updateFlags($result, $size);
+        // ROL only affects CF and OF, not SF/ZF/PF/AF
+        if ($count > 0) {
+            $cf = ($result & 0x1) !== 0;
+            $runtime->memoryAccessor()->setCarryFlag($cf);
+            // OF is only defined for count=1: OF = MSB XOR CF
+            if ($operand === 1) {
+                $msb = ($result >> ($size - 1)) & 1;
+                $runtime->memoryAccessor()->setOverflowFlag($msb !== ($cf ? 1 : 0));
+            }
+        }
 
         return ExecutionStatus::SUCCESS;
     }
@@ -124,8 +140,17 @@ class Group2 implements InstructionInterface
             } else {
                 $this->writeMemory8($runtime, $address, $result);
             }
-            $runtime->memoryAccessor()->setCarryFlag($count > 0 ? (($value >> ($count - 1)) & 0x1) !== 0 : false);
-            $runtime->memoryAccessor()->updateFlags($result, 8);
+            // ROR only affects CF and OF, not SF/ZF/PF/AF
+            if ($count > 0) {
+                $cf = (($value >> ($count - 1)) & 0x1) !== 0;
+                $runtime->memoryAccessor()->setCarryFlag($cf);
+                // OF is only defined for count=1: OF = MSB XOR (MSB-1) of result
+                if ($operand === 1) {
+                    $msb = ($result >> 7) & 1;
+                    $msb1 = ($result >> 6) & 1;
+                    $runtime->memoryAccessor()->setOverflowFlag($msb !== $msb1);
+                }
+            }
 
             return ExecutionStatus::SUCCESS;
         }
@@ -146,8 +171,17 @@ class Group2 implements InstructionInterface
                 $this->writeMemory16($runtime, $address, $result);
             }
         }
-        $runtime->memoryAccessor()->setCarryFlag($count > 0 ? (($value >> ($count - 1)) & 0x1) !== 0 : false);
-        $runtime->memoryAccessor()->updateFlags($result, $size);
+        // ROR only affects CF and OF, not SF/ZF/PF/AF
+        if ($count > 0) {
+            $cf = (($value >> ($count - 1)) & 0x1) !== 0;
+            $runtime->memoryAccessor()->setCarryFlag($cf);
+            // OF is only defined for count=1: OF = MSB XOR (MSB-1) of result
+            if ($operand === 1) {
+                $msb = ($result >> ($size - 1)) & 1;
+                $msb1 = ($result >> ($size - 2)) & 1;
+                $runtime->memoryAccessor()->setOverflowFlag($msb !== $msb1);
+            }
+        }
 
         return ExecutionStatus::SUCCESS;
     }
@@ -177,8 +211,13 @@ class Group2 implements InstructionInterface
             } else {
                 $this->writeMemory8($runtime, $address, $result);
             }
+            // RCL only affects CF and OF, not SF/ZF/PF/AF
             $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
-            $runtime->memoryAccessor()->updateFlags($result, 8);
+            // OF is only defined for count=1: OF = MSB XOR CF
+            if ($operand === 1) {
+                $msb = ($result >> 7) & 1;
+                $runtime->memoryAccessor()->setOverflowFlag($msb !== $cf);
+            }
 
             return ExecutionStatus::SUCCESS;
         }
@@ -206,8 +245,13 @@ class Group2 implements InstructionInterface
                 $this->writeMemory16($runtime, $address, $result);
             }
         }
+        // RCL only affects CF and OF, not SF/ZF/PF/AF
         $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
-        $runtime->memoryAccessor()->updateFlags($result, $size);
+        // OF is only defined for count=1: OF = MSB XOR CF
+        if ($operand === 1) {
+            $msb = ($result >> ($size - 1)) & 1;
+            $runtime->memoryAccessor()->setOverflowFlag($msb !== $cf);
+        }
 
         return ExecutionStatus::SUCCESS;
     }
@@ -237,8 +281,14 @@ class Group2 implements InstructionInterface
             } else {
                 $this->writeMemory8($runtime, $address, $result);
             }
+            // RCR only affects CF and OF, not SF/ZF/PF/AF
             $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
-            $runtime->memoryAccessor()->updateFlags($result, 8);
+            // OF is only defined for count=1: OF = MSB XOR (MSB-1) of result
+            if ($operand === 1) {
+                $msb = ($result >> 7) & 1;
+                $msb1 = ($result >> 6) & 1;
+                $runtime->memoryAccessor()->setOverflowFlag($msb !== $msb1);
+            }
 
             return ExecutionStatus::SUCCESS;
         }
@@ -266,8 +316,14 @@ class Group2 implements InstructionInterface
                 $this->writeMemory16($runtime, $address, $result);
             }
         }
+        // RCR only affects CF and OF, not SF/ZF/PF/AF
         $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
-        $runtime->memoryAccessor()->updateFlags($result, $size);
+        // OF is only defined for count=1: OF = MSB XOR (MSB-1) of result
+        if ($operand === 1) {
+            $msb = ($result >> ($size - 1)) & 1;
+            $msb1 = ($result >> ($size - 2)) & 1;
+            $runtime->memoryAccessor()->setOverflowFlag($msb !== $msb1);
+        }
 
         return ExecutionStatus::SUCCESS;
     }
@@ -293,6 +349,11 @@ class Group2 implements InstructionInterface
             $cfBit = $operand > 0 ? (($value >> (8 - $operand)) & 0x1) !== 0 : false;
             $runtime->memoryAccessor()->setCarryFlag($cfBit);
             $runtime->memoryAccessor()->updateFlags($result, 8);
+            // OF for SHL by 1: set if MSB changed (MSB XOR CF) - must be after updateFlags
+            if ($operand === 1) {
+                $msb = ($result >> 7) & 1;
+                $runtime->memoryAccessor()->setOverflowFlag($msb !== ($cfBit ? 1 : 0));
+            }
 
             return ExecutionStatus::SUCCESS;
         }
@@ -336,6 +397,11 @@ class Group2 implements InstructionInterface
 
         $runtime->memoryAccessor()->setCarryFlag($cfBit);
         $runtime->memoryAccessor()->updateFlags($result, $size);
+        // OF for SHL by 1: set if MSB changed (MSB XOR CF) - must be after updateFlags
+        if ($operand === 1) {
+            $msb = ($result >> ($size - 1)) & 1;
+            $runtime->memoryAccessor()->setOverflowFlag($msb !== ($cfBit ? 1 : 0));
+        }
 
         return ExecutionStatus::SUCCESS;
     }
@@ -359,6 +425,10 @@ class Group2 implements InstructionInterface
             }
             $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
             $runtime->memoryAccessor()->updateFlags($result, 8);
+            // OF for SHR by 1: set to the original MSB - must be after updateFlags
+            if ($operand === 1) {
+                $runtime->memoryAccessor()->setOverflowFlag((($value >> 7) & 1) !== 0);
+            }
 
             return ExecutionStatus::SUCCESS;
         }
@@ -389,6 +459,10 @@ class Group2 implements InstructionInterface
         }
         $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
         $runtime->memoryAccessor()->updateFlags($result, $size);
+        // OF for SHR by 1: set to the original MSB - must be after updateFlags
+        if ($operand === 1) {
+            $runtime->memoryAccessor()->setOverflowFlag((($value >> ($size - 1)) & 1) !== 0);
+        }
 
         return ExecutionStatus::SUCCESS;
     }
@@ -406,11 +480,16 @@ class Group2 implements InstructionInterface
 
             // SAR: Arithmetic right shift - sign bit is propagated
             $sign = $value & 0x80;
-            $result = $value >> $operand;
-            if ($sign && $operand > 0) {
-                // Fill upper bits with 1s (sign extension)
-                $signFill = ((1 << $operand) - 1) << (8 - $operand);
-                $result = ($result | $signFill) & 0xFF;
+            if ($operand >= 8) {
+                // If shift count >= 8, result is all 1s (if negative) or all 0s (if positive)
+                $result = $sign ? 0xFF : 0;
+            } else {
+                $result = $value >> $operand;
+                if ($sign && $operand > 0) {
+                    // Fill upper bits with 1s (sign extension)
+                    $signFill = ((1 << $operand) - 1) << (8 - $operand);
+                    $result = ($result | $signFill) & 0xFF;
+                }
             }
 
             if ($isRegister) {
@@ -420,6 +499,10 @@ class Group2 implements InstructionInterface
             }
             $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
             $runtime->memoryAccessor()->updateFlags($result, 8);
+            // OF for SAR by 1: always 0 (sign is always preserved) - must be after updateFlags
+            if ($operand === 1) {
+                $runtime->memoryAccessor()->setOverflowFlag(false);
+            }
 
             return ExecutionStatus::SUCCESS;
         }
@@ -433,11 +516,16 @@ class Group2 implements InstructionInterface
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
 
         // SAR: Arithmetic right shift - sign bit is propagated
-        $result = $value >> $operand;
-        if ($sign && $operand > 0) {
-            // Fill upper bits with 1s (sign extension)
-            $signFill = ((1 << $operand) - 1) << ($size - $operand);
-            $result = ($result | $signFill) & $mask;
+        if ($operand >= $size) {
+            // If shift count >= operand size, result is all 1s (if negative) or all 0s (if positive)
+            $result = $sign ? $mask : 0;
+        } else {
+            $result = $value >> $operand;
+            if ($sign && $operand > 0) {
+                // Fill upper bits with 1s (sign extension)
+                $signFill = ((1 << $operand) - 1) << ($size - $operand);
+                $result = ($result | $signFill) & $mask;
+            }
         }
 
         if ($isRegister) {
@@ -451,6 +539,10 @@ class Group2 implements InstructionInterface
         }
         $runtime->memoryAccessor()->setCarryFlag($operand > 0 ? (($value >> ($operand - 1)) & 0x1) !== 0 : false);
         $runtime->memoryAccessor()->updateFlags($result, $size);
+        // OF for SAR by 1: always 0 (sign is always preserved) - must be after updateFlags
+        if ($operand === 1) {
+            $runtime->memoryAccessor()->setOverflowFlag(false);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

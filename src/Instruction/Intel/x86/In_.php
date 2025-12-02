@@ -22,6 +22,8 @@ class In_ implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $enhanced = new EnhanceStreamReader($runtime->memory());
+        $isByte = ($opcode === 0xE4 || $opcode === 0xEC);
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
 
         $port = match ($opcode) {
             0xE4, 0xE5 => $enhanced->streamReader()->byte(),
@@ -34,13 +36,15 @@ class In_ implements InstructionInterface
             if ($cpl > $iopl) {
                 throw new FaultException(0x0D, 0, 'IN privilege check failed');
             }
-            $this->assertIoPermission($runtime, $port, $opcode === 0xE4 || $opcode === 0xEC ? 8 : 16);
+            $this->assertIoPermission($runtime, $port, $opSize);
         }
 
-        $value = $this->readPort($runtime, $port, $opcode === 0xE4 || $opcode === 0xEC ? 8 : 16);
+        $value = $this->readPort($runtime, $port, $opSize);
 
-        if ($opcode === 0xE4 || $opcode === 0xEC) {
+        if ($isByte) {
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $value);
+        } elseif ($opSize === 32) {
+            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $value, 32);
         } else {
             $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $value);
         }

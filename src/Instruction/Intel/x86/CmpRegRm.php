@@ -38,7 +38,17 @@ class CmpRegRm implements InstructionInterface
             $dest = $destIsRm
                 ? $this->readRm8($runtime, $reader, $modRegRM)
                 : $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
-            $runtime->memoryAccessor()->updateFlags($dest - $src, 8)->setCarryFlag($dest < $src);
+            $calc = $dest - $src;
+            $maskedResult = $calc & 0xFF;
+            // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
+            $signA = ($dest >> 7) & 1;
+            $signB = ($src >> 7) & 1;
+            $signR = ($maskedResult >> 7) & 1;
+            $of = ($signA !== $signB) && ($signB === $signR);
+            $runtime->memoryAccessor()
+                ->updateFlags($maskedResult, 8)
+                ->setCarryFlag($calc < 0)
+                ->setOverflowFlag($of);
             $runtime->option()->logger()->debug(sprintf('CMP r/m8, r8: dest=0x%02X src=0x%02X ZF=%d', $dest, $src, $dest === $src ? 1 : 0));
         } else {
             $dest = $destIsRm
@@ -46,21 +56,41 @@ class CmpRegRm implements InstructionInterface
                 : $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
 
             // For unsigned comparison, dest < src means borrow (CF=1)
-            $mask = (1 << $opSize) - 1;
+            $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $signBit = $opSize === 32 ? 31 : 15;
             $destU = $dest & $mask;
             $srcU = $src & $mask;
-            $cf = $destU < $srcU;
+            $calc = $destU - $srcU;
+            $maskedResult = $calc & $mask;
+            $cf = $calc < 0;
 
             // Debug: Log CMP for LZMA direct bits decoding area
             $ip = $runtime->memory()->offset();
             if ($ip >= 0x8CD0 && $ip <= 0x8CE0) {
                 $runtime->option()->logger()->debug(sprintf(
-                    'CMP direct bits: IP=0x%04X dest=0x%08X src=0x%08X CF=%d',
-                    $ip, $destU, $srcU, $cf ? 1 : 0
+                'CMP direct bits: IP=0x%04X dest=0x%08X src=0x%08X CF=%d',
+                $ip, $destU, $srcU, $cf ? 1 : 0
+            ));
+            }
+            if ($ip >= 0x7DD5 && $ip <= 0x7DDA) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'CMP boot checksum: IP=0x%04X dest=0x%08X src=0x%08X result=0x%08X',
+                    $ip,
+                    $destU,
+                    $srcU,
+                    $maskedResult
                 ));
             }
 
-            $runtime->memoryAccessor()->updateFlags($dest - $src, $opSize)->setCarryFlag($cf);
+            // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
+            $signA = ($destU >> $signBit) & 1;
+            $signB = ($srcU >> $signBit) & 1;
+            $signR = ($maskedResult >> $signBit) & 1;
+            $of = ($signA !== $signB) && ($signB === $signR);
+            $runtime->memoryAccessor()
+                ->updateFlags($maskedResult, $opSize)
+                ->setCarryFlag($cf)
+                ->setOverflowFlag($of);
         }
 
         return ExecutionStatus::SUCCESS;

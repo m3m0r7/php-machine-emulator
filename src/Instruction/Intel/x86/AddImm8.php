@@ -25,16 +25,18 @@ class AddImm8 implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $map = $this->opcodeMap()[$opcode];
-        $size = $map['size'];
-        $mask = $size === 8 ? 0xFF : 0xFFFF;
+        $isByte = $map['size'] === 8;
+        $size = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
+        $mask = $size === 32 ? 0xFFFFFFFF : ($size === 16 ? 0xFFFF : 0xFF);
+        $signBit = $size - 1;
 
         $reader = new EnhanceStreamReader($runtime->memory());
-        $operand = $size === 8
+        $operand = $isByte
             ? $reader->streamReader()->byte()
-            : $reader->short();
+            : ($size === 32 ? $reader->dword() : $reader->short());
 
         $acc = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
-        $left = $size === 8 ? $acc->asLowBit() : $acc->asByte();
+        $left = $isByte ? $acc->asLowBit() : $acc->asBytesBySize($size);
 
         $carryIn = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
@@ -56,15 +58,27 @@ class AddImm8 implements InstructionInterface
 
         $result = $calc & $mask;
 
-        if ($size === 8) {
+        // Calculate OF for arithmetic operations
+        $signA = ($left >> $signBit) & 1;
+        $signB = ($operand >> $signBit) & 1;
+        $signR = ($result >> $signBit) & 1;
+
+        $overflow = match ($map['op']) {
+            'add', 'adc' => ($signA === $signB) && ($signA !== $signR),
+            'sub', 'sbb' => ($signA !== $signB) && ($signB === $signR),
+            default => false, // Logical ops clear OF
+        };
+
+        if ($isByte) {
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $result);
         } else {
-            $runtime->memoryAccessor()->enableUpdateFlags(false)->write16Bit(RegisterType::EAX, $result);
+            $runtime->memoryAccessor()->enableUpdateFlags(false)->writeBySize(RegisterType::EAX, $result, $size);
         }
 
         $runtime
             ->memoryAccessor()
             ->setCarryFlag($carry)
+            ->setOverflowFlag($overflow)
             ->updateFlags($result, $size);
 
         return ExecutionStatus::SUCCESS;

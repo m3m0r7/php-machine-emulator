@@ -60,68 +60,32 @@ class BootImage
     }
 
     /**
-     * Load No Emulation boot image, checking for Boot Info Table.
-     * The Boot Info Table is embedded at offset 8 in the boot image by mkisofs/genisoimage
-     * and contains the actual file length.
+     * Load No Emulation boot image.
+     *
+     * For ISOLINUX and similar bootloaders, we only load what the El Torito catalog
+     * specifies (sectorCount * 512 bytes), typically just the first CD sector (2048 bytes).
+     * The bootloader then uses INT 13h to load additional sectors to wherever it needs them.
+     * This is important because bootloaders like ISOLINUX have specific memory layouts
+     * and relocation schemes that don't match a simple contiguous load.
      */
     private function loadNoEmulationImage(): void
     {
-        // First, read at least the first sector to check for Boot Info Table
-        $this->iso->seekSector($this->loadRBA);
-        $firstSector = $this->iso->readSectors(1) ?: '';
+        // For No Emulation, sectorCount is in 512-byte virtual sectors
+        // Load only what the El Torito catalog specifies
+        $this->imageSize = $this->sectorCount * 512;
+        $sectorsNeeded = (int) ceil($this->imageSize / ISO9660::SECTOR_SIZE);
 
-        if (strlen($firstSector) < 24) {
-            // Fallback to sectorCount-based size
-            $this->imageSize = $this->sectorCount * 512;
-            $this->imageData = $firstSector;
-            return;
+        // Ensure at least 1 CD sector is loaded
+        if ($sectorsNeeded < 1) {
+            $sectorsNeeded = 1;
         }
 
-        // Boot Info Table format (at offset 8 in the boot image):
-        // Offset 8-11: bi_pvd - LBA of primary volume descriptor (should be 16)
-        // Offset 12-15: bi_file - LBA of boot file
-        // Offset 16-19: bi_length - Length of boot file in bytes
-        // Offset 20-23: bi_checksum - Checksum
-        $bi_pvd = unpack('V', substr($firstSector, 8, 4))[1];
-        $bi_file = unpack('V', substr($firstSector, 12, 4))[1];
-        $bi_length = unpack('V', substr($firstSector, 16, 4))[1];
+        $this->iso->seekSector($this->loadRBA);
+        $this->imageData = $this->iso->readSectors($sectorsNeeded) ?: '';
 
-        // Validate Boot Info Table: bi_pvd should be 16 (PVD sector), bi_file should match loadRBA
-        $hasValidBootInfoTable = ($bi_pvd === 16 && $bi_file === $this->loadRBA && $bi_length > 0 && $bi_length < 10 * 1024 * 1024);
-
-        if ($hasValidBootInfoTable) {
-            // Use bi_length from Boot Info Table
-            $this->imageSize = $bi_length;
-            $sectorsNeeded = (int) ceil($bi_length / ISO9660::SECTOR_SIZE);
-
-            // Read remaining sectors if needed
-            if ($sectorsNeeded > 1) {
-                $this->iso->seekSector($this->loadRBA);
-                $this->imageData = $this->iso->readSectors($sectorsNeeded) ?: '';
-            } else {
-                $this->imageData = $firstSector;
-            }
-
-            // Trim to exact size
-            if (strlen($this->imageData) > $this->imageSize) {
-                $this->imageData = substr($this->imageData, 0, $this->imageSize);
-            }
-        } else {
-            // No valid Boot Info Table, fallback to sectorCount-based size
-            // For No Emulation, sectorCount is in 512-byte virtual sectors
-            $this->imageSize = $this->sectorCount * 512;
-            $sectorsNeeded = (int) ceil($this->imageSize / ISO9660::SECTOR_SIZE);
-
-            if ($sectorsNeeded > 1) {
-                $this->iso->seekSector($this->loadRBA);
-                $this->imageData = $this->iso->readSectors($sectorsNeeded) ?: '';
-            } else {
-                $this->imageData = $firstSector;
-            }
-
-            if (strlen($this->imageData) > $this->imageSize) {
-                $this->imageData = substr($this->imageData, 0, $this->imageSize);
-            }
+        // Trim to exact size specified by El Torito
+        if (strlen($this->imageData) > $this->imageSize) {
+            $this->imageData = substr($this->imageData, 0, $this->imageSize);
         }
     }
 
@@ -158,6 +122,15 @@ class BootImage
     public function loadRBA(): int
     {
         return $this->loadRBA;
+    }
+
+    /**
+     * Get the sector count from El Torito boot catalog.
+     * For No Emulation mode, this is in 512-byte virtual sectors.
+     */
+    public function catalogSectorCount(): int
+    {
+        return $this->sectorCount;
     }
 
     public function readAt(int $offset, int $length): string

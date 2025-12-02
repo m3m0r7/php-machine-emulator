@@ -20,8 +20,10 @@ class FpuStub implements InstructionInterface
 
     public function opcodes(): array
     {
-        // WAIT/FWAIT, and ESC opcodes for FNINIT/FNSAVE/FRSTOR/FNSTSW/FLDCW/FNSTCW
-        return [0x9B, 0xD9, 0xDB, 0xDD, 0xDF];
+        // WAIT/FWAIT, and ESC opcodes for FPU instructions
+        // 0x9B: FWAIT
+        // 0xD8-0xDF: FPU escape opcodes (x87 coprocessor)
+        return [0x9B, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF];
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
@@ -31,12 +33,37 @@ class FpuStub implements InstructionInterface
 
         return match ($opcode) {
             0x9B => ExecutionStatus::SUCCESS, // FWAIT
+            0xD8 => $this->handleGenericFpu($runtime, $reader), // FADD/FMUL/FCOM/etc.
             0xD9 => $this->handleD9($runtime, $reader),
+            0xDA => $this->handleGenericFpu($runtime, $reader), // FIADD/FIMUL/etc.
             0xDB => $this->handleDB($runtime, $reader),
+            0xDC => $this->handleGenericFpu($runtime, $reader), // FADD/FMUL/etc. (double)
             0xDD => $this->handleDD($runtime, $reader),
+            0xDE => $this->handleGenericFpu($runtime, $reader), // FIADD/FIMUL/etc. (word)
             0xDF => $this->handleDF($runtime, $reader),
             default => ExecutionStatus::SUCCESS,
         };
+    }
+
+    /**
+     * Handle generic FPU opcodes (0xD8, 0xDA, 0xDC, 0xDE) by consuming the ModR/M byte
+     * and any displacement bytes, then returning SUCCESS.
+     */
+    private function handleGenericFpu(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
+    {
+        $next = $reader->streamReader()->byte();
+        $mod = ($next >> 6) & 0x3;
+        $rm = $next & 0x7;
+
+        if ($mod === 0b11) {
+            // Register-to-register form, no additional bytes
+            return ExecutionStatus::SUCCESS;
+        }
+
+        // Memory operand form - consume displacement bytes
+        $this->consumeRmBytes($reader, $mod, $rm);
+
+        return ExecutionStatus::SUCCESS;
     }
 
     private function handleD9(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
@@ -146,7 +173,7 @@ class FpuStub implements InstructionInterface
         if ($mod === 0b01) {
             $reader->streamReader()->byte();
         } elseif ($mod === 0b10 || ($mod === 0b00 && $rm === 0b110)) {
-            $reader->word();
+            $reader->short();
         }
     }
 

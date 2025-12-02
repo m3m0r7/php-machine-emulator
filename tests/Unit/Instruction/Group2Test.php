@@ -564,4 +564,150 @@ class Group2Test extends InstructionTestCase
         $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX));
         $this->assertTrue($this->getSignFlag());
     }
+
+    // ========================================
+    // Overflow Flag (OF) Tests for count=1
+    // ========================================
+
+    public function testShlOverflowFlagBy1MsbChanged(): void
+    {
+        // SHL by 1: OF = MSB changed (result MSB XOR CF)
+        // 0x40000000 << 1 = 0x80000000, CF = 0
+        // MSB changed from 0 to 1, OF = 1
+        $this->setRegister(RegisterType::EAX, 0x40000000);
+        $this->executeBytes([0xD1, 0xE0]); // SHL EAX, 1
+
+        $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getCarryFlag());
+        $this->assertTrue($this->getOverflowFlag()); // MSB changed from 0 to 1
+    }
+
+    public function testShlNoOverflowFlagBy1MsbUnchanged(): void
+    {
+        // SHL by 1: OF = 0 when MSB doesn't change
+        // 0x00000001 << 1 = 0x00000002, CF = 0
+        // MSB unchanged (0 -> 0), OF = 0
+        $this->setRegister(RegisterType::EAX, 0x00000001);
+        $this->executeBytes([0xD1, 0xE0]); // SHL EAX, 1
+
+        $this->assertSame(0x00000002, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getCarryFlag());
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testShlOverflowFlagBy1CfSet(): void
+    {
+        // SHL by 1: OF = MSB XOR CF (result MSB differs from CF)
+        // 0x80000000 << 1 = 0x00000000, CF = 1
+        // Result MSB = 0, CF = 1, they differ
+        // But wait - Intel spec says OF is set when sign changes
+        // 0x80000000 (negative) -> 0x00000000 (zero/positive)
+        // Sign changed, but result is 0, MSB=0, CF=1, 0 XOR 1 = 1
+        // Actually the implementation should match: MSB(0) != CF(1) -> OF = true
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0xD1, 0xE0]); // SHL EAX, 1
+
+        $this->assertSame(0x00000000, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getCarryFlag());
+        // Let's verify what Intel spec actually says - check the actual flag
+        // Result MSB = 0, CF = 1 -> 0 XOR 1 = 1, so OF should be TRUE
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testShlNoOverflowFlagBy1BothSet(): void
+    {
+        // SHL by 1: OF = MSB XOR CF
+        // 0xC0000000 << 1 = 0x80000000, CF = 1
+        // Result MSB = 1, CF = 1, same -> OF = 0
+        $this->setRegister(RegisterType::EAX, 0xC0000000);
+        $this->executeBytes([0xD1, 0xE0]); // SHL EAX, 1
+
+        $this->assertSame(0x80000000, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getCarryFlag());
+        // MSB = 1, CF = 1 -> 1 XOR 1 = 0, OF should be FALSE
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testShrOverflowFlagBy1OriginalMsbSet(): void
+    {
+        // SHR by 1: OF = original MSB
+        // 0x80000000 >> 1 = 0x40000000
+        // Original MSB was 1, OF = 1
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0xD1, 0xE8]); // SHR EAX, 1
+
+        $this->assertSame(0x40000000, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testShrNoOverflowFlagBy1OriginalMsbClear(): void
+    {
+        // SHR by 1: OF = original MSB
+        // 0x7FFFFFFF >> 1 = 0x3FFFFFFF
+        // Original MSB was 0, OF = 0
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0xD1, 0xE8]); // SHR EAX, 1
+
+        $this->assertSame(0x3FFFFFFF, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testSarOverflowFlagBy1AlwaysClear(): void
+    {
+        // SAR by 1: OF = 0 (sign is always preserved)
+        // 0x80000000 >> 1 (arithmetic) = 0xC0000000
+        // Sign preserved, OF = 0
+        $this->setRegister(RegisterType::EAX, 0x80000000);
+        $this->executeBytes([0xD1, 0xF8]); // SAR EAX, 1
+
+        $this->assertSame(0xC0000000, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testSarOverflowFlagBy1PositiveValue(): void
+    {
+        // SAR by 1: OF = 0 regardless of value
+        $this->setRegister(RegisterType::EAX, 0x7FFFFFFF);
+        $this->executeBytes([0xD1, 0xF8]); // SAR EAX, 1
+
+        $this->assertSame(0x3FFFFFFF, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->getOverflowFlag());
+    }
+
+    public function testShlOverflowFlag8BitBy1(): void
+    {
+        // 8-bit SHL by 1: OF = MSB XOR CF
+        // 0x40 << 1 = 0x80, CF = 0
+        // MSB changed from 0 to 1, OF = 1
+        $this->setRegister(RegisterType::EAX, 0x00000040);
+        $this->executeBytes([0xD0, 0xE0]); // SHL AL, 1
+
+        $this->assertSame(0x80, $this->getRegister(RegisterType::EAX, 8));
+        $this->assertFalse($this->getCarryFlag());
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testShrOverflowFlag8BitBy1(): void
+    {
+        // 8-bit SHR by 1: OF = original MSB
+        // 0x80 >> 1 = 0x40
+        // Original MSB was 1, OF = 1
+        $this->setRegister(RegisterType::EAX, 0x00000080);
+        $this->executeBytes([0xD0, 0xE8]); // SHR AL, 1
+
+        $this->assertSame(0x40, $this->getRegister(RegisterType::EAX, 8));
+        $this->assertTrue($this->getOverflowFlag());
+    }
+
+    public function testSarOverflowFlag8BitBy1(): void
+    {
+        // 8-bit SAR by 1: OF = 0
+        // 0x80 >> 1 (arithmetic) = 0xC0
+        // OF is always 0 for SAR by 1
+        $this->setRegister(RegisterType::EAX, 0x00000080);
+        $this->executeBytes([0xD0, 0xF8]); // SAR AL, 1
+
+        $this->assertSame(0xC0, $this->getRegister(RegisterType::EAX, 8));
+        $this->assertFalse($this->getOverflowFlag());
+    }
 }

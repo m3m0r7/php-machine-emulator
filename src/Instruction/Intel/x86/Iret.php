@@ -67,9 +67,11 @@ class Iret implements InstructionInterface
             $runtime->memory()->setOffset($linear);
         }
 
+        // Restore flags directly from the popped value
         $ma->setCarryFlag(($flags & 0x1) !== 0);
         $ma->setParityFlag(($flags & (1 << 2)) !== 0);
-        $ma->updateFlags(($flags & (1 << 6)) ? 0 : 1, $opSize);
+        $ma->setAuxiliaryCarryFlag(($flags & (1 << 4)) !== 0);
+        $ma->setZeroFlag(($flags & (1 << 6)) !== 0);
         $ma->setSignFlag(($flags & (1 << 7)) !== 0);
         $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
         $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);

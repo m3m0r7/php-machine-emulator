@@ -26,8 +26,20 @@ class Dec implements InstructionInterface
 
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value - 1) & $mask;
+
+        // Preserve CF - DEC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+
         $ma->enableUpdateFlags(false)->writeBySize($reg, $result, $size);
         $ma->updateFlags($result, $size);
+
+        // Restore CF
+        $ma->setCarryFlag($savedCf);
+
+        // OF for DEC: set when original value was min negative (0x80, 0x8000, 0x80000000)
+        // Decrementing min negative causes signed overflow (becomes max positive)
+        $signMask = 1 << ($size - 1);
+        $ma->setOverflowFlag($value === $signMask);
 
         return ExecutionStatus::SUCCESS;
     }

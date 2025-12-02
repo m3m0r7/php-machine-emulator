@@ -45,7 +45,7 @@ class Disk implements InterruptInterface
             0x48 => $this->getDriveParametersExtended($runtime),
             0x08 => $this->getDriveParameters($runtime),
             0x15 => $this->getDiskType($runtime),
-            0x4B => $this->terminateDiskEmulation($runtime),
+            0x4B => $this->handleBootInfo($runtime, $al),
             default => $this->unsupported($runtime, $ah),
         };
     }
@@ -315,12 +315,45 @@ class Disk implements InterruptInterface
                 return;
             }
 
-            // Write data to memory
+            // Write data to memory - ISOLINUX manages its own memory layout
+            // and uses INT 13h to load additional sectors to specific addresses
             $dataLen = strlen($data);
             for ($i = 0; $i < $dataLen; $i++) {
                 $address = $bufferAddress + $i;
                 $runtime->memoryAccessor()->allocate($address, safe: false);
                 $runtime->memoryAccessor()->writeRawByte($address, ord($data[$i]));
+            }
+
+            // Debug: dump first 32 bytes of loaded data
+            $debugBytes = [];
+            for ($i = 0; $i < min(32, $dataLen); $i++) {
+                $debugBytes[] = sprintf('%02X', ord($data[$i]));
+            }
+            $runtime->option()->logger()->debug(sprintf(
+                'INT 13h READ LBA: first 32 bytes loaded at 0x%05X: %s',
+                $bufferAddress,
+                implode(' ', $debugBytes)
+            ));
+
+            // Debug: compare checksum with Boot Info Table when loading the boot image body.
+            $bootImage = $bootStream->bootImage();
+            $firstSector = $bootImage->data();
+            $biLength = strlen($firstSector) >= 20 ? unpack('V', substr($firstSector, 16, 4))[1] : 0;
+            $biChecksum = strlen($firstSector) >= 24 ? unpack('V', substr($firstSector, 20, 4))[1] : 0;
+            if ($lba === $bootImage->loadRBA() + 1 && $biLength > 0) {
+                $fullData = $firstSector . substr($data, 0, max(0, $biLength - strlen($firstSector)));
+                $sum = 0;
+                for ($i = 64; $i < strlen($fullData); $i += 4) {
+                    $chunk = substr($fullData, $i, 4);
+                    $val = unpack('V', str_pad($chunk, 4, "\0"))[1];
+                    $sum = ($sum + $val) & 0xFFFFFFFF;
+                }
+                $runtime->option()->logger()->debug(sprintf(
+                    'INT 13h READ LBA: computed boot image checksum=0x%08X (expected=0x%08X, length=%d)',
+                    $sum,
+                    $biChecksum,
+                    $biLength
+                ));
             }
 
             $runtime->memoryAccessor()->enableUpdateFlags(false)->writeToHighBit(RegisterType::EAX, 0x00);
@@ -385,10 +418,23 @@ class Disk implements InterruptInterface
         $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($addressSize);
         $buffer = $this->segmentLinearAddress($runtime, $ds, $si, $addressSize);
 
+        // Decide geometry based on media type. For El Torito no-emulation CD boot,
+        // the logical sector size must be 2048 bytes instead of the default 512.
+        $bootStream = $runtime->bootStream();
+        $isCdRom = ($bootStream instanceof ISOBootImageStream) && $bootStream->isNoEmulation();
+
+        $bytesPerSector = $isCdRom ? self::CD_SECTOR_SIZE : self::SECTOR_SIZE;
         $cylinders = 1024;
         $heads = self::HEADS_PER_CYLINDER;
         $sectors = self::SECTORS_PER_TRACK;
-        $totalSectors = 0x0010_0000; // ~512MB worth
+
+        // Estimate total sector count. For CD-ROM, use the ISO size; otherwise keep the old default.
+        if ($isCdRom) {
+            $isoSize = $bootStream->iso()->fileSize();
+            $totalSectors = (int) max(1, floor($isoSize / $bytesPerSector));
+        } else {
+            $totalSectors = 0x0010_0000; // ~512MB worth
+        }
 
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
 
@@ -404,7 +450,7 @@ class Disk implements InterruptInterface
             $ma->writeBySize($buffer + 10 + $i, ($totalSectors >> ($i * 8)) & 0xFF, 8);
         }
         // Bytes per sector
-        $ma->write16Bit($buffer + 18, self::SECTOR_SIZE);
+        $ma->write16Bit($buffer + 18, $bytesPerSector);
         // EDD configuration params (set to zero/invalid)
         $ma->write16Bit($buffer + 20, 0); // reserved
         $ma->write32Bit($buffer + 22, 0); // host bus type ptr (none)
@@ -547,16 +593,82 @@ class Disk implements InterruptInterface
         $ma->setCarryFlag(false);
     }
 
-    private function terminateDiskEmulation(RuntimeInterface $runtime): void
+    /**
+     * Handle El Torito boot info/termination (INT 13h AH=4Bh).
+     *
+     * We implement AL=01h (Get Boot Info) which isolinux relies on, and fall back
+     * to success for termination requests.
+     */
+    private function handleBootInfo(RuntimeInterface $runtime, int $al): void
     {
-        // El Torito: Terminate disk emulation (INT 13h AH=4Bh)
-        // AL = 00h: Terminate and return boot catalog
-        // AL = 01h: Terminate and return boot catalog only if emulation active
-        $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
         $ma = $runtime->memoryAccessor()->enableUpdateFlags(false);
+        $bootStream = $runtime->bootStream();
+        $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
 
-        // For now, just report no emulation active
-        $ma->writeToHighBit(RegisterType::EAX, 0x00); // Success
+        // AL=01h: Get Boot Info (El Torito)
+        if ($al === 0x01 && $bootStream instanceof ISOBootImageStream) {
+            $addressSize = $runtime->context()->cpu()->addressSize();
+            $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
+            $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($addressSize);
+            $buffer = $this->segmentLinearAddress($runtime, $ds, $si, $addressSize);
+
+            $bootImage = $bootStream->bootImage();
+
+            // Packet layout (19 bytes):
+            // 0: size (0x13)
+            // 1: media type
+            // 2: drive number
+            // 3: controller number (0)
+            // 4-7: boot image start LBA
+            // 8-9: device spec packet segment (0 for none)
+            // 10-11: device spec packet offset (0)
+            // 12-13: load segment
+            // 14-15: sector count (512-byte virtual sectors)
+            // 16-18: reserved
+            $ma->allocate($buffer, 0x13, safe: false);
+            $runtime->memoryAccessor()->writeRawByte($buffer + 0, 0x13);
+            $runtime->memoryAccessor()->writeRawByte($buffer + 1, $bootImage->mediaType());
+            $runtime->memoryAccessor()->writeRawByte($buffer + 2, $dl);
+            $runtime->memoryAccessor()->writeRawByte($buffer + 3, 0x00);
+            $runtime->memoryAccessor()->writeRawByte($buffer + 16, 0x00);
+            $runtime->memoryAccessor()->writeRawByte($buffer + 17, 0x00);
+            $runtime->memoryAccessor()->writeRawByte($buffer + 18, 0x00);
+
+            // Little-endian helpers
+            $writeWord = function (int $addr, int $value) use ($runtime): void {
+                $runtime->memoryAccessor()->writeRawByte($addr, $value & 0xFF);
+                $runtime->memoryAccessor()->writeRawByte($addr + 1, ($value >> 8) & 0xFF);
+            };
+            $writeDword = function (int $addr, int $value) use ($writeWord): void {
+                $writeWord($addr, $value & 0xFFFF);
+                $writeWord($addr + 2, ($value >> 16) & 0xFFFF);
+            };
+
+            // Spec expects the boot catalog LBA here; fall back to boot image RBA.
+            $catalogLba = $bootStream->iso()->bootRecord()?->bootCatalogSector ?? $bootImage->loadRBA();
+            $writeDword($buffer + 4, $bootImage->loadRBA());
+            $writeWord($buffer + 8, 0x0000);  // device spec packet segment (none)
+            $writeWord($buffer + 10, 0x0000); // device spec packet offset (none)
+            $writeWord($buffer + 12, $bootImage->loadSegment());
+            $writeWord($buffer + 14, $bootImage->catalogSectorCount());
+
+            $runtime->option()->logger()->debug(sprintf(
+                'INT 13h GET BOOT INFO: DL=0x%02X media=0x%02X LBA=%d loadSeg=0x%04X sectors=%d buffer=0x%05X',
+                $dl,
+                $bootImage->mediaType(),
+                $catalogLba,
+                $bootImage->loadSegment(),
+                $bootImage->catalogSectorCount(),
+                $buffer
+            ));
+
+            $ma->writeToHighBit(RegisterType::EAX, 0x00);
+            $ma->setCarryFlag(false);
+            return;
+        }
+
+        // For termination or unsupported variants, simply report success.
+        $ma->writeToHighBit(RegisterType::EAX, 0x00);
         $ma->setCarryFlag(false);
     }
 

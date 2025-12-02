@@ -35,7 +35,7 @@ class TestRegRm implements InstructionInterface
             $result = ($left & $right) & ($opSize === 32 ? 0xFFFFFFFF : 0xFFFF);
         }
 
-        $runtime->memoryAccessor()->setCarryFlag(false)->updateFlags($result, $isByte ? 8 : $opSize);
+        $runtime->memoryAccessor()->setCarryFlag(false)->setOverflowFlag(false)->updateFlags($result, $isByte ? 8 : $opSize);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -20,15 +20,17 @@ class Pushf implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
+        $ma = $runtime->memoryAccessor();
         $flags =
-            ($runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0) |
-            0x2 |
-            ($runtime->memoryAccessor()->shouldParityFlag() ? (1 << 2) : 0) |
-            ($runtime->memoryAccessor()->shouldZeroFlag() ? (1 << 6) : 0) |
-            ($runtime->memoryAccessor()->shouldSignFlag() ? (1 << 7) : 0) |
-            ($runtime->memoryAccessor()->shouldInterruptFlag() ? (1 << 9) : 0) |
-            ($runtime->memoryAccessor()->shouldDirectionFlag() ? (1 << 10) : 0) |
-            ($runtime->memoryAccessor()->shouldOverflowFlag() ? (1 << 11) : 0);
+            ($ma->shouldCarryFlag() ? 1 : 0) |
+            0x2 | // reserved bit always set
+            ($ma->shouldParityFlag() ? (1 << 2) : 0) |
+            ($ma->shouldAuxiliaryCarryFlag() ? (1 << 4) : 0) |
+            ($ma->shouldZeroFlag() ? (1 << 6) : 0) |
+            ($ma->shouldSignFlag() ? (1 << 7) : 0) |
+            ($ma->shouldInterruptFlag() ? (1 << 9) : 0) |
+            ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
+            ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
 
         if ($runtime->context()->cpu()->isProtectedMode()) {
             $flags |= ($runtime->context()->cpu()->iopl() & 0x3) << 12;

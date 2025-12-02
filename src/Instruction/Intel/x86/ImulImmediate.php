@@ -25,11 +25,15 @@ class ImulImmediate implements InstructionInterface
         $opSize = $runtime->context()->cpu()->operandSize();
         $isImm8 = $opcode === 0x6B;
 
+        // x86 encoding order: ModR/M -> SIB -> displacement -> immediate
+        // Read src first (consumes displacement), THEN read immediate
+        $src = $this->readRm($runtime, $reader, $modrm, $opSize);
+
+        // NOW read immediate (after displacement has been consumed)
         $imm = $isImm8
             ? $this->signExtend($reader->streamReader()->byte(), 8)
             : ($opSize === 32 ? $this->signExtend($reader->dword(), 32) : $this->signExtend($reader->short(), 16));
 
-        $src = $this->readRm($runtime, $reader, $modrm, $opSize);
         $signedSrc = $this->signExtend($src, $opSize);
         $product = $signedSrc * $imm;
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;

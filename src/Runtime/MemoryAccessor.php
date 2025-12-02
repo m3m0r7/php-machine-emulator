@@ -267,6 +267,11 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $this;
     }
 
+    public function shouldUpdateFlags(): bool
+    {
+        return $this->enableUpdateFlags;
+    }
+
 
     public function updateFlags(int|null $value, int $size = 16): self
     {

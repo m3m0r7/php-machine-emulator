@@ -8,28 +8,33 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
- * INT3 (0xCC) - Breakpoint interrupt.
- * This is a one-byte instruction that triggers interrupt vector 3.
+ * INT1 / ICEBP (0xF1) - In-Circuit Emulator Breakpoint
+ *
+ * This is an undocumented one-byte instruction that triggers interrupt vector 1
+ * (single-step/debug exception). It's used by ICE (In-Circuit Emulator) for
+ * debugging purposes.
+ *
+ * In modern x86, this generates a #DB (debug exception, vector 1).
  */
-class Int3 implements InstructionInterface
+class Int1 implements InstructionInterface
 {
     use Instructable;
 
     public function opcodes(): array
     {
-        return [0xCC];
+        return [0xF1];
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        // INT3 triggers interrupt vector 3 (breakpoint)
-        $runtime->option()->logger()->debug('INT3 breakpoint triggered');
+        // INT1/ICEBP triggers interrupt vector 1 (debug exception)
+        $runtime->option()->logger()->debug('INT1/ICEBP debug trap triggered');
 
-        // Raise interrupt vector 3 (breakpoint exception)
+        // Raise interrupt vector 1 (debug exception)
         $returnIp = $runtime->memory()->offset();
         $intHandler = $this->instructionList->instructionList()[Int_::class] ?? null;
         if ($intHandler instanceof Int_) {
-            $intHandler->raise($runtime, 3, $returnIp, null);
+            $intHandler->raise($runtime, 1, $returnIp, null);
         }
 
         return ExecutionStatus::SUCCESS;

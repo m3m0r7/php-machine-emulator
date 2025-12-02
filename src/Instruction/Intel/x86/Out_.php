@@ -22,6 +22,8 @@ class Out_ implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $enhanced = new EnhanceStreamReader($runtime->memory());
+        $isByte = ($opcode === 0xE6 || $opcode === 0xEE);
+        $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
 
         $port = match ($opcode) {
             0xE6, 0xE7 => $enhanced->streamReader()->byte(),
@@ -34,14 +36,16 @@ class Out_ implements InstructionInterface
             if ($cpl > $iopl) {
                 throw new FaultException(0x0D, 0, 'OUT privilege check failed');
             }
-            $this->assertIoPermission($runtime, $port, ($opcode === 0xE6 || $opcode === 0xEE) ? 8 : 16);
+            $this->assertIoPermission($runtime, $port, $opSize);
         }
 
-        $value = ($opcode === 0xE6 || $opcode === 0xEE)
+        $value = $isByte
             ? $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit()
-            : $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte();
+            : ($opSize === 32
+                ? $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(32)
+                : $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte());
 
-        $this->writePort($runtime, $port, $value, ($opcode === 0xE6 || $opcode === 0xEE) ? 8 : 16);
+        $this->writePort($runtime, $port, $value, $opSize);
 
         return ExecutionStatus::SUCCESS;
     }

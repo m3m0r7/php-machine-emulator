@@ -13,7 +13,9 @@ class Nop implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0x00];
+        // 0x90 is NOP (XCHG EAX, EAX)
+        // Note: 0x00 is ADD r/m8, r8, not NOP
+        return [0x90];
     }
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
