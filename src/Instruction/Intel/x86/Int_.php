@@ -11,6 +11,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\BIOSInterrupt;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Disk;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Keyboard;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\MemorySize;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\System;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Video;
 use PHPMachineEmulator\Instruction\Intel\x86\DOSInterrupt\Dos;
@@ -55,20 +56,13 @@ class Int_ implements InstructionInterface
         $vector = $runtime
             ->memory()
             ->byte();
-        $opSize = $runtime->context()->cpu()->operandSize();
-        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
-        $returnIp = $runtime->memory()->offset();
-        $isProtected = $runtime->context()->cpu()->isProtectedMode();
-        $returnVal = !$isProtected
-            ? $returnIp
-            : $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
-
-        // $runtime->option()->logger()->debug(sprintf('INT 0x%02X called', $vector));
 
         $operand = BIOSInterrupt::tryFrom($vector);
 
         match ($operand) {
             BIOSInterrupt::VIDEO_INTERRUPT => ($this->interruptInstances[Video::class] ??= new Video($runtime))
+                ->process($runtime),
+            BIOSInterrupt::MEMORY_SIZE_INTERRUPT => ($this->interruptInstances[MemorySize::class] ??= new MemorySize())
                 ->process($runtime),
             BIOSInterrupt::DISK_INTERRUPT => ($this->interruptInstances[Disk::class] ??= new Disk($runtime))
                 ->process($runtime),
@@ -76,7 +70,7 @@ class Int_ implements InstructionInterface
                 ->process($runtime),
             BIOSInterrupt::SYSTEM_INTERRUPT => ($this->interruptInstances[System::class] ??= new System())->process($runtime),
             BIOSInterrupt::DOS_INTERRUPT => ($this->interruptInstances[Dos::class] ??= new Dos($this->instructionList))->process($runtime, $opcode),
-            default => $this->vectorInterrupt($runtime, $vector, $returnVal),
+            default => throw new ExecutionException(sprintf('Unimplemented BIOS interrupt: INT 0x%02X', $vector)),
         };
 
         return ExecutionStatus::SUCCESS;

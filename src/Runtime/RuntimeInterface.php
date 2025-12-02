@@ -9,8 +9,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Stream\BootableStreamInterface;
-use PHPMachineEmulator\Stream\MemoryStream;
-use PHPMachineEmulator\Stream\StreamReaderIsProxyableInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Video\VideoInterface;
 
 interface RuntimeInterface
@@ -31,6 +30,6 @@ interface RuntimeInterface
     public function frame(): FrameInterface;
     public function option(): OptionInterface;
     public function video(): VideoInterface;
-    public function memory(): ?MemoryStream;
-    public function bootStream(): ?BootableStreamInterface;
+    public function memory(): MemoryStreamInterface;
+    public function bootStream(): BootableStreamInterface;
 }

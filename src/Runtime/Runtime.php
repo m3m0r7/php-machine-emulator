@@ -27,6 +27,7 @@ use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
 use PHPMachineEmulator\Stream\BootableStreamInterface;
 use PHPMachineEmulator\Stream\MemoryStream;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Video\VideoInterface;
 
 class Runtime implements RuntimeInterface
@@ -127,7 +128,7 @@ class Runtime implements RuntimeInterface
     /**
      * Get the memory stream.
      */
-    public function memory(): MemoryStream
+    public function memory(): MemoryStreamInterface
     {
         return $this->memory;
     }
@@ -135,7 +136,7 @@ class Runtime implements RuntimeInterface
     /**
      * Get the boot stream.
      */
-    public function bootStream(): ?BootableStreamInterface
+    public function bootStream(): BootableStreamInterface
     {
         return $this->bootStream;
     }

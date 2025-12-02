@@ -14,30 +14,23 @@ namespace PHPMachineEmulator\Stream;
  * Boot data is copied here at startup, and all subsequent operations
  * (INT 13h disk reads, REP MOVSB, instruction fetch, etc.) work on this same memory.
  */
-class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyableInterface, StreamIsCopyableInterface
+class MemoryStream implements MemoryStreamInterface
 {
     /** @var resource */
     private $memory;
 
     private int $offset = 0;
 
-    private int $size;
-
-    private int $maxSize;
-
     /**
      * @param int $size Initial memory size (default 1MB)
-     * @param int $maxSize Maximum memory size for auto-expansion (default 16MB)
-     * @param int $tempMaxMemory Maximum bytes to keep in memory before swapping to temp file (default 256MB)
+     * @param int $physicalMaxMemorySize Maximum physical memory size (default 16MB)
+     * @param int $swapSize Swap size for overflow to temp file (default 256MB)
      */
-    public function __construct(int $size = 0x100000, int $maxSize = 0x1000000, int $tempMaxMemory = 0x10000000)
+    public function __construct(private int $size = 0x100000, private int $physicalMaxMemorySize = 0x1000000, private int $swapSize = 0x10000000)
     {
-        $this->size = $size;
-        $this->maxSize = $maxSize;
-
         // Use php://temp with maxmemory option
-        // Data is kept in memory up to $tempMaxMemory bytes, then swaps to temp file
-        $this->memory = fopen("php://temp/maxmemory:{$tempMaxMemory}", 'r+b');
+        // Data is kept in memory up to physicalMaxMemorySize bytes, then swaps to temp file
+        $this->memory = fopen("php://temp/maxmemory:{$physicalMaxMemorySize}", 'r+b');
 
         // Pre-allocate memory with zeros
         fwrite($this->memory, str_repeat("\x00", $size));
@@ -53,13 +46,13 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
             return true;
         }
 
-        if ($requiredOffset >= $this->maxSize) {
+        if ($requiredOffset >= $this->logicalMaxMemorySize()) {
             return false;
         }
 
         // Expand in 1MB chunks
         $newSize = min(
-            $this->maxSize,
+            $this->logicalMaxMemorySize(),
             (int) ceil(($requiredOffset + 1) / 0x100000) * 0x100000
         );
 
@@ -78,9 +71,9 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     public function char(): string
     {
-        // Safety check: don't allow access beyond maxSize
-        if ($this->offset >= $this->maxSize) {
-            throw new \RuntimeException(sprintf('Memory read out of bounds: offset=0x%X maxSize=0x%X', $this->offset, $this->maxSize));
+        // Safety check: don't allow access beyond logical max (swap inclusive)
+        if ($this->offset >= $this->logicalMaxMemorySize()) {
+            throw new \RuntimeException(sprintf('Memory read out of bounds: offset=0x%X logicalMaxMemorySize=0x%X', $this->offset, $this->logicalMaxMemorySize()));
         }
 
         // Auto-expand if reading beyond current size
@@ -129,9 +122,9 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     public function setOffset(int $newOffset): self
     {
-        // Safety check: don't allow setting offset beyond maxSize
-        if ($newOffset < 0 || $newOffset >= $this->maxSize) {
-            throw new \RuntimeException(sprintf('Cannot set offset beyond bounds: offset=0x%X maxSize=0x%X', $newOffset, $this->maxSize));
+        // Safety check: don't allow setting offset beyond logical max (swap inclusive)
+        if ($newOffset < 0 || $newOffset >= $this->logicalMaxMemorySize()) {
+            throw new \RuntimeException(sprintf('Cannot set offset beyond bounds: offset=0x%X logicalMaxMemorySize=0x%X', $newOffset, $this->logicalMaxMemorySize()));
         }
 
         // Auto-expand memory if needed
@@ -144,7 +137,7 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     public function isEOF(): bool
     {
-        return $this->offset >= $this->size && $this->offset >= $this->maxSize;
+        return $this->offset >= $this->size && $this->offset >= $this->logicalMaxMemorySize();
     }
 
     // ========================================
@@ -166,9 +159,9 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
 
     public function writeByte(int $value): void
     {
-        // Safety check: don't allow access beyond maxSize
-        if ($this->offset >= $this->maxSize) {
-            throw new \RuntimeException(sprintf('Memory access out of bounds: offset=0x%X maxSize=0x%X', $this->offset, $this->maxSize));
+        // Safety check: don't allow access beyond logical max (swap inclusive)
+        if ($this->offset >= $this->logicalMaxMemorySize()) {
+            throw new \RuntimeException(sprintf('Memory access out of bounds: offset=0x%X logicalMaxMemorySize=0x%X', $this->offset, $this->logicalMaxMemorySize()));
         }
 
         if ($this->offset >= $this->size) {
@@ -230,4 +223,31 @@ class MemoryStream implements StreamIsProxyableInterface, StreamReaderIsProxyabl
     {
         return $this->size;
     }
+
+    /**
+     * Get the logical maximum memory size (physical + swap).
+     * This is the total addressable memory space.
+     */
+    public function logicalMaxMemorySize(): int
+    {
+        return $this->physicalMaxMemorySize + $this->swapSize;
+    }
+
+    /**
+     * Get the physical maximum memory size (without swap).
+     * Data up to this size stays in RAM; beyond this goes to temp file.
+     */
+    public function physicalMaxMemorySize(): int
+    {
+        return $this->physicalMaxMemorySize;
+    }
+
+    /**
+     * Get the swap size.
+     */
+    public function swapSize(): int
+    {
+        return $this->swapSize;
+    }
+
 }
