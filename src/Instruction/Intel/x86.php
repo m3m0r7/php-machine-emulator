@@ -125,6 +125,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Ret;
 use PHPMachineEmulator\Instruction\Intel\x86\Sti;
 use PHPMachineEmulator\Instruction\Intel\x86\Stosb;
 use PHPMachineEmulator\Instruction\Intel\x86\TestImmAl;
+use PHPMachineEmulator\Instruction\Intel\x86\Xlat;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\BitOp;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bsf;
@@ -366,6 +367,7 @@ class x86 implements InstructionListInterface
             Stosb::class,
             Stosw::class,
             TestImmAl::class,
+            Xlat::class,
             Xor_::class,
             ImulImmediate::class,
             FpuStub::class,
