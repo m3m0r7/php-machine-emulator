@@ -3,13 +3,18 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
-use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
+/**
+ * CMP AL/AX/EAX, imm8/imm16/imm32
+ *
+ * 0x3C: CMP AL, imm8
+ * 0x3D: CMP AX, imm16 (or CMP EAX, imm32 with 0x66 prefix in 16-bit mode)
+ */
 class CmpImmAX implements InstructionInterface
 {
     use Instructable;
@@ -25,37 +30,37 @@ class CmpImmAX implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
+        $cpu = $runtime->context()->cpu();
 
-        $operand = $opcode === 0x3D
-            ? $enhancedStreamReader->short()
-            : $enhancedStreamReader->streamReader()->byte();
-
-        $fetchResult = $runtime
-            ->memoryAccessor()
-            ->fetch(RegisterType::EAX);
-
-        $leftHand = match ($opcode) {
-            0x3C => $fetchResult->asLowBit(),
-            0x3D => $fetchResult->asByte() & 0b11111111_11111111,
-        };
-
-        $normalizedOperand = $opcode === 0x3D ? ($operand & 0xFFFF) : $operand;
-        $newCF = $leftHand < $normalizedOperand;
-
-        // Debug FAT chain reading
-        if ($opcode === 0x3D && $normalizedOperand === 0x0FF8) {
-            $runtime->option()->logger()->debug(sprintf(
-                'CMP AX, 0xFF8: AX=0x%04X < 0xFF8 ? CF=%s',
-                $leftHand,
-                $newCF ? 'true' : 'false'
-            ));
+        if ($opcode === 0x3C) {
+            // CMP AL, imm8
+            $operand = $enhancedStreamReader->streamReader()->byte();
+            $leftHand = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
+            $bitSize = 8;
+            $mask = 0xFF;
+        } else {
+            // 0x3D: CMP AX/EAX, imm16/imm32
+            $use32 = $cpu->shouldUse32bit();
+            if ($use32) {
+                $operand = $enhancedStreamReader->dword();
+                $leftHand = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(32);
+                $bitSize = 32;
+                $mask = 0xFFFFFFFF;
+            } else {
+                $operand = $enhancedStreamReader->short();
+                $leftHand = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(16);
+                $bitSize = 16;
+                $mask = 0xFFFF;
+            }
         }
+
+        $normalizedOperand = $operand & $mask;
+        $newCF = $leftHand < $normalizedOperand;
 
         $runtime
             ->memoryAccessor()
-            ->updateFlags($leftHand - $normalizedOperand, $opcode === 0x3D ? 16 : 8)
+            ->updateFlags($leftHand - $normalizedOperand, $bitSize)
             ->setCarryFlag($newCF);
-
 
         return ExecutionStatus::SUCCESS;
     }
