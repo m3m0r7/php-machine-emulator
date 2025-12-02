@@ -147,22 +147,22 @@ class Instruction64Test extends TestCase
         }
     }
 
-    public function testGetInstructionByOperationCode64BitMode(): void
+    public function testFindInstruction64BitMode(): void
     {
         // REX prefix should return RexPrefix in 64-bit mode
-        $instruction = $this->instructionList->getInstructionByOperationCode(0x48);
+        [$instruction, ] = $this->instructionList->findInstruction(0x48);
         $this->assertInstanceOf(RexPrefix::class, $instruction);
 
         // MOVSXD
-        $instruction = $this->instructionList->getInstructionByOperationCode(0x63);
+        [$instruction, ] = $this->instructionList->findInstruction(0x63);
         $this->assertInstanceOf(Movsxd::class, $instruction);
 
         // PUSH r64
-        $instruction = $this->instructionList->getInstructionByOperationCode(0x50);
+        [$instruction, ] = $this->instructionList->findInstruction(0x50);
         $this->assertInstanceOf(Push64::class, $instruction);
 
         // POP r64
-        $instruction = $this->instructionList->getInstructionByOperationCode(0x58);
+        [$instruction, ] = $this->instructionList->findInstruction(0x58);
         $this->assertInstanceOf(Pop64::class, $instruction);
     }
 
@@ -183,15 +183,15 @@ class Instruction64Test extends TestCase
     {
         // Non-64-bit specific opcodes should delegate to x86
         // NOP (0x90)
-        $instruction = $this->instructionList->getInstructionByOperationCode(0x90);
+        [$instruction, ] = $this->instructionList->findInstruction(0x90);
         $this->assertNotNull($instruction);
 
         // INT (0xCD)
-        $instruction = $this->instructionList->getInstructionByOperationCode(0xCD);
+        [$instruction, ] = $this->instructionList->findInstruction(0xCD);
         $this->assertNotNull($instruction);
 
         // RET (0xC3)
-        $instruction = $this->instructionList->getInstructionByOperationCode(0xC3);
+        [$instruction, ] = $this->instructionList->findInstruction(0xC3);
         $this->assertNotNull($instruction);
     }
 

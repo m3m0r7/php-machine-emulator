@@ -40,7 +40,7 @@ class RepPrefix implements InstructionInterface
 
         // For CMPS/SCAS, we need per-iteration ZF check
         while ($counter > 0) {
-            $instruction = $this->instructionList->getInstructionByOperationCode($nextOpcode);
+            [$instruction, ] = $this->instructionList->findInstruction($nextOpcode);
             $result = $instruction->process($runtime, $nextOpcode);
             $counter--;
             $this->writeIndex($runtime, RegisterType::ECX, $counter);

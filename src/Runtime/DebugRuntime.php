@@ -72,16 +72,7 @@ class DebugRuntime extends Runtime implements RuntimeInterface
 
         try {
             $instructionList = $this->architectureProvider->instructionList();
-            if (count($opcodeArray) > 1) {
-                $matched = $instructionList->tryMatchMultiByteOpcode($opcodeArray);
-                if ($matched !== null) {
-                    $instruction = $matched[0];
-                } else {
-                    $instruction = $instructionList->getInstructionByOperationCode($firstOpcode);
-                }
-            } else {
-                $instruction = $instructionList->getInstructionByOperationCode($firstOpcode);
-            }
+            [$instruction, ] = $instructionList->findInstruction($opcodeArray);
 
             $result = parent::execute($opcodes);
             $class = new \ReflectionClass($instruction);

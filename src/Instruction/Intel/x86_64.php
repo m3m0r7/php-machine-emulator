@@ -70,8 +70,10 @@ class x86_64 implements InstructionListInterface
         $this->x86->setRuntime($runtime);
     }
 
-    public function getInstructionByOperationCode(int $opcode): InstructionInterface
+    public function findInstruction(int|array $opcodes): array
     {
+        $opcodeArray = is_array($opcodes) ? $opcodes : [$opcodes];
+
         // Check if we're in 64-bit mode (Long Mode and not Compatibility Mode)
         $isIn64BitMode = $this->runtime !== null
             && $this->runtime->context()->cpu()->isLongMode()
@@ -80,13 +82,14 @@ class x86_64 implements InstructionListInterface
         // Only use 64-bit specific instructions when actually in 64-bit mode
         if ($isIn64BitMode) {
             $list64 = $this->instructionList64();
+            $opcode = $opcodeArray[0];
             if (isset($list64[$opcode])) {
-                return $list64[$opcode];
+                return [$list64[$opcode], $opcode];
             }
         }
 
         // Delegate to x86 for non-64-bit mode or non-64-bit-specific opcodes
-        return $this->x86->getInstructionByOperationCode($opcode);
+        return $this->x86->findInstruction($opcodes);
     }
 
     /**
@@ -98,15 +101,12 @@ class x86_64 implements InstructionListInterface
     }
 
     /**
-     * Try to match a multi-byte opcode sequence.
+     * Check if a byte sequence matches a multi-byte opcode.
      * Delegates to the underlying x86 implementation.
-     *
-     * @param int[] $bytes The opcode bytes to match
-     * @return array|null [InstructionInterface, opcodeKey] or null if no match
      */
-    public function tryMatchMultiByteOpcode(array $bytes): ?array
+    public function isMultiByteOpcode(array $bytes): bool
     {
-        return $this->x86->tryMatchMultiByteOpcode($bytes);
+        return $this->x86->isMultiByteOpcode($bytes);
     }
 
     /**

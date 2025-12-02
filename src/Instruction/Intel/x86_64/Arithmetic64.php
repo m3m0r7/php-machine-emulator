@@ -61,9 +61,8 @@ class Arithmetic64 implements InstructionInterface
 
         // In non-64-bit mode, delegate to standard x86
         if (!$cpu->isLongMode() || $cpu->isCompatibilityMode()) {
-            return $this->instructionList->x86()
-                ->getInstructionByOperationCode($opcode)
-                ->process($runtime, $opcode);
+            [$instruction, ] = $this->instructionList->x86()->findInstruction($opcode);
+            return $instruction->process($runtime, $opcode);
         }
 
         // Determine operation type

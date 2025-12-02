@@ -21,7 +21,7 @@ class LockPrefix implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $nextOpcode = $runtime->memory()->byte();
-        return $runtime->execute($nextOpcode);
+        // LOCK prefix is ignored in this emulator (no multi-processor support)
+        return ExecutionStatus::CONTINUE;
     }
 }

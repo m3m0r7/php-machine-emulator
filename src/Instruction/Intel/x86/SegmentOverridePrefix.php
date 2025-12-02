@@ -21,10 +21,7 @@ class SegmentOverridePrefix implements InstructionInterface
     {
         $segment = $this->map()[$opcode];
         $runtime->context()->cpu()->setSegmentOverride($segment);
-
-        // Execute the following opcode with the override applied.
-        $nextOpcode = $runtime->memory()->byte();
-        return $runtime->execute($nextOpcode);
+        return ExecutionStatus::CONTINUE;
     }
 
     private function map(): array

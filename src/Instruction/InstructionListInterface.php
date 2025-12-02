@@ -11,18 +11,22 @@ interface InstructionListInterface
     public function register(): RegisterInterface;
 
     /**
-     * Get instruction by single-byte opcode.
+     * Find instruction by opcode(s).
+     * Returns [instruction, opcodeKey] or throws InvalidOpcodeException.
+     *
+     * @param int|int[] $opcodes Single opcode or array of opcode bytes
+     * @return array{InstructionInterface, int}
      */
-    public function getInstructionByOperationCode(int $opcode): InstructionInterface;
+    public function findInstruction(int|array $opcodes): array;
 
     /**
-     * Try to match a multi-byte opcode sequence.
-     * Returns [instruction, opcodeKey] if found, null otherwise.
+     * Check if a byte sequence matches a multi-byte opcode.
+     * Used by Runtime for opcode peeking during fetch.
      *
-     * @param int[] $bytes The opcode bytes to match
-     * @return array{InstructionInterface, int}|null
+     * @param int[] $bytes The opcode bytes to check
+     * @return bool True if the sequence matches a multi-byte opcode
      */
-    public function tryMatchMultiByteOpcode(array $bytes): ?array;
+    public function isMultiByteOpcode(array $bytes): bool;
 
     /**
      * Get the maximum opcode length registered.

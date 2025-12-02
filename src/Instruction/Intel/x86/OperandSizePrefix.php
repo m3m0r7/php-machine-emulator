@@ -23,7 +23,6 @@ class OperandSizePrefix implements InstructionInterface
     {
         // Flag the runtime context for this instruction to prefer 32-bit operands.
         $runtime->context()->cpu()->setOperandSizeOverride(true);
-        $nextOpcode = $runtime->memory()->byte();
-        return $runtime->execute($nextOpcode);
+        return ExecutionStatus::CONTINUE;
     }
 }

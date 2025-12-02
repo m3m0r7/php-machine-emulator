@@ -21,9 +21,7 @@ class AddressSizePrefix implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        // Address-size override not yet implemented; flag context and process next opcode.
         $runtime->context()->cpu()->setAddressSizeOverride(true);
-        $nextOpcode = $runtime->memory()->byte();
-        return $runtime->execute($nextOpcode);
+        return ExecutionStatus::CONTINUE;
     }
 }

@@ -183,29 +183,47 @@ class x86 implements InstructionListInterface
         return $this->register ??= new Register();
     }
 
-    public function getInstructionByOperationCode(int $opcode): InstructionInterface
+    public function findInstruction(int|array $opcodes): array
     {
-        return $this->instructionList()[$opcode] ?? throw new InvalidOpcodeException($opcode);
+        $this->instructionList(); // ensure initialized
+
+        $opcodeArray = is_array($opcodes) ? $opcodes : [$opcodes];
+        $length = count($opcodeArray);
+
+        // Try multi-byte match first (longest to shortest)
+        if ($length >= 2) {
+            for ($len = min($length, $this->maxOpcodeLength); $len >= 2; $len--) {
+                $key = $this->bytesToKey(array_slice($opcodeArray, 0, $len));
+                if (isset($this->multiByteOpcodes[$key])) {
+                    return $this->multiByteOpcodes[$key];
+                }
+            }
+        }
+
+        // Fall back to single-byte lookup
+        $opcode = $opcodeArray[0];
+        $instruction = $this->instructionList[$opcode] ?? throw new InvalidOpcodeException($opcode);
+
+        return [$instruction, $opcode];
     }
 
-    public function tryMatchMultiByteOpcode(array $bytes): ?array
+    public function isMultiByteOpcode(array $bytes): bool
     {
         $this->instructionList(); // ensure initialized
 
         $length = count($bytes);
         if ($length < 2) {
-            return null;
+            return false;
         }
 
-        // Try to match from longest to shortest
         for ($len = min($length, $this->maxOpcodeLength); $len >= 2; $len--) {
             $key = $this->bytesToKey(array_slice($bytes, 0, $len));
             if (isset($this->multiByteOpcodes[$key])) {
-                return $this->multiByteOpcodes[$key];
+                return true;
             }
         }
 
-        return null;
+        return false;
     }
 
     public function getMaxOpcodeLength(): int

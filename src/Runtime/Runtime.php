@@ -165,8 +165,7 @@ class Runtime implements RuntimeInterface
                 // Peek ahead for potential multi-byte opcode
                 for ($i = 1; $i < $maxOpcodeLength && !$this->memory->isEOF(); $i++) {
                     $peekBytes[] = $this->memory->byte();
-                    $matched = $instructionList->tryMatchMultiByteOpcode($peekBytes);
-                    if ($matched !== null) {
+                    if ($instructionList->isMultiByteOpcode($peekBytes)) {
                         $opcodes = $peekBytes;
                         break;
                     }
@@ -294,50 +293,28 @@ class Runtime implements RuntimeInterface
     public function execute(int|array $opcodes): ExecutionStatus
     {
         $instructionList = $this->architectureProvider->instructionList();
-
-        // Handle array of opcodes (multi-byte)
-        if (is_array($opcodes)) {
-            if (count($opcodes) > 1) {
-                $matched = $instructionList->tryMatchMultiByteOpcode($opcodes);
-                if ($matched !== null) {
-                    [$instruction, $opcodeKey] = $matched;
-                    try {
-                        return $instruction->process($this, $opcodeKey);
-                    } catch (FaultException $e) {
-                        $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
-                        if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {
-                            return ExecutionStatus::SUCCESS;
-                        }
-                        throw $e;
-                    } catch (ExecutionException $e) {
-                        $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
-                        throw $e;
-                    } finally {
-                        $this->context->cpu()->clearTransientOverrides();
-                    }
-                }
-            }
-            // Single-element array or no match - use first byte
-            $opcode = $opcodes[0];
-        } else {
-            $opcode = $opcodes;
-        }
-
-        $instruction = $instructionList->getInstructionByOperationCode($opcode);
+        [$instruction, $opcodeKey] = $instructionList->findInstruction($opcodes);
 
         try {
-            return $instruction->process($this, $opcode);
+            $result = $instruction->process($this, $opcodeKey);
+
+            // Don't clear transient overrides for prefix instructions
+            if ($result !== ExecutionStatus::CONTINUE) {
+                $this->context->cpu()->clearTransientOverrides();
+            }
+
+            return $result;
         } catch (FaultException $e) {
+            $this->context->cpu()->clearTransientOverrides();
             $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
             if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {
                 return ExecutionStatus::SUCCESS;
             }
             throw $e;
         } catch (ExecutionException $e) {
+            $this->context->cpu()->clearTransientOverrides();
             $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
             throw $e;
-        } finally {
-            $this->context->cpu()->clearTransientOverrides();
         }
     }
 
