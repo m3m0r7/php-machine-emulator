@@ -322,9 +322,9 @@ class Runtime implements RuntimeInterface
                 return ExecutionStatus::SUCCESS;
             }
             throw $e;
-        } catch (ExecutionException $e) {
+        } catch (\Throwable $e) {
             $this->context->cpu()->clearTransientOverrides();
-            $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
+            $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e));
             throw $e;
         }
     }
