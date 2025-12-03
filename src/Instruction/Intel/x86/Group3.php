@@ -32,7 +32,7 @@ class Group3 implements InstructionInterface
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
 
         match ($modRegRM->digit()) {
-            0x0 => $this->test($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
+            0x0, 0x1 => $this->test($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
             0x2 => $this->not($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
             0x3 => $this->neg($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
             0x4 => $this->mul($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),

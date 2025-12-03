@@ -76,16 +76,19 @@ class BIOS
         // 4. Initialize IVT first (to handle exceptions safely)
         $this->initializeIVT();
 
-        // 5. Initialize ROM area (BIOS identification, default handlers)
+        // 5. Initialize emulator-specific BIOS stubs (INT handlers that call back to PHP)
+        $this->initializeBIOSStubsForEmulator();
+
+        // 6. Initialize ROM area (BIOS identification, default handlers)
         $this->initializeROM();
 
-        // 6. Initialize BDA
+        // 7. Initialize BDA
         $this->initializeBDA();
 
-        // 7. Initialize segment registers (DS, ES, SS, etc.)
+        // 8. Initialize segment registers (DS, ES, SS, etc.)
         $this->initializeSegmentRegisters();
 
-        // 8. Initialize boot segment (CS register) - should be last before boot
+        // 9. Initialize boot segment (CS register) - should be last before boot
         $this->initializeBootSegment();
 
         $this->machine->option()->logger()->info('BIOS initialization completed');
@@ -478,6 +481,64 @@ class BIOS
 
         $this->machine->option()->logger()->debug(
             sprintf('BIOS: Initialized IVT (0x000-0x3FF) with %d vectors pointing to F000:%04X', 256, $defaultOffset)
+        );
+    }
+
+    /**
+     * Initialize BIOS stubs for emulator.
+     *
+     * This method creates minimal BIOS handler stubs in ROM that execute INT instructions
+     * to trigger PHP-based BIOS handlers. This is needed for bootloaders like ISOLINUX
+     * that use RETF to jump directly to IVT handlers instead of using INT instructions.
+     *
+     * Each stub consists of: INT nn (0xCD nn) + IRET (0xCF)
+     * The IVT entries are updated to point to these stubs.
+     */
+    protected function initializeBIOSStubsForEmulator(): void
+    {
+        $mem = $this->runtime()->memoryAccessor();
+
+        // BIOS segment and base offset for stubs
+        $biosSegment = 0xF000;
+        $stubBaseOffset = 0xE100;  // F000:E100 range for BIOS stubs
+
+        // List of BIOS interrupts that need stubs
+        // These are interrupts that are handled by PHP code via Int_::process()
+        $biosInterrupts = [
+            0x10, // Video services
+            0x12, // Memory size
+            0x13, // Disk services
+            0x15, // System services
+            0x16, // Keyboard services
+        ];
+
+        foreach ($biosInterrupts as $vector) {
+            // Calculate stub offset: E100 + (vector * 4) to space them out
+            $stubOffset = $stubBaseOffset + ($vector * 4);
+            $stubAddress = ($biosSegment << 4) + $stubOffset;
+
+            // Write stub code: INT nn (0xCD nn) followed by IRET (0xCF)
+            $mem->writeBySize($stubAddress, 0xCD, 8);       // INT opcode
+            $mem->writeBySize($stubAddress + 1, $vector, 8); // Interrupt number
+            $mem->writeBySize($stubAddress + 2, 0xCF, 8);    // IRET
+
+            // Update IVT entry to point to this stub
+            $ivtAddress = $vector * 4;
+            $mem->writeBySize($ivtAddress, $stubOffset, 16);      // Offset
+            $mem->writeBySize($ivtAddress + 2, $biosSegment, 16); // Segment
+
+            $this->machine->option()->logger()->debug(
+                sprintf(
+                    'BIOS: Stub for INT 0x%02X at F000:%04X (linear 0x%05X), IVT updated',
+                    $vector,
+                    $stubOffset,
+                    $stubAddress
+                )
+            );
+        }
+
+        $this->machine->option()->logger()->debug(
+            sprintf('BIOS: Initialized %d BIOS stubs for emulator', count($biosInterrupts))
         );
     }
 
