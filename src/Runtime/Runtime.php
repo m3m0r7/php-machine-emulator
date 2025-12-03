@@ -303,28 +303,33 @@ class Runtime implements RuntimeInterface
      */
     public function execute(int|array $opcodes): ExecutionStatus
     {
-        $instructionList = $this->architectureProvider->instructionList();
-        [$instruction, $opcodeKey] = $instructionList->findInstruction($opcodes);
-
         try {
-            $result = $instruction->process($this, $opcodeKey);
+            $instructionList = $this->architectureProvider->instructionList();
+            [$instruction, $opcodeKey] = $instructionList->findInstruction($opcodes);
 
-            // Don't clear transient overrides for prefix instructions
-            if ($result !== ExecutionStatus::CONTINUE) {
+            try {
+                $result = $instruction->process($this, $opcodeKey);
+
+                // Don't clear transient overrides for prefix instructions
+                if ($result !== ExecutionStatus::CONTINUE) {
+                    $this->context->cpu()->clearTransientOverrides();
+                }
+
+                return $result;
+            } catch (FaultException $e) {
                 $this->context->cpu()->clearTransientOverrides();
+                $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
+                if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {
+                    return ExecutionStatus::SUCCESS;
+                }
+                throw $e;
+            } catch (ExecutionException $e) {
+                $this->context->cpu()->clearTransientOverrides();
+                $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
+                throw $e;
             }
-
-            return $result;
-        } catch (FaultException $e) {
-            $this->context->cpu()->clearTransientOverrides();
-            $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
-            if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {
-                return ExecutionStatus::SUCCESS;
-            }
-            throw $e;
         } catch (\Throwable $e) {
-            $this->context->cpu()->clearTransientOverrides();
-            $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e));
+            $this->machine->option()->logger()->error(sprintf('Threw error: %s', $e));
             throw $e;
         }
     }
