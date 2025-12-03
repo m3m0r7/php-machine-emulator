@@ -69,10 +69,29 @@ class Int_ implements InstructionInterface
             BIOSInterrupt::KEYBOARD_INTERRUPT => ($this->interruptInstances[Keyboard::class] ??= new Keyboard($runtime))
                 ->process($runtime),
             BIOSInterrupt::SYSTEM_INTERRUPT => ($this->interruptInstances[System::class] ??= new System())->process($runtime),
-            BIOSInterrupt::DOS_INTERRUPT => ($this->interruptInstances[Dos::class] ??= new Dos($this->instructionList))->process($runtime, $opcode),
-            default => throw new ExecutionException(sprintf('Unimplemented BIOS interrupt: INT 0x%02X', $vector)),
+            BIOSInterrupt::DOS_TERMINATE_INTERRUPT => null,
+            BIOSInterrupt::DOS_INTERRUPT => null,
+            default => $this->handleUnknownInterrupt($runtime, $vector),
         };
 
+        if ($operand === BIOSInterrupt::DOS_TERMINATE_INTERRUPT) {
+            return ExecutionStatus::EXIT;
+        }
+
+        if ($operand === BIOSInterrupt::DOS_INTERRUPT) {
+            return ($this->interruptInstances[Dos::class] ??= new Dos($this->instructionList))->process($runtime, $opcode);
+        }
+
+        return ExecutionStatus::SUCCESS;
+    }
+
+    /**
+     * Handle unknown interrupt vectors by delegating to IVT-based interrupt handling.
+     */
+    private function handleUnknownInterrupt(RuntimeInterface $runtime, int $vector): ExecutionStatus
+    {
+        $returnOffset = $runtime->memory()->offset();
+        $this->vectorInterrupt($runtime, $vector, $returnOffset);
         return ExecutionStatus::SUCCESS;
     }
 

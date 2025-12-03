@@ -22,6 +22,8 @@ class Popa implements InstructionInterface
         $ma = $runtime->memoryAccessor();
         $size = $runtime->context()->cpu()->operandSize();
 
+        $espBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize(32);
+
         $di = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $si = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $bp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
@@ -31,10 +33,12 @@ class Popa implements InstructionInterface
         $cx = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $ax = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
-        // Debug: log POPA SI value
+        $espAfter = $ma->fetch(RegisterType::ESP)->asBytesBySize(32);
+
+        // Debug: log POPA with ESP
         $runtime->option()->logger()->debug(sprintf(
-            'POPA: SI=0x%04X DI=0x%04X AX=0x%04X BX=0x%04X',
-            $si, $di, $ax, $bx
+            'POPA: ESP before=0x%08X after=0x%08X SI=0x%04X DI=0x%04X AX=0x%04X BX=0x%04X',
+            $espBefore, $espAfter, $si, $di, $ax, $bx
         ));
 
         $ma->writeBySize(RegisterType::EDI, $di, $size);

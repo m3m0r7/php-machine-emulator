@@ -10,6 +10,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\LogicBoard\LogicBoardInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Runtime\AddressMapInterface;
 use PHPMachineEmulator\Runtime\MemoryAccessor;
@@ -19,6 +20,7 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Runtime\RuntimeOptionInterface;
 use PHPMachineEmulator\Stream\BootableStreamInterface;
 use PHPMachineEmulator\Stream\MemoryStream;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Video\VideoInterface;
 
 class TestRuntime implements RuntimeInterface
@@ -111,14 +113,19 @@ class TestRuntime implements RuntimeInterface
         return new TestVideo();
     }
 
-    public function memory(): ?MemoryStream
+    public function memory(): MemoryStreamInterface
     {
         return $this->memoryStream;
     }
 
-    public function bootStream(): ?BootableStreamInterface
+    public function bootStream(): BootableStreamInterface
     {
-        return null;
+        return new TestBootableStream();
+    }
+
+    public function logicBoard(): LogicBoardInterface
+    {
+        return new TestLogicBoard();
     }
 
     // ========================================

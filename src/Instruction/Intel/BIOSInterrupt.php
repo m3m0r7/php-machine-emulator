@@ -15,5 +15,6 @@ enum BIOSInterrupt: int
     case DISK_INTERRUPT = 0x13;
     case KEYBOARD_INTERRUPT = 0x16;
     case SYSTEM_INTERRUPT = 0x15;
+    case DOS_TERMINATE_INTERRUPT = 0x20;
     case DOS_INTERRUPT = 0x21;
 }

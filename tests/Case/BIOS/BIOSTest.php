@@ -1,36 +1,42 @@
 <?php
+
 declare(strict_types=1);
+
 namespace Tests\Case\BIOS;
 
 use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\IO\Buffer;
-use PHPMachineEmulator\MachineType;
+use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
-use Tests\Utils\BootableFileStream;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Spatie\Snapshots\MatchesSnapshots;
 use Tests\CreateApplication;
+use Tests\Utils\BootableFileStream;
 
 class BIOSTest extends TestCase
 {
     use CreateApplication;
+    use MatchesSnapshots;
 
-    #[DataProvider('machineInitialization')]
-    public function testBIOS(MachineType $machineType, OptionInterface $option)
+    public static function biosDataProvider(): array
+    {
+        $bootStream = new BootableFileStream(__DIR__ . '/Fixture/BIOS.o', 0x7C00);
+        return self::machineInitializationWithMachine($bootStream);
+    }
+
+    #[DataProvider('biosDataProvider')]
+    public function testBIOS(MachineInterface $machine, OptionInterface $option)
     {
         try {
-            BIOS::start(
-                new BootableFileStream(__DIR__ . '/Fixture/BIOS.o', 0x7C00),
-                $machineType,
-                $option,
-            );
+            BIOS::start($machine);
         } catch (ExitException) {
         }
 
         $output = $option->IO()->output();
         assert($output instanceof Buffer);
 
-        $this->assertSame("Hello World!\r\n", $output->getBuffer());
+        $this->assertMatchesTextSnapshot($output->getBuffer());
     }
 }

@@ -17,6 +17,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\ServiceInterface;
+use PHPMachineEmulator\LogicBoard\LogicBoardInterface;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandler;
@@ -25,7 +26,6 @@ use PHPMachineEmulator\Runtime\Ticker\ApicTicker;
 use PHPMachineEmulator\Runtime\Ticker\PitTicker;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
-use PHPMachineEmulator\Stream\BootableStreamInterface;
 use PHPMachineEmulator\Stream\MemoryStream;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Video\VideoInterface;
@@ -47,8 +47,11 @@ class Runtime implements RuntimeInterface
         protected MachineInterface $machine,
         protected RuntimeOptionInterface $runtimeOption,
         protected ArchitectureProviderInterface $architectureProvider,
-        protected BootableStreamInterface $bootStream,
     ) {
+        // Apply PHP memory limit from LogicBoard
+        $phpMemoryLimit = $this->logicBoard()->memory()->phpMemoryLimit();
+        ini_set('memory_limit', $phpMemoryLimit);
+
         $this->register = $this
             ->architectureProvider
             ->instructionList()
@@ -64,7 +67,7 @@ class Runtime implements RuntimeInterface
 
         // Initialize RuntimeContext with CPU and Screen contexts
         $screenContext = new RuntimeScreenContext(
-            $this->machine->option()->screenWriterFactory(),
+            $this->logicBoard()->display()->screenWriterFactory(),
             $this,
             $this->architectureProvider->video(),
         );
@@ -90,34 +93,44 @@ class Runtime implements RuntimeInterface
     }
 
     /**
+     * Get the LogicBoard from the machine.
+     */
+    public function logicBoard(): LogicBoardInterface
+    {
+        return $this->machine->logicBoard();
+    }
+
+    /**
      * Create memory stream with boot data copied in.
      */
     private function createMemoryStream(): MemoryStream
     {
-        $option = $this->machine->option();
+        $memoryContext = $this->logicBoard()->memory();
+        $bootStream = $this->logicBoard()->media()->primary()->stream();
 
-        // Create memory stream with configurable sizes from Option
+        // Create memory stream with configurable sizes from LogicBoard's MemoryContext
         $memoryStream = new MemoryStream(
-            $option->memorySize(),
-            $option->maxMemorySize()
+            $memoryContext->initialMemory(),
+            $memoryContext->maxMemory(),
+            $memoryContext->swapSize(),
         );
 
-        $loadAddress = $this->bootStream->loadAddress();
-        $bootSize = $this->bootStream->fileSize();
+        $loadAddress = $bootStream->loadAddress();
+        $bootSize = $bootStream->fileSize();
 
-        $option->logger()->debug(
+        $this->option()->logger()->debug(
             sprintf(
                 'Memory configured: initial=%dMB max=%dMB',
-                $option->memorySize() / 0x100000,
-                $option->maxMemorySize() / 0x100000
+                $memoryContext->initialMemory() / 0x100000,
+                $memoryContext->maxMemory() / 0x100000
             )
         );
-        $option->logger()->debug(
+        $this->option()->logger()->debug(
             sprintf('Copying boot data (%d bytes) to memory at 0x%05X', $bootSize, $loadAddress)
         );
 
         // Copy boot data to memory at loadAddress (e.g., 0x7C00)
-        $memoryStream->copy($this->bootStream, 0, $loadAddress, $bootSize);
+        $memoryStream->copy($bootStream, 0, $loadAddress, $bootSize);
 
         // Set initial offset to boot entry point
         $memoryStream->setOffset($loadAddress);
@@ -131,14 +144,6 @@ class Runtime implements RuntimeInterface
     public function memory(): MemoryStreamInterface
     {
         return $this->memory;
-    }
-
-    /**
-     * Get the boot stream.
-     */
-    public function bootStream(): BootableStreamInterface
-    {
-        return $this->bootStream;
     }
 
     public function start(): void
@@ -355,11 +360,7 @@ class Runtime implements RuntimeInterface
      */
     private function initializeBootSegment(): void
     {
-        if ($this->bootStream === null) {
-            return;
-        }
-
-        $loadSegment = $this->bootStream->loadSegment();
+        $loadSegment = $this->logicBoard()->media()->primary()->stream()->loadSegment();
         $this->memoryAccessor->write16Bit(RegisterType::CS, $loadSegment);
         $this->machine->option()->logger()->debug(
             sprintf('Initialized CS to 0x%04X for bootable stream', $loadSegment)

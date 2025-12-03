@@ -63,6 +63,16 @@ class MemoryAccessor implements MemoryAccessorInterface
             ));
         }
 
+        // Debug: trace writes to stack area where return address should be
+        if ($address >= 0x7B74 && $address <= 0x7B7F) {
+            $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
+            $caller = isset($bt[1]) ? ($bt[1]['class'] ?? '') . '::' . ($bt[1]['function'] ?? '') : 'unknown';
+            $this->runtime->option()->logger()->debug(sprintf(
+                'WRITE to stack return area: address=0x%08X byte=0x%02X caller=%s',
+                $address, $value & 0xFF, $caller
+            ));
+        }
+
         $memory = $this->runtime->memory();
         $savedOffset = $memory->offset();
         $memory->setOffset($address);
@@ -435,6 +445,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         // Stack-aware pop when targeting ESP.
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
+            $espFullBefore = $this->fetch(RegisterType::ESP)->asBytesBySize(32);
             $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($size);
             $bytes = intdiv($size, 8);
 
@@ -447,6 +458,15 @@ class MemoryAccessor implements MemoryAccessorInterface
             $newSp = ($sp + $bytes) & $mask;
 
             $this->writeBySize(RegisterType::ESP, $newSp, $size);
+
+            $espFullAfter = $this->fetch(RegisterType::ESP)->asBytesBySize(32);
+            // Debug: detect unexpected ESP changes
+            if (($espFullBefore & 0xFFFF0000) !== ($espFullAfter & 0xFFFF0000) && $size === 16) {
+                $this->runtime->option()->logger()->debug(sprintf(
+                    'POP: ESP upper bits changed! before=0x%08X after=0x%08X sp=%04X newSp=%04X size=%d',
+                    $espFullBefore, $espFullAfter, $sp, $newSp, $size
+                ));
+            }
 
             // Value is already in correct little-endian format from memory read
             // Pass alreadyDecoded=true to skip byte swap in asBytesBySize()

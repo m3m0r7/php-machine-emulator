@@ -1,55 +1,42 @@
 <?php
+
 declare(strict_types=1);
+
 namespace Tests\Case\FizzBuzz;
 
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\IO\Buffer;
-use PHPMachineEmulator\Machine;
-use PHPMachineEmulator\MachineType;
+use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
-use Tests\Utils\BootableFileStream;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Spatie\Snapshots\MatchesSnapshots;
 use Tests\CreateApplication;
+use Tests\Utils\BootableFileStream;
 
 class FizzBuzzTest extends TestCase
 {
     use CreateApplication;
     use MatchesSnapshots;
 
-    #[DataProvider('machineInitialization')]
-    public function testPrintHelloWorld(MachineType $machineType, OptionInterface $option)
+    public static function fizzBuzzDataProvider(): array
     {
-        $machine = new Machine(
-            new BootableFileStream(__DIR__ . '/Fixture/FizzBuzz.o'),
-            $option,
-        );
+        $bootStream = new BootableFileStream(__DIR__ . '/Fixture/FizzBuzz.o');
+        return self::machineInitializationWithMachine($bootStream);
+    }
 
+    #[DataProvider('fizzBuzzDataProvider')]
+    public function testPrintHelloWorld(MachineInterface $machine, OptionInterface $option)
+    {
         try {
-            $machine->runtime($machineType)
-                ->start();
-        } catch (ExitException|HaltException) {
+            $machine->runtime()->start();
+        } catch (ExitException | HaltException) {
         }
-
 
         $output = $option->IO()->output();
         assert($output instanceof Buffer);
 
-        $this->assertSame(
-            $this->createFizzBuzz(100),
-            $output->getBuffer(),
-        );
-    }
-
-    protected function createFizzBuzz(int $loops): string
-    {
-        $result = '';
-        for ($i = 1; $i <= $loops; $i++) {
-            $result .= ($i % 15 ? ($i % 5 ? ($i % 3 ? $i : 'Fizz') : 'Buzz') : 'FizzBuzz') . "\r\n";
-        }
-
-        return $result;
+        $this->assertMatchesTextSnapshot($output->getBuffer());
     }
 }

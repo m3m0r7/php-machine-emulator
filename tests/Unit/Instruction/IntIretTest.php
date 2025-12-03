@@ -271,12 +271,12 @@ class IntIretTest extends InstructionTestCase
 
     /**
      * Test INT pushes FLAGS, CS, IP to stack in real mode
-     * Uses vector 0x20 which is NOT a BIOS interrupt, so vectorInterrupt is called
+     * Uses vector 0x80 which is NOT a BIOS interrupt, so vectorInterrupt is called
      */
     public function testIntPushesStateToStack(): void
     {
-        // Use vector 0x20 which is not a BIOS interrupt
-        $vector = 0x20;
+        // Use vector 0x80 which is not a BIOS interrupt
+        $vector = 0x80;
         $handlerOffset = 0x1000;
         $handlerSegment = 0x0000;
 
@@ -325,11 +325,11 @@ class IntIretTest extends InstructionTestCase
 
     /**
      * Test INT clears IF flag
-     * Uses vector 0x20 which is NOT a BIOS interrupt
+     * Uses vector 0x80 which is NOT a BIOS interrupt
      */
     public function testIntClearsIfFlag(): void
     {
-        $vector = 0x20;
+        $vector = 0x80;
         $ivtAddress = $vector * 4;
         $this->writeMemory($ivtAddress, 0x1000, 16);
         $this->writeMemory($ivtAddress + 2, 0x0000, 16);

@@ -4,37 +4,40 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator;
 
-use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Exception\BIOSInvalidException;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
-use PHPMachineEmulator\Runtime\RuntimeOption;
-use PHPMachineEmulator\Stream\BootableStreamInterface;
 
-class BIOS extends Machine
+class BIOS
 {
     public const NAME = 'PHPMachineEmulator';
     public const BIOS_ENTRYPOINT = 0x7C00;
     public const READ_SIZE_PER_SECTOR = 512;
 
-    public function __construct(BootableStreamInterface $bootStream, OptionInterface $option)
+    public function __construct(protected MachineInterface $machine)
     {
-        parent::__construct($bootStream, $option);
-
-        if ($option->bootType() === BootType::BOOT_SIGNATURE) {
+        if ($this->machine->logicBoard()->media()->primary()->bootType() === BootType::BOOT_SIGNATURE) {
             $this->verifyBIOSSignature();
         }
     }
 
-    public static function start(BootableStreamInterface $bootStream, MachineType $useMachineType = MachineType::Intel_x86, OptionInterface $option = new Option()): void
+    public function machine(): MachineInterface
+    {
+        return $this->machine;
+    }
+
+    public function runtime(): RuntimeInterface
+    {
+        return $this->machine->runtime(self::BIOS_ENTRYPOINT);
+    }
+
+    public static function start(MachineInterface $machine): void
     {
         try {
-            (new static(
-                $bootStream,
-                $option,
-            ))->runtime($useMachineType)
+            (new static($machine))
+                ->runtime()
                 ->start();
         } catch (HaltException) {
             throw new ExitException('Halted', 0);
@@ -45,7 +48,8 @@ class BIOS extends Machine
 
     protected function verifyBIOSSignature(): void
     {
-        $proxy = $this->bootableStream->proxy();
+        $bootStream = $this->machine->logicBoard()->media()->primary()->stream();
+        $proxy = $bootStream->proxy();
         try {
             $proxy->setOffset(510);
         } catch (StreamReaderException) {
@@ -58,15 +62,5 @@ class BIOS extends Machine
         if ($high !== 0xAA || $low !== 0x55) {
             throw new BIOSInvalidException('The BIOS signature is invalid');
         }
-    }
-
-    protected function createRuntime(ArchitectureProviderInterface $architectureProvider): RuntimeInterface
-    {
-        return new ($this->option->runtimeClass())(
-            $this,
-            new RuntimeOption(self::BIOS_ENTRYPOINT),
-            $architectureProvider,
-            $this->bootableStream,
-        );
     }
 }

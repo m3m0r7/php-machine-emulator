@@ -71,6 +71,13 @@ class MovMoffset implements InstructionInterface
                     $valueToWrite, $linearOffset
                 ));
             }
+            // Debug: track writes to stack area
+            if ($linearOffset >= 0x7B00 && $linearOffset <= 0x7C00) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'MOV moffs, EAX: writing to stack area! offset=0x%04X linearOffset=0x%05X value=0x%08X opSize=%d',
+                    $offset, $linearOffset, $valueToWrite, $opSize
+                ));
+            }
             // Write using appropriate size
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearOffset, $valueToWrite);

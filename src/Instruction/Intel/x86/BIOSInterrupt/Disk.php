@@ -119,7 +119,7 @@ class Disk implements InterruptInterface
         $dl = $dx->asLowBit(); // drive
 
         // Read from bootStream (disk image) directly, not from unified memory
-        $bootStream = $runtime->bootStream();
+        $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
         if ($bootStream === null) {
             $this->fail($runtime, 0x20);
             return;
@@ -149,7 +149,7 @@ class Disk implements InterruptInterface
         $bufferAddress = $this->segmentLinearAddress($runtime, $es, $bx, $addressSize);
 
         // Also debug the [0x01FA] value for MikeOS
-        $bootLoadAddress = $runtime->bootStream()?->loadAddress() ?? 0x7C00;
+        $bootLoadAddress = $runtime->logicBoard()->media()->primary()?->stream()?->loadAddress() ?? 0x7C00;
         $bufPtr = $this->readMemory16($runtime, $bootLoadAddress + 0x01FA);
         $runtime->option()->logger()->debug(sprintf(
             'INT 13h READ CHS: C=%d H=%d S=%d => LBA=%d, sectors=%d, ES:BX=%04X:%04X linear=0x%05X CS:IP=%04X:%04X',
@@ -287,7 +287,7 @@ class Disk implements InterruptInterface
         $bufferAddress = $this->segmentLinearAddress($runtime, $bufferSegment, $bufferOffset, $addressSize);
 
         // Read from bootStream (disk image) directly
-        $bootStream = $runtime->bootStream();
+        $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
         if ($bootStream === null) {
             $this->fail($runtime, 0x20);
             return;
@@ -420,7 +420,7 @@ class Disk implements InterruptInterface
 
         // Decide geometry based on media type. For El Torito no-emulation CD boot,
         // the logical sector size must be 2048 bytes instead of the default 512.
-        $bootStream = $runtime->bootStream();
+        $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
         $isCdRom = ($bootStream instanceof ISOBootImageStream) && $bootStream->isNoEmulation();
 
         $bytesPerSector = $isCdRom ? self::CD_SECTOR_SIZE : self::SECTOR_SIZE;
@@ -602,7 +602,7 @@ class Disk implements InterruptInterface
     private function handleBootInfo(RuntimeInterface $runtime, int $al): void
     {
         $ma = $runtime->memoryAccessor();
-        $bootStream = $runtime->bootStream();
+        $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
         $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
 
         // AL=01h: Get Boot Info (El Torito)

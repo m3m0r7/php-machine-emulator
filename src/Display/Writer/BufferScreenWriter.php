@@ -1,0 +1,65 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PHPMachineEmulator\Display\Writer;
+
+use PHPMachineEmulator\Display\Pixel\ColorInterface;
+use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Video\VideoTypeInfo;
+
+class BufferScreenWriter implements ScreenWriterInterface
+{
+    protected int $cursorRow = 0;
+    protected int $cursorCol = 0;
+
+    public function __construct(protected RuntimeInterface $runtime, protected VideoTypeInfo $videoTypeInfo)
+    {
+    }
+
+    public function write(string $value): void
+    {
+        $this->runtime
+            ->option()
+            ->IO()
+            ->output()
+            ->write($value);
+    }
+
+    public function dot(int $x, int $y, ColorInterface $color): void
+    {
+        // Buffer mode: no visual output for dots
+    }
+
+    public function newline(): void
+    {
+        $this->write("\n");
+    }
+
+    public function setCursorPosition(int $row, int $col): void
+    {
+        $this->cursorRow = $row;
+        $this->cursorCol = $col;
+    }
+
+    public function getCursorPosition(): array
+    {
+        return ['row' => $this->cursorRow, 'col' => $this->cursorCol];
+    }
+
+    public function writeCharAtCursor(string $char, int $count = 1, ?int $attribute = null): void
+    {
+        $this->write(str_repeat($char, $count));
+    }
+
+    public function clear(): void
+    {
+        $this->cursorRow = 0;
+        $this->cursorCol = 0;
+    }
+
+    public function fillArea(int $row, int $col, int $width, int $height, int $attribute): void
+    {
+        // Buffer mode: no visual output for fill
+    }
+}

@@ -65,8 +65,18 @@ class Lxs implements InstructionInterface
             $segName, $address, $offset, $segValue, $opSize
         ));
 
-        $this->writeRegisterBySize($runtime, $modrm->registerOrOPCode(), $offset, $opSize);
+        $destReg = $modrm->registerOrOPCode();
+        $this->writeRegisterBySize($runtime, $destReg, $offset, $opSize);
         $runtime->memoryAccessor()->write16Bit($segment, $segValue & 0xFFFF);
+
+        // Debug: if LSS, show final ESP value
+        if ($secondByte === 0xB2) {
+            $finalEsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(32);
+            $runtime->option()->logger()->debug(sprintf(
+                'LSS: destReg=%d ESP after=0x%08X',
+                $destReg, $finalEsp
+            ));
+        }
 
         return ExecutionStatus::SUCCESS;
     }

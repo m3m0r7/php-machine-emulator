@@ -30,9 +30,19 @@ class PopSeg implements InstructionInterface
         };
 
         $size = $runtime->context()->cpu()->operandSize();
+        $espBefore = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(32);
 
         $value = $runtime->memoryAccessor()->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $runtime->memoryAccessor()->write16Bit($seg, $value);
+
+        $espAfter = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(32);
+        if ($espAfter !== $espBefore + ($size === 32 ? 4 : 2)) {
+            $runtime->option()->logger()->debug(sprintf(
+                'POP %s: ESP before=0x%08X after=0x%08X size=%d (unexpected!)',
+                match($seg) { RegisterType::ES => 'ES', RegisterType::DS => 'DS', RegisterType::SS => 'SS', default => '??' },
+                $espBefore, $espAfter, $size
+            ));
+        }
 
         return ExecutionStatus::SUCCESS;
     }
