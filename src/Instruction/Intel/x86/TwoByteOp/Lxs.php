@@ -53,6 +53,18 @@ class Lxs implements InstructionInterface
             : $this->readMemory16($runtime, $address);
         $segValue = $this->readMemory16($runtime, $address + ($opSize === 32 ? 4 : 2));
 
+        // Debug: trace LSS/LFS/LGS
+        $segName = match ($secondByte) {
+            0xB2 => 'SS',
+            0xB4 => 'FS',
+            0xB5 => 'GS',
+            default => '??',
+        };
+        $runtime->option()->logger()->debug(sprintf(
+            'L%sS: address=0x%08X offset=0x%08X seg=0x%04X opSize=%d',
+            $segName, $address, $offset, $segValue, $opSize
+        ));
+
         $this->writeRegisterBySize($runtime, $modrm->registerOrOPCode(), $offset, $opSize);
         $runtime->memoryAccessor()->write16Bit($segment, $segValue & 0xFFFF);
 

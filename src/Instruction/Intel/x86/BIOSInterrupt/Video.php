@@ -90,7 +90,46 @@ class Video implements InterruptInterface
 
     protected function teletypeOutput(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
     {
-        $runtime->context()->screen()->write($fetchResult->asLowBitChar());
+        $char = $fetchResult->asLowBit();
+
+        // Handle control characters
+        if ($char === 0x0D) {
+            // CR - Carriage Return: move to beginning of line
+            $this->cursorCol = 0;
+            $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+            return;
+        }
+        if ($char === 0x0A) {
+            // LF - Line Feed: move to next line
+            $this->cursorRow++;
+            $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+            return;
+        }
+        if ($char === 0x08) {
+            // BS - Backspace: move cursor left
+            if ($this->cursorCol > 0) {
+                $this->cursorCol--;
+                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+            }
+            return;
+        }
+        if ($char === 0x07) {
+            // BEL - Bell: just ignore
+            return;
+        }
+
+        // Regular character: write and advance cursor
+        $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+        $runtime->context()->screen()->write(chr($char));
+        $this->cursorCol++;
+
+        // Handle line wrap based on current video mode width
+        $videoMode = $runtime->video()->supportedVideoModes()[$this->currentMode] ?? null;
+        $cols = $videoMode?->width ?? 80;
+        if ($this->cursorCol >= $cols) {
+            $this->cursorCol = 0;
+            $this->cursorRow++;
+        }
     }
 
     protected function setCursorPosition(RuntimeInterface $runtime): void
@@ -115,11 +154,18 @@ class Video implements InterruptInterface
 
     protected function getCurrentVideoMode(RuntimeInterface $runtime): void
     {
-        // Write AL (low byte of EAX) with current video mode
-        // Write AH (high byte of EAX low word) with 0x20 (text mode, 8x16 font)
-        // Combined: AH:AL = 0x2003 for mode 3
-        $axValue = (0x20 << 8) | ($this->currentMode & 0xFF);
+        // INT 10h AH=0Fh - Get Current Video Mode
+        // Returns:
+        //   AL = current video mode
+        //   AH = number of screen columns
+        //   BH = active display page
+        $videoMode = $runtime->video()->supportedVideoModes()[$this->currentMode] ?? null;
+        $cols = $videoMode?->width ?? 80;
+
+        $axValue = ($cols << 8) | ($this->currentMode & 0xFF);
         $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $axValue);
+        // BH = current page (0)
+        $runtime->memoryAccessor()->writeToHighBit(RegisterType::EBX, 0);
     }
 
     protected function handlePaletteControl(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void

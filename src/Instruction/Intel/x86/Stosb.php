@@ -38,15 +38,14 @@ class Stosb implements InstructionInterface
             ->memoryAccessor()
             ->writeRawByte($address, $byte);
 
-        // Debug: log stosb operations
-        $runtime->option()->logger()->debug(sprintf(
-            'STOSB: ES:DI=0x%04X:0x%04X linear=0x%05X value=0x%02X (char=%s)',
-            $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte(),
-            $di,
-            $address,
-            $byte,
-            $byte >= 0x20 && $byte < 0x7F ? chr($byte) : '.'
-        ));
+        // Debug: trace STOSB writes to detect stack corruption
+        if ($address >= 0x7B00 && $address <= 0x7C00) {
+            $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
+            $runtime->option()->logger()->debug(sprintf(
+                'STOSB: writing to stack area! address=0x%08X ES=0x%04X EDI=0x%08X value=0x%02X',
+                $address, $es, $di, $byte
+            ));
+        }
 
         $step = $this->stepForElement($runtime, 1);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $step);

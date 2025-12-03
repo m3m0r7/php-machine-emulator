@@ -25,6 +25,16 @@ class Ret implements InstructionInterface
 
         $size = $runtime->context()->cpu()->operandSize();
 
+        // Debug: log operand size for RETF
+        if ($opcode === 0xCB || $opcode === 0xCA) {
+            $isProtected = $runtime->context()->cpu()->isProtectedMode();
+            $defaultSize = $runtime->context()->cpu()->defaultOperandSize();
+            $runtime->option()->logger()->debug(sprintf(
+                'RETF: operandSize=%d defaultOperandSize=%d protectedMode=%s',
+                $size, $defaultSize, $isProtected ? 'true' : 'false'
+            ));
+        }
+
         $ma = $runtime->memoryAccessor();
         $espBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize($size);
         $returnIp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);

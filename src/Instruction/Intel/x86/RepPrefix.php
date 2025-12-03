@@ -35,6 +35,16 @@ class RepPrefix implements InstructionInterface
         // REP count uses CX/ECX depending on address-size
         $counter = $this->readIndex($runtime, RegisterType::ECX);
 
+        // Debug: log REP STOSD
+        $edi = $this->readIndex($runtime, RegisterType::EDI);
+        if ($nextOpcode === 0xAB) {
+            $eax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(32);
+            $runtime->option()->logger()->debug(sprintf(
+                'REP STOSD start: ECX=%d (0x%08X) EDI=0x%08X EAX=0x%08X endAddr=0x%08X',
+                $counter, $counter, $edi, $eax, $edi + ($counter * 4)
+            ));
+        }
+
         if ($counter === 0) {
             return ExecutionStatus::SUCCESS;
         }

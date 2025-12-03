@@ -339,6 +339,9 @@ class Runtime implements RuntimeInterface
         // The boot code expects CS to be the load segment (e.g., 0x07C0 for 0x7C00)
         $this->initializeBootSegment();
 
+        // Initialize BIOS Data Area (BDA) at 0x400-0x4FF
+        $this->initializeBDA();
+
         foreach ($this->architectureProvider->services() as $service) {
             assert($service instanceof ServiceInterface);
 
@@ -360,6 +363,54 @@ class Runtime implements RuntimeInterface
         $this->memoryAccessor->write16Bit(RegisterType::CS, $loadSegment);
         $this->machine->option()->logger()->debug(
             sprintf('Initialized CS to 0x%04X for bootable stream', $loadSegment)
+        );
+    }
+
+    /**
+     * Initialize BIOS Data Area (BDA) at 0x400-0x4FF.
+     * This area contains essential BIOS state information.
+     */
+    private function initializeBDA(): void
+    {
+        // Get default video mode info
+        $videoMode = $this->video()->supportedVideoModes()[0x03] ?? null;
+        $cols = $videoMode?->width ?? 80;
+        $rows = $videoMode?->height ?? 25;
+
+        // 0x449: Current video mode (default: mode 3 = 80x25 text)
+        $this->memoryAccessor->writeBySize(0x449, 0x03, 8);
+
+        // 0x44A-0x44B: Number of screen columns (word)
+        $this->memoryAccessor->writeBySize(0x44A, $cols, 16);
+
+        // 0x44C-0x44D: Size of video regen buffer in bytes
+        $this->memoryAccessor->writeBySize(0x44C, $cols * $rows * 2, 16);
+
+        // 0x44E-0x44F: Offset of current video page in video regen buffer
+        $this->memoryAccessor->writeBySize(0x44E, 0x0000, 16);
+
+        // 0x450-0x45F: Cursor position for pages 0-7 (row, col pairs)
+        for ($i = 0; $i < 16; $i++) {
+            $this->memoryAccessor->writeBySize(0x450 + $i, 0x00, 8);
+        }
+
+        // 0x460-0x461: Cursor shape (start/end scan lines)
+        $this->memoryAccessor->writeBySize(0x460, 0x0607, 16);
+
+        // 0x462: Current video page number
+        $this->memoryAccessor->writeBySize(0x462, 0x00, 8);
+
+        // 0x463-0x464: Base I/O port for video (0x3D4 for color, 0x3B4 for mono)
+        $this->memoryAccessor->writeBySize(0x463, 0x03D4, 16);
+
+        // 0x484: Number of rows - 1 (byte, EGA/VGA only)
+        $this->memoryAccessor->writeBySize(0x484, $rows - 1, 8);
+
+        // 0x485-0x486: Character height in scan lines (word, EGA/VGA)
+        $this->memoryAccessor->writeBySize(0x485, 16, 16);
+
+        $this->machine->option()->logger()->debug(
+            sprintf('Initialized BDA: cols=%d, rows=%d', $cols, $rows)
         );
     }
 

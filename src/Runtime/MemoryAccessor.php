@@ -55,6 +55,14 @@ class MemoryAccessor implements MemoryAccessorInterface
      */
     private function writeToMemory(int $address, int $value): void
     {
+        // Debug: trace writes to stack pointer save area (0x38B8-0x38BC)
+        if ($address >= 0x38B8 && $address <= 0x38BC) {
+            $this->runtime->option()->logger()->debug(sprintf(
+                'WRITE to RM stack save area: address=0x%08X byte=0x%02X',
+                $address, $value & 0xFF
+            ));
+        }
+
         $memory = $this->runtime->memory();
         $savedOffset = $memory->offset();
         $memory->setOffset($address);
