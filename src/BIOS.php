@@ -64,18 +64,23 @@ class BIOS
      */
     protected function initialize(): void
     {
-        // Allocate CPU registers first (must be done before any register access)
+        // 1. Allocate CPU registers first (must be done before any register access)
         $this->initializeRegisters();
 
-        // Initialize services (e.g., VideoMemoryService)
+        // 2. Initialize services (e.g., VideoMemoryService)
         $this->initializeServices();
 
-        // Initialize boot segment (CS register)
-        $this->initializeBootSegment();
-
-        // Initialize memory areas
-        $this->initializeBDA();
+        // 3. Initialize IVT first (to handle exceptions safely)
         $this->initializeIVT();
+
+        // 4. Initialize ROM area (BIOS identification, default handlers)
+        $this->initializeROM();
+
+        // 5. Initialize BDA
+        $this->initializeBDA();
+
+        // 6. Initialize boot segment (CS register) - should be last before boot
+        $this->initializeBootSegment();
 
         $this->machine->option()->logger()->info('BIOS initialization completed');
     }
@@ -139,11 +144,14 @@ class BIOS
         $mem->writeBySize(0x404, 0x03E8, 16);  // COM3
         $mem->writeBySize(0x406, 0x02E8, 16);  // COM4
 
-        // 0x408-0x40F: LPT port base addresses (4 words)
+        // 0x408-0x40D: LPT port base addresses (3 words)
         $mem->writeBySize(0x408, 0x0378, 16);  // LPT1
         $mem->writeBySize(0x40A, 0x0278, 16);  // LPT2
         $mem->writeBySize(0x40C, 0x0000, 16);  // LPT3 (not present)
-        $mem->writeBySize(0x40E, 0x0000, 16);  // LPT4 (not present)
+
+        // 0x40E-0x40F: EBDA (Extended BIOS Data Area) segment address
+        // EBDA is at physical address 0x9FC00, so segment = 0x9FC0
+        $mem->writeBySize(0x40E, 0x9FC0, 16);
 
         // ========================================
         // Equipment & Memory (0x410-0x414)
@@ -449,11 +457,11 @@ class BIOS
     {
         $mem = $this->runtime()->memoryAccessor();
 
-        // Initialize all 256 interrupt vectors to point to a default handler
-        // Default handler address: F000:FF53 (typical BIOS IRET location)
+        // Default handler address: F000:FF53 (will contain IRET instruction)
         $defaultSegment = 0xF000;
         $defaultOffset = 0xFF53;
 
+        // Initialize all 256 interrupt vectors to point to default handler
         for ($vector = 0; $vector < 256; $vector++) {
             $address = $vector * 4;
             // Store offset (low word)
@@ -463,7 +471,42 @@ class BIOS
         }
 
         $this->machine->option()->logger()->debug(
-            sprintf('BIOS: Initialized IVT (0x000-0x3FF) with %d vectors', 256)
+            sprintf('BIOS: Initialized IVT (0x000-0x3FF) with %d vectors pointing to F000:%04X', 256, $defaultOffset)
+        );
+    }
+
+    /**
+     * Initialize ROM area with BIOS identification and default interrupt handlers.
+     */
+    protected function initializeROM(): void
+    {
+        $mem = $this->runtime()->memoryAccessor();
+
+        // Place default IRET handler at F000:FF53 (physical address 0xFFF53)
+        // IRET opcode = 0xCF
+        $iretAddress = (0xF000 << 4) + 0xFF53;  // 0xFFF53
+        $mem->writeBySize($iretAddress, 0xCF, 8);
+
+        // BIOS identification string at F000:E000 (physical address 0xFE000)
+        $biosId = "PHPMachineEmulator BIOS";
+        $biosIdAddress = (0xF000 << 4) + 0xE000;  // 0xFE000
+        for ($i = 0; $i < strlen($biosId); $i++) {
+            $mem->writeBySize($biosIdAddress + $i, ord($biosId[$i]), 8);
+        }
+
+        // BIOS date at F000:FFF5 (physical address 0xFFFF5) - format: MM/DD/YY
+        $date = date('m/d/y');
+        $dateAddress = (0xF000 << 4) + 0xFFF5;  // 0xFFFF5
+        for ($i = 0; $i < strlen($date); $i++) {
+            $mem->writeBySize($dateAddress + $i, ord($date[$i]), 8);
+        }
+
+        // System model ID at F000:FFFE (physical address 0xFFFFE)
+        // 0xFC = AT compatible
+        $mem->writeBySize(0xFFFFE, 0xFC, 8);
+
+        $this->machine->option()->logger()->debug(
+            sprintf('BIOS: Initialized ROM area with IRET at 0x%05X, ID at 0x%05X', $iretAddress, $biosIdAddress)
         );
     }
 
