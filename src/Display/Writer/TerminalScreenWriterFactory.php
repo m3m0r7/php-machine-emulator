@@ -9,8 +9,10 @@ use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class TerminalScreenWriterFactory implements ScreenWriterFactoryInterface
 {
+    private ?ScreenWriterInterface $created = null;
+
     public function create(RuntimeInterface $runtime, VideoTypeInfo $videoTypeInfo): ScreenWriterInterface
     {
-        return new TerminalScreenWriter($runtime, $videoTypeInfo);
+        return $this->created ??= new TerminalScreenWriter($runtime, $videoTypeInfo);
     }
 }
