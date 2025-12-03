@@ -46,8 +46,8 @@ class Popa implements InstructionInterface
 
         // Debug: log POPA with ESP
         $runtime->option()->logger()->debug(sprintf(
-            'POPA: ESP before=0x%08X after=0x%08X SI=0x%04X DI=0x%04X AX=0x%04X BX=0x%04X',
-            $espBefore, $espAfter, $si, $di, $ax, $bx
+            'POPA: ESP before=0x%08X after=0x%08X AX=0x%04X BX=0x%04X CX=0x%04X DX=0x%04X SI=0x%04X DI=0x%04X',
+            $espBefore, $espAfter, $ax, $bx, $cx, $dx, $si, $di
         ));
 
         $ma->writeBySize(RegisterType::EDI, $di, $size);

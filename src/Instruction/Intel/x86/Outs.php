@@ -26,14 +26,8 @@ class Outs implements InstructionInterface
 
         $port = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asBytesBySize(16) & 0xFFFF;
 
+        // assertIoPermission handles both IOPL and I/O bitmap checks
         $this->assertIoPermission($runtime, $port, $width);
-        if ($runtime->context()->cpu()->isProtectedMode()) {
-            $cpl = $runtime->context()->cpu()->cpl();
-            $iopl = $runtime->context()->cpu()->iopl();
-            if ($cpl > $iopl) {
-                throw new \PHPMachineEmulator\Exception\FaultException(0x0D, 0, 'OUTS privilege check failed');
-            }
-        }
 
         $count = $runtime->memoryAccessor()->shouldDirectionFlag() ? -1 : 1;
         $delta = $count * ($isByte ? 1 : ($opSize === 32 ? 4 : 2));

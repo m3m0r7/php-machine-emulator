@@ -6,7 +6,7 @@ namespace PHPMachineEmulator\Stream;
 
 use PHPMachineEmulator\Exception\StreamReaderException;
 
-class FileStream implements StreamReaderIsProxyableInterface
+class FileStream implements FileStreamInterface
 {
     use GenericStream;
 
@@ -41,6 +41,16 @@ class FileStream implements StreamReaderIsProxyableInterface
         $streamReader->setOffset($this->offset());
 
         return new StreamReaderProxy($streamReader);
+    }
+
+    public function fileSize(): int
+    {
+        return $this->fileSize;
+    }
+
+    public function path(): string
+    {
+        return $this->path;
     }
 }
 

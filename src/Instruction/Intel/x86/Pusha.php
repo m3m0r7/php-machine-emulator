@@ -41,8 +41,8 @@ class Pusha implements InstructionInterface
 
         // Debug: log PUSHA with ESP
         $runtime->option()->logger()->debug(sprintf(
-            'PUSHA: ESP before=0x%08X after=0x%08X AX=0x%04X BX=0x%04X SI=0x%04X DI=0x%04X size=%d',
-            $espBefore, $espAfter, $ax, $bx, $si, $di, $size
+            'PUSHA: ESP before=0x%08X after=0x%08X AX=0x%04X BX=0x%04X CX=0x%04X DX=0x%04X SI=0x%04X DI=0x%04X size=%d',
+            $espBefore, $espAfter, $ax, $bx, $cx, $dx, $si, $di, $size
         ));
 
         return ExecutionStatus::SUCCESS;

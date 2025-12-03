@@ -78,19 +78,9 @@ trait AddressingTrait
         $cpuOverride = $runtime->context()->cpu()->segmentOverride();
         $segment = $segmentOverride ?? $cpuOverride ?? $defaultSegment;
 
-        // Debug: log segment override when active
-        if ($cpuOverride !== null) {
-            $linear = $this->segmentOffsetAddress($runtime, $segment, $offset);
-            $runtime->option()->logger()->debug(sprintf(
-                'rmLinearAddress: segOverride=%s offset=0x%08X linear=0x%08X',
-                $cpuOverride->name,
-                $offset,
-                $linear
-            ));
-            return $linear;
-        }
+        $linear = $this->segmentOffsetAddress($runtime, $segment, $offset);
 
-        return $this->segmentOffsetAddress($runtime, $segment, $offset);
+        return $linear;
     }
 
     /**
@@ -124,6 +114,18 @@ trait AddressingTrait
                 : $val($runtime, RegisterType::EBP),
             0b111 => $val($runtime, RegisterType::EBX),
         };
+
+        // Debug: log [DI] addressing when DI has upper bits set
+        if ($rm === 0b101) {
+            $fullEdi = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize(32);
+            $di16 = $val($runtime, RegisterType::EDI);
+            if (($fullEdi & 0xFFFF0000) !== 0) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'effectiveAddress16 [DI]: fullEDI=0x%08X di16=0x%04X address=0x%04X disp=%d result=0x%04X',
+                    $fullEdi, $di16, $address, $disp, ($address + $disp) & 0xFFFF
+                ));
+            }
+        }
 
         return ($address + $disp) & 0xFFFF;
     }

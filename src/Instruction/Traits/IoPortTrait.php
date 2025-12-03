@@ -18,6 +18,10 @@ trait IoPortTrait
 {
     /**
      * Assert I/O permission for the given port.
+     *
+     * Intel SDM specifies the following order for I/O permission checks:
+     * 1. If CPL <= IOPL, the I/O operation is allowed (no bitmap check)
+     * 2. If CPL > IOPL, check the I/O permission bitmap in TSS
      */
     protected function assertIoPermission(RuntimeInterface $runtime, int $port, int $width): void
     {
@@ -25,6 +29,14 @@ trait IoPortTrait
             return;
         }
 
+        // First check IOPL - if CPL <= IOPL, I/O is always allowed
+        $cpl = $runtime->context()->cpu()->cpl();
+        $iopl = $runtime->context()->cpu()->iopl();
+        if ($cpl <= $iopl) {
+            return; // Privileged I/O access allowed
+        }
+
+        // CPL > IOPL: must check I/O permission bitmap in TSS
         $tr = $runtime->context()->cpu()->taskRegister();
         $trSelector = $tr['selector'] ?? 0;
         $trBase = $tr['base'] ?? 0;
@@ -37,23 +49,26 @@ trait IoPortTrait
         $tss32 = $this->tss32Offsets();
         // IO map base is word at TSS32 offset (iomap).
         $ioBase = $this->readMemory16($runtime, $trBase + $tss32['iomap']);
-        if ($ioBase >= $trLimit) {
+        if ($ioBase > $trLimit) {
             return; // I/O bitmap beyond limit => all access allowed
         }
 
         $bytesNeeded = intdiv($width, 8);
+        if ($bytesNeeded === 0) {
+            $bytesNeeded = 1; // Minimum 1 byte for 8-bit access
+        }
         for ($i = 0; $i < $bytesNeeded; $i++) {
             $p = $port + $i;
-            $byteOffset = $trBase + $ioBase + intdiv($p, 8);
-            // If bitmap extends beyond limit, #TS(0)
-            if (($byteOffset - $trBase) > $trLimit) {
-                throw new FaultException(0x0A, $trSelector, 'I/O bitmap exceeds TSS limit');
+            $byteOffset = $ioBase + intdiv($p, 8);
+            // If bitmap extends beyond limit, #GP(0)
+            if ($byteOffset > $trLimit) {
+                throw new FaultException(0x0D, 0, sprintf('I/O port 0x%04X not permitted (bitmap beyond TSS)', $p));
             }
             $bit = $p & 0x7;
             $mask = 1 << $bit;
-            $mapByte = $this->readMemory8($runtime, $byteOffset);
+            $mapByte = $this->readMemory8($runtime, $trBase + $byteOffset);
             if (($mapByte & $mask) !== 0) {
-                throw new FaultException(0x0D, $trSelector, sprintf('I/O port 0x%04X not permitted', $p));
+                throw new FaultException(0x0D, 0, sprintf('I/O port 0x%04X not permitted', $p));
             }
         }
     }

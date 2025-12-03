@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
-use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -30,14 +29,8 @@ class In_ implements InstructionInterface
             0xEC, 0xED => $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asByte() & 0xFFFF,
         };
 
-        if ($runtime->context()->cpu()->isProtectedMode()) {
-            $cpl = $runtime->context()->cpu()->cpl();
-            $iopl = $runtime->context()->cpu()->iopl();
-            if ($cpl > $iopl) {
-                throw new FaultException(0x0D, 0, 'IN privilege check failed');
-            }
-            $this->assertIoPermission($runtime, $port, $opSize);
-        }
+        // assertIoPermission handles both IOPL and I/O bitmap checks
+        $this->assertIoPermission($runtime, $port, $opSize);
 
         $value = $this->readPort($runtime, $port, $opSize);
 

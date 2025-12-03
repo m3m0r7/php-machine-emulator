@@ -27,13 +27,29 @@ trait ModRmTrait
 
         $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
 
-        return match ($size) {
+        $value = match ($size) {
             8 => $this->readMemory8($runtime, $address),
             16 => $this->readMemory16($runtime, $address),
             32 => $this->readMemory32($runtime, $address),
             64 => $this->readMemory64($runtime, $address),
             default => $this->readMemory16($runtime, $address) & ((1 << $size) - 1),
         };
+
+        // Debug: log readRm for problem IP range
+        $ip = $runtime->memory()->offset();
+        if ($ip >= 0x1009C0 && $ip <= 0x1009E0) {
+            $runtime->option()->logger()->debug(sprintf(
+                'readRm: IP=0x%04X addr=0x%08X value=0x%08X size=%d mode=%d rm=%d',
+                $ip,
+                $address,
+                $value & 0xFFFFFFFF,
+                $size,
+                $modRegRM->mode(),
+                $modRegRM->registerOrMemoryAddress()
+            ));
+        }
+
+        return $value;
     }
 
     /**
@@ -102,7 +118,22 @@ trait ModRmTrait
         }
 
         $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        return $this->readMemory16($runtime, $address);
+        $value = $this->readMemory16($runtime, $address);
+
+        // Debug: log readRm16 for problem IP range
+        $ip = $runtime->memory()->offset();
+        if ($ip >= 0x1009C0 && $ip <= 0x1009E0) {
+            $runtime->option()->logger()->debug(sprintf(
+                'readRm16: IP=0x%04X addr=0x%08X value=0x%04X mode=%d rm=%d',
+                $ip,
+                $address,
+                $value & 0xFFFF,
+                $modRegRM->mode(),
+                $modRegRM->registerOrMemoryAddress()
+            ));
+        }
+
+        return $value;
     }
 
     /**

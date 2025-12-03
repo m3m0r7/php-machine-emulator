@@ -31,6 +31,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Jbe;
 use PHPMachineEmulator\Instruction\Intel\x86\Jc;
 use PHPMachineEmulator\Instruction\Intel\x86\Jcxz;
 use PHPMachineEmulator\Instruction\Intel\x86\Jnc;
+use PHPMachineEmulator\Instruction\Intel\x86\Jo;
 use PHPMachineEmulator\Instruction\Intel\x86\Jno;
 use PHPMachineEmulator\Instruction\Intel\x86\Js;
 use PHPMachineEmulator\Instruction\Intel\x86\Jns;
@@ -272,6 +273,7 @@ class x86 implements InstructionListInterface
             Jc::class,
             Jcxz::class,
             Jnc::class,
+            Jo::class,
             Jno::class,
             Js::class,
             Jns::class,

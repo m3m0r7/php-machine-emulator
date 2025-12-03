@@ -347,7 +347,15 @@ trait MemoryAccessTrait
             $byte = $memory->byte();
             $memory->setOffset($currentOffset);
             return $byte;
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            // Debug: log unmapped memory access for high addresses
+            if ($address >= 0x100000) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'readPhysical8: unmapped memory at 0x%08X (%s)',
+                    $address,
+                    $e->getMessage()
+                ));
+            }
             // Address out of bounds - return 0 (unmapped memory)
             return 0;
         }

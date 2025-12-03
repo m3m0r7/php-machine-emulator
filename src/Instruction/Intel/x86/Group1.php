@@ -27,6 +27,7 @@ class Group1 implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
+        $ip = $runtime->memory()->offset();
         $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $enhancedStreamReader->byteAsModRegRM();
 
@@ -43,6 +44,22 @@ class Group1 implements InstructionInterface
             : ($this->isByteOperation($opcode)
                 ? $enhancedStreamReader->streamReader()->byte()
                 : ($size === 32 ? $enhancedStreamReader->dword() : $enhancedStreamReader->short()));
+
+        // Debug: log Group1 operations around IP=0x93B7
+        if ($ip >= 0x93B0 && $ip <= 0x93C0) {
+            $opNames = ['ADD', 'OR', 'ADC', 'SBB', 'AND', 'SUB', 'XOR', 'CMP'];
+            $opName = $opNames[$modRegRM->digit()] ?? 'UNK';
+            $memValue = 0;
+            if (!$isReg) {
+                $memValue = $size === 32
+                    ? $this->readMemory32($runtime, $linearAddr)
+                    : $this->readMemory16($runtime, $linearAddr);
+            }
+            $runtime->option()->logger()->debug(sprintf(
+                'Group1 at IP=0x%04X: op=%s digit=%d size=%d isReg=%d linearAddr=0x%08X memValue=0x%08X imm=0x%08X',
+                $ip, $opName, $modRegRM->digit(), $size, $isReg ? 1 : 0, $linearAddr, $memValue, $operand & 0xFFFFFFFF
+            ));
+        }
 
         match ($modRegRM->digit()) {
             0x0 => $this->add($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
@@ -87,10 +104,13 @@ class Group1 implements InstructionInterface
             $signB = ($op >> 7) & 1;
             $signR = ($maskedResult >> 7) & 1;
             $of = ($signA === $signB) && ($signA !== $signR);
+            // AF: carry from bit 3 to bit 4
+            $af = (($original & 0x0F) + ($op & 0x0F)) > 0x0F;
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
                 ->setCarryFlag($result > 0xFF)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -120,10 +140,13 @@ class Group1 implements InstructionInterface
         $signB = ($unsignedOperand >> $signBit) & 1;
         $signR = ($maskedResult >> $signBit) & 1;
         $of = ($signA === $signB) && ($signA !== $signR);
+        // AF: carry from bit 3 to bit 4
+        $af = (($original & 0x0F) + ($unsignedOperand & 0x0F)) > 0x0F;
         $runtime->memoryAccessor()
             ->updateFlags($maskedResult, $opSize)
             ->setCarryFlag($result > $mask)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -143,7 +166,8 @@ class Group1 implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
                 ->setCarryFlag(false)
-                ->setOverflowFlag(false);
+                ->setOverflowFlag(false)
+                ->setAuxiliaryCarryFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -166,7 +190,8 @@ class Group1 implements InstructionInterface
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
             ->setCarryFlag(false)
-            ->setOverflowFlag(false);
+            ->setOverflowFlag(false)
+            ->setAuxiliaryCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -192,10 +217,13 @@ class Group1 implements InstructionInterface
             $signB = ($op >> 7) & 1;
             $signR = ($maskedResult >> 7) & 1;
             $of = ($signA === $signB) && ($signA !== $signR);
+            // AF: carry from bit 3 to bit 4
+            $af = (($left & 0x0F) + ($op & 0x0F) + $carry) > 0x0F;
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
                 ->setCarryFlag($result > 0xFF)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -223,10 +251,13 @@ class Group1 implements InstructionInterface
         $signB = ($unsignedOperand >> $signBit) & 1;
         $signR = ($maskedResult >> $signBit) & 1;
         $of = ($signA === $signB) && ($signA !== $signR);
+        // AF: carry from bit 3 to bit 4
+        $af = (($left & 0x0F) + ($unsignedOperand & 0x0F) + $carry) > 0x0F;
         $runtime->memoryAccessor()
             ->updateFlags($maskedResult, $opSize)
             ->setCarryFlag($result > $mask)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -252,10 +283,13 @@ class Group1 implements InstructionInterface
             $signB = ($op >> 7) & 1;
             $signR = ($result >> 7) & 1;
             $of = ($signA !== $signB) && ($signB === $signR);
+            // AF: borrow from bit 4 to bit 3
+            $af = (($left & 0x0F) - ($op & 0x0F) - $borrow) < 0;
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -284,10 +318,13 @@ class Group1 implements InstructionInterface
         $signB = ($unsignedOperand >> $signBit) & 1;
         $signR = ($result >> $signBit) & 1;
         $of = ($signA !== $signB) && ($signB === $signR);
+        // AF: borrow from bit 4 to bit 3
+        $af = (($left & 0x0F) - ($unsignedOperand & 0x0F) - $borrow) < 0;
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
             ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -307,7 +344,8 @@ class Group1 implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
                 ->setCarryFlag(false)
-                ->setOverflowFlag(false);
+                ->setOverflowFlag(false)
+                ->setAuxiliaryCarryFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -330,7 +368,8 @@ class Group1 implements InstructionInterface
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
             ->setCarryFlag(false)
-            ->setOverflowFlag(false);
+            ->setOverflowFlag(false)
+            ->setAuxiliaryCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -354,10 +393,13 @@ class Group1 implements InstructionInterface
             $signB = ($op >> 7) & 1;
             $signR = ($result >> 7) & 1;
             $of = ($signA !== $signB) && ($signB === $signR);
+            // AF: borrow from bit 4 to bit 3
+            $af = (($left & 0x0F) - ($op & 0x0F)) < 0;
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -386,10 +428,13 @@ class Group1 implements InstructionInterface
         $signB = ($unsignedOperand >> $signBit) & 1;
         $signR = ($result >> $signBit) & 1;
         $of = ($signA !== $signB) && ($signB === $signR);
+        // AF: borrow from bit 4 to bit 3
+        $af = (($left & 0x0F) - ($unsignedOperand & 0x0F)) < 0;
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
             ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -409,7 +454,8 @@ class Group1 implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($result, 8)
                 ->setCarryFlag(false)
-                ->setOverflowFlag(false);
+                ->setOverflowFlag(false)
+                ->setAuxiliaryCarryFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -432,7 +478,8 @@ class Group1 implements InstructionInterface
         $runtime->memoryAccessor()
             ->updateFlags($result, $opSize)
             ->setCarryFlag(false)
-            ->setOverflowFlag(false);
+            ->setOverflowFlag(false)
+            ->setAuxiliaryCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -452,11 +499,14 @@ class Group1 implements InstructionInterface
             $signB = ($op >> 7) & 1;
             $signR = ($result >> 7) & 1;
             $of = ($signA !== $signB) && ($signB === $signR);
+            // AF: borrow from bit 4 to bit 3
+            $af = (($left & 0x0F) - ($op & 0x0F)) < 0;
             $runtime
                 ->memoryAccessor()
                 ->updateFlags($result, 8)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
             $runtime->option()->logger()->debug(sprintf('CMP r/m8, imm8: left=0x%02X right=0x%02X ZF=%d', $left, $op, $left === $op ? 1 : 0));
 
             return ExecutionStatus::SUCCESS;
@@ -476,11 +526,14 @@ class Group1 implements InstructionInterface
         $signB = ($unsignedOperand >> $signBit) & 1;
         $signR = ($result >> $signBit) & 1;
         $of = ($signA !== $signB) && ($signB === $signR);
+        // AF: borrow from bit 4 to bit 3
+        $af = (($left & 0x0F) - ($unsignedOperand & 0x0F)) < 0;
         $runtime
             ->memoryAccessor()
             ->updateFlags($result, $opSize)
             ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
         $runtime->option()->logger()->debug(sprintf('CMP r/m%d, imm: left=0x%04X right=0x%04X ZF=%d', $opSize, $left, $unsignedOperand, $left === $unsignedOperand ? 1 : 0));
 
         return ExecutionStatus::SUCCESS;

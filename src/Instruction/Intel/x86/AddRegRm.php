@@ -61,10 +61,13 @@ class AddRegRm implements InstructionInterface
             $signB = ($src >> 7) & 1;
             $signR = ($maskedResult >> 7) & 1;
             $of = ($signA === $signB) && ($signA !== $signR);
+            // AF: carry from bit 3 to bit 4
+            $af = (($dest & 0x0F) + ($src & 0x0F)) > 0x0F;
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
                 ->setCarryFlag($result > 0xFF)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         } else {
             $dest = $destIsRm
                 ? ($rmAddress !== null
@@ -93,10 +96,13 @@ class AddRegRm implements InstructionInterface
             $signB = ($src >> $signBit) & 1;
             $signR = ($maskedResult >> $signBit) & 1;
             $of = ($signA === $signB) && ($signA !== $signR);
+            // AF: carry from bit 3 to bit 4
+            $af = (($dest & 0x0F) + ($src & 0x0F)) > 0x0F;
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, $opSize)
                 ->setCarryFlag($result > $mask)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         }
 
         return ExecutionStatus::SUCCESS;

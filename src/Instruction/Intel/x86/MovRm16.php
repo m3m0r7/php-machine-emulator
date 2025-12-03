@@ -64,6 +64,35 @@ class MovRm16 implements InstructionInterface
             ));
         }
 
+        // Debug: log MOV to EDI register (reg code 7 = EDI) in target function
+        $ip = $runtime->memory()->offset();
+        if ($regCode === 7 && $ip >= 0x1009AA && $ip <= 0x1009F0) {
+            $ediBefore = $runtime->memoryAccessor()->fetch(\PHPMachineEmulator\Instruction\RegisterType::EDI)->asBytesBySize(32);
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV EDI, r/m: IP=0x%04X before=0x%08X value=0x%08X size=%d mode=%d rm=%d',
+                $ip,
+                $ediBefore,
+                $value & 0xFFFFFFFF,
+                $size,
+                $modRegRM->mode(),
+                $rm
+            ));
+        }
+
+        // Debug: log MOV to EDX register (reg code 2 = EDX) in target function
+        if ($regCode === 2 && $ip >= 0x1009C0 && $ip <= 0x1009D0) {
+            $edxBefore = $runtime->memoryAccessor()->fetch(\PHPMachineEmulator\Instruction\RegisterType::EDX)->asBytesBySize(32);
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV EDX, r/m: IP=0x%04X before=0x%08X value=0x%08X size=%d mode=%d rm=%d',
+                $ip,
+                $edxBefore,
+                $value & 0xFFFFFFFF,
+                $size,
+                $modRegRM->mode(),
+                $rm
+            ));
+        }
+
         $runtime
             ->memoryAccessor()
             ->writeBySize(

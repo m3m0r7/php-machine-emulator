@@ -69,6 +69,13 @@ class AddImm8 implements InstructionInterface
             default => false, // Logical ops clear OF
         };
 
+        // Calculate AF (Auxiliary Carry Flag) - carry from bit 3 to bit 4
+        $auxCarry = match ($map['op']) {
+            'add', 'adc' => (($left & 0x0F) + ($operand & 0x0F) + ($map['op'] === 'adc' ? $carryIn : 0)) > 0x0F,
+            'sub', 'sbb' => (($left & 0x0F) - ($operand & 0x0F) - ($map['op'] === 'sbb' ? $carryIn : 0)) < 0,
+            default => false, // Logical ops clear AF
+        };
+
         if ($isByte) {
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $result);
         } else {
@@ -77,9 +84,10 @@ class AddImm8 implements InstructionInterface
 
         $runtime
             ->memoryAccessor()
+            ->updateFlags($result, $size)
             ->setCarryFlag($carry)
             ->setOverflowFlag($overflow)
-            ->updateFlags($result, $size);
+            ->setAuxiliaryCarryFlag($auxCarry);
 
         return ExecutionStatus::SUCCESS;
     }
