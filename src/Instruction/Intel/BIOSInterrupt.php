@@ -10,6 +10,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
 
 enum BIOSInterrupt: int
 {
+    case TIMER_INTERRUPT = 0x08;
     case VIDEO_INTERRUPT = 0x10;
     case MEMORY_SIZE_INTERRUPT = 0x12;
     case DISK_INTERRUPT = 0x13;

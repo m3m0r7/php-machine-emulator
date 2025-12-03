@@ -13,6 +13,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Disk;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Keyboard;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\MemorySize;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\System;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Timer;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Video;
 use PHPMachineEmulator\Instruction\Intel\x86\DOSInterrupt\Dos;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -60,6 +61,8 @@ class Int_ implements InstructionInterface
         $operand = BIOSInterrupt::tryFrom($vector);
 
         match ($operand) {
+            BIOSInterrupt::TIMER_INTERRUPT => ($this->interruptInstances[Timer::class] ??= new Timer())
+                ->process($runtime),
             BIOSInterrupt::VIDEO_INTERRUPT => ($this->interruptInstances[Video::class] ??= new Video($runtime))
                 ->process($runtime),
             BIOSInterrupt::MEMORY_SIZE_INTERRUPT => ($this->interruptInstances[MemorySize::class] ??= new MemorySize())

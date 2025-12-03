@@ -457,6 +457,14 @@ class MemoryAccessor implements MemoryAccessorInterface
             $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
             $newSp = ($sp + $bytes) & $mask;
 
+            // Debug: log stack pop when ESP is high (protected mode stack)
+            if ($sp > 0x10000) {
+                $this->runtime->option()->logger()->debug(sprintf(
+                    'POP: ESP=0x%08X linearAddr=0x%08X value=0x%08X size=%d',
+                    $sp, $address, $value & $mask, $size
+                ));
+            }
+
             $this->writeBySize(RegisterType::ESP, $newSp, $size);
 
             $espFullAfter = $this->fetch(RegisterType::ESP)->asBytesBySize(32);
@@ -499,6 +507,14 @@ class MemoryAccessor implements MemoryAccessorInterface
             $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
             $newSp = ($sp - $bytes) & $mask;
             $address = $this->stackLinearAddress($newSp, $size, true);
+
+            // Debug: log stack push when ESP is high (protected mode stack)
+            if ($sp > 0x10000) {
+                $this->runtime->option()->logger()->debug(sprintf(
+                    'PUSH: ESP=0x%08X newSP=0x%08X linearAddr=0x%08X value=0x%08X size=%d',
+                    $sp, $newSp, $address, $value & $mask, $size
+                ));
+            }
 
             $this->writeBySize(RegisterType::ESP, $newSp, $size);
             $this->allocate($address, $bytes, safe: false);

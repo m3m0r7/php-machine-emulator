@@ -75,7 +75,20 @@ trait AddressingTrait
     protected function rmLinearAddress(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, RegisterType|null $segmentOverride = null): int
     {
         [$offset, $defaultSegment] = $this->effectiveAddressInfo($runtime, $reader, $modRegRM);
-        $segment = $segmentOverride ?? $runtime->context()->cpu()->segmentOverride() ?? $defaultSegment;
+        $cpuOverride = $runtime->context()->cpu()->segmentOverride();
+        $segment = $segmentOverride ?? $cpuOverride ?? $defaultSegment;
+
+        // Debug: log segment override when active
+        if ($cpuOverride !== null) {
+            $linear = $this->segmentOffsetAddress($runtime, $segment, $offset);
+            $runtime->option()->logger()->debug(sprintf(
+                'rmLinearAddress: segOverride=%s offset=0x%08X linear=0x%08X',
+                $cpuOverride->name,
+                $offset,
+                $linear
+            ));
+            return $linear;
+        }
 
         return $this->segmentOffsetAddress($runtime, $segment, $offset);
     }

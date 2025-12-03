@@ -51,6 +51,18 @@ class MovRm16 implements InstructionInterface
             ));
         }
 
+        // Debug: log MOV to ESP register (reg code 4 = ESP)
+        if ($regCode === 4) {
+            $espBefore = $runtime->memoryAccessor()->fetch(\PHPMachineEmulator\Instruction\RegisterType::ESP)->asBytesBySize(32);
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV ESP, r/m: before=0x%08X value=0x%08X size=%d mode=%d rm=%d',
+                $espBefore,
+                $value & 0xFFFFFFFF,
+                $size,
+                $modRegRM->mode(),
+                $rm
+            ));
+        }
 
         $runtime
             ->memoryAccessor()

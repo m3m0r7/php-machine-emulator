@@ -41,6 +41,24 @@ class MovMem implements InstructionInterface
             0 => 'AL', 1 => 'CL', 2 => 'DL', 3 => 'BL',
             4 => 'AH', 5 => 'CH', 6 => 'DH', 7 => 'BH',
         };
+
+        // Debug: log when AL gets 0x00 in protected mode (potential infinite loop cause)
+        if ($destReg === 0 && $value === 0 && $runtime->context()->cpu()->isProtectedMode()) {
+            $esi = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize(32);
+            $edi = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize(32);
+            $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV AL, [rm8]=0x00: mode=%d rm=%d ESI=0x%08X EDI=0x%08X DS=0x%04X addrSize=%d IP=0x%04X',
+                $mode,
+                $rm,
+                $esi,
+                $edi,
+                $ds,
+                $addrSize,
+                $streamPosBefore - 1
+            ));
+        }
+
         // In 32-bit mode with rm=4, check SIB byte for addressing
         if ($addrSize === 32 && $mode === 0 && $rm === 0b100) {
             $edi = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize(32);

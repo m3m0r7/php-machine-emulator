@@ -22,6 +22,8 @@ class Pusha implements InstructionInterface
         $ma = $runtime->memoryAccessor();
         $size = $runtime->context()->cpu()->operandSize();
 
+        $espBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize(32);
+
         $ax = $ma->fetch(RegisterType::EAX)->asBytesBySize($size);
         $cx = $ma->fetch(RegisterType::ECX)->asBytesBySize($size);
         $dx = $ma->fetch(RegisterType::EDX)->asBytesBySize($size);
@@ -34,6 +36,14 @@ class Pusha implements InstructionInterface
         foreach ([$ax, $cx, $dx, $bx, $sp, $bp, $si, $di] as $val) {
             $ma->push(RegisterType::ESP, $val, $size);
         }
+
+        $espAfter = $ma->fetch(RegisterType::ESP)->asBytesBySize(32);
+
+        // Debug: log PUSHA with ESP
+        $runtime->option()->logger()->debug(sprintf(
+            'PUSHA: ESP before=0x%08X after=0x%08X AX=0x%04X BX=0x%04X SI=0x%04X DI=0x%04X size=%d',
+            $espBefore, $espAfter, $ax, $bx, $si, $di, $size
+        ));
 
         return ExecutionStatus::SUCCESS;
     }

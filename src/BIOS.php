@@ -79,7 +79,10 @@ class BIOS
         // 5. Initialize emulator-specific BIOS stubs (INT handlers that call back to PHP)
         $this->initializeBIOSStubsForEmulator();
 
-        // 6. Initialize ROM area (BIOS identification, default handlers)
+        // 6. Initialize PIC (Programmable Interrupt Controller)
+        $this->initializePIC();
+
+        // 7. Initialize ROM area (BIOS identification, default handlers)
         $this->initializeROM();
 
         // 7. Initialize BDA
@@ -505,6 +508,7 @@ class BIOS
         // List of BIOS interrupts that need stubs
         // These are interrupts that are handled by PHP code via Int_::process()
         $biosInterrupts = [
+            0x08, // Timer (IRQ0) - updates BDA tick counter
             0x10, // Video services
             0x12, // Memory size
             0x13, // Disk services
@@ -539,6 +543,30 @@ class BIOS
 
         $this->machine->option()->logger()->debug(
             sprintf('BIOS: Initialized %d BIOS stubs for emulator', count($biosInterrupts))
+        );
+    }
+
+    /**
+     * Initialize PIC (Programmable Interrupt Controller).
+     *
+     * Sets up the 8259A PIC with standard PC/AT configuration:
+     * - Master PIC: IRQ0-7 mapped to INT 8-F
+     * - Slave PIC: IRQ8-15 mapped to INT 70-77
+     * - IRQ0 (timer) enabled, others masked
+     */
+    protected function initializePIC(): void
+    {
+        $picState = $this->runtime()->context()->cpu()->picState();
+
+        // Enable IRQ0 (timer), mask others on master PIC
+        // Bit 0 = 0 means IRQ0 is enabled
+        $picState->maskMaster(0xFE);
+
+        // Mask all IRQs on slave PIC
+        $picState->maskSlave(0xFF);
+
+        $this->machine->option()->logger()->debug(
+            'BIOS: Initialized PIC - IRQ0 (timer) enabled, others masked'
         );
     }
 

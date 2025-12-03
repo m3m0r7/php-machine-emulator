@@ -24,6 +24,15 @@ class Popa implements InstructionInterface
 
         $espBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize(32);
 
+        // Debug: check if ESP has unexpected upper bits in 32-bit mode
+        if ($size === 32 && ($espBefore & 0xFFFF0000) !== 0 && ($espBefore & 0xFFFF0000) !== 0x00010000) {
+            $runtime->option()->logger()->debug(sprintf(
+                'POPA WARNING: ESP has unexpected upper bits: 0x%08X (size=%d)',
+                $espBefore,
+                $size
+            ));
+        }
+
         $di = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $si = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $bp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);

@@ -38,6 +38,14 @@ class CmpImmAX implements InstructionInterface
             $leftHand = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
             $bitSize = 8;
             $mask = 0xFF;
+
+            // Debug: log CMP AL, imm8
+            $runtime->option()->logger()->debug(sprintf(
+                'CMP AL, imm8: AL=0x%02X imm8=0x%02X result=%d',
+                $leftHand,
+                $operand,
+                $leftHand - $operand
+            ));
         } else {
             // 0x3D: CMP AX/EAX, imm16/imm32
             $use32 = $cpu->shouldUse32bit();

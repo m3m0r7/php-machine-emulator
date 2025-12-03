@@ -52,6 +52,20 @@ class MovToCr implements InstructionInterface
         $runtime->memoryAccessor()->writeControlRegister($cr, $val);
 
         if ($cr === 0) {
+            // Debug: dump memory at 0xB1D0-0xB1E0 before entering protected mode
+            if (($val & 0x1) && !$runtime->context()->cpu()->isProtectedMode()) {
+                $dumpAddr = 0xB1D0;
+                $dumpData = [];
+                for ($i = 0; $i < 16; $i++) {
+                    $dumpData[] = sprintf('%02X', $this->readMemory8($runtime, $dumpAddr + $i));
+                }
+                $runtime->option()->logger()->debug(sprintf(
+                    'Memory at 0x%05X before PM entry: %s',
+                    $dumpAddr,
+                    implode(' ', $dumpData)
+                ));
+            }
+
             $runtime->context()->cpu()->setProtectedMode((bool) ($val & 0x1));
             $runtime->context()->cpu()->setPagingEnabled((bool) ($val & 0x80000000));
         }

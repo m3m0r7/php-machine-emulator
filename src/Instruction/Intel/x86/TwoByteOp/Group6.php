@@ -77,8 +77,8 @@ class Group6 implements InstructionInterface
             $limit
         ));
 
-        // Dump first 5 GDT entries for debugging
-        for ($i = 0; $i < 5 && ($i * 8) <= $limit; $i++) {
+        // Dump first 8 GDT entries for debugging
+        for ($i = 0; $i < 8 && ($i * 8) <= $limit; $i++) {
             $descAddr = $base + ($i * 8);
             $bytes = [];
             for ($j = 0; $j < 8; $j++) {
