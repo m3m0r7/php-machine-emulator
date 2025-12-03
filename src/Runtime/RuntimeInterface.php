@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Runtime;
 
+use PHPMachineEmulator\Collection\ServiceCollectionInterface;
 use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterInterface;
@@ -44,4 +45,6 @@ interface RuntimeInterface
     public function memory(): MemoryStreamInterface;
 
     public function logicBoard(): LogicBoardInterface;
+
+    public function services(): ServiceCollectionInterface;
 }

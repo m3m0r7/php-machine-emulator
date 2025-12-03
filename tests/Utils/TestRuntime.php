@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Utils;
 
 use PHPMachineEmulator\Collection\MemoryAccessorObserverCollection;
+use PHPMachineEmulator\Collection\ServiceCollectionInterface;
 use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\Intel\Register;
@@ -126,6 +127,11 @@ class TestRuntime implements RuntimeInterface
     public function logicBoard(): LogicBoardInterface
     {
         return new TestLogicBoard();
+    }
+
+    public function services(): ServiceCollectionInterface
+    {
+        return new TestServiceCollection();
     }
 
     // ========================================
