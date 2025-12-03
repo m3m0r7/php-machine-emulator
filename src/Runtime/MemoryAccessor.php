@@ -553,7 +553,9 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function writeEfer(int $value): void
     {
-        $this->efer = $value & 0xFFFFFFFFFFFFFFFF;
+        // EFER is a 64-bit MSR, but only lower bits are used
+        // Avoid PHP's int overflow by not masking with 0xFFFFFFFFFFFFFFFF
+        $this->efer = $value;
     }
 
     private function processRegisterWrite(int|RegisterType $registerType, int|null $value): array

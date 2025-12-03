@@ -34,5 +34,16 @@ interface MemoryAccessorInterface
     public function shouldCarryFlag(): bool;
     public function shouldParityFlag(): bool;
     public function shouldAuxiliaryCarryFlag(): bool;
+    public function shouldDirectionFlag(): bool;
+    public function shouldInterruptFlag(): bool;
+
+    public function setZeroFlag(bool $which): self;
+    public function setSignFlag(bool $which): self;
+    public function setOverflowFlag(bool $which): self;
+    public function setParityFlag(bool $which): self;
     public function setAuxiliaryCarryFlag(bool $which): self;
+    public function setDirectionFlag(bool $which): self;
+    public function setInterruptFlag(bool $which): self;
+
+    public function writeEfer(int $value): void;
 }

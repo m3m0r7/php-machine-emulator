@@ -67,19 +67,25 @@ class BIOS
         // 1. Allocate CPU registers first (must be done before any register access)
         $this->initializeRegisters();
 
-        // 2. Initialize services (e.g., VideoMemoryService)
+        // 2. Initialize CPU state (flags, descriptor tables, A20, etc.)
+        $this->initializeCPUState();
+
+        // 3. Initialize services (e.g., VideoMemoryService)
         $this->initializeServices();
 
-        // 3. Initialize IVT first (to handle exceptions safely)
+        // 4. Initialize IVT first (to handle exceptions safely)
         $this->initializeIVT();
 
-        // 4. Initialize ROM area (BIOS identification, default handlers)
+        // 5. Initialize ROM area (BIOS identification, default handlers)
         $this->initializeROM();
 
-        // 5. Initialize BDA
+        // 6. Initialize BDA
         $this->initializeBDA();
 
-        // 6. Initialize boot segment (CS register) - should be last before boot
+        // 7. Initialize segment registers (DS, ES, SS, etc.)
+        $this->initializeSegmentRegisters();
+
+        // 8. Initialize boot segment (CS register) - should be last before boot
         $this->initializeBootSegment();
 
         $this->machine->option()->logger()->info('BIOS initialization completed');
@@ -472,6 +478,137 @@ class BIOS
 
         $this->machine->option()->logger()->debug(
             sprintf('BIOS: Initialized IVT (0x000-0x3FF) with %d vectors pointing to F000:%04X', 256, $defaultOffset)
+        );
+    }
+
+    /**
+     * Initialize CPU state (flags, descriptor tables, control registers, A20 line).
+     * Based on x86 CPU reset state from Intel SDM and QEMU's x86_cpu_reset_hold().
+     */
+    protected function initializeCPUState(): void
+    {
+        $runtime = $this->runtime();
+        $mem = $runtime->memoryAccessor();
+        $cpuContext = $runtime->context()->cpu();
+
+        // ========================================
+        // CPU Mode: Real Mode (16-bit)
+        // ========================================
+        $cpuContext->setProtectedMode(false);
+        $cpuContext->setDefaultOperandSize(16);
+        $cpuContext->setDefaultAddressSize(16);
+
+        // ========================================
+        // Control Registers
+        // ========================================
+        // CR0: PE=0 (real mode), others as per reset
+        // Bit 4 (ET): Extension Type - 1 for 387 coprocessor
+        // Keep existing MP + NE bits (0x22) and add ET
+        $cr0 = 0x22 | 0x10;  // MP + NE + ET
+        $mem->writeControlRegister(0, $cr0);
+
+        // CR2, CR3, CR4: All zero on reset
+        $mem->writeControlRegister(2, 0);
+        $mem->writeControlRegister(3, 0);
+        $mem->writeControlRegister(4, 0);
+
+        // ========================================
+        // EFLAGS: Reset to 0x00000002
+        // Only bit 1 is reserved and always set to 1
+        // ========================================
+        // Note: Flags are stored individually in MemoryAccessor
+        // Clear all flags except reserved bit 1
+        $mem->setCarryFlag(false);
+        $mem->setZeroFlag(false);
+        $mem->setSignFlag(false);
+        $mem->setOverflowFlag(false);
+        $mem->setParityFlag(false);
+        $mem->setAuxiliaryCarryFlag(false);
+        $mem->setDirectionFlag(false);
+        $mem->setInterruptFlag(false);  // IF=0 on reset (interrupts disabled)
+
+        // ========================================
+        // Descriptor Table Registers
+        // On reset: base=0, limit=0xFFFF
+        // ========================================
+        $cpuContext->setGdtr(0x00000000, 0xFFFF);
+        $cpuContext->setIdtr(0x00000000, 0xFFFF);  // IVT at 0x0000:0x0000 with limit 0x3FF in real mode
+
+        // Task Register: selector=0, base=0, limit=0xFFFF
+        $cpuContext->setTaskRegister(0, 0x00000000, 0xFFFF);
+
+        // LDTR: selector=0, base=0, limit=0xFFFF
+        $cpuContext->setLdtr(0, 0x00000000, 0xFFFF);
+
+        // ========================================
+        // Privilege Level
+        // ========================================
+        $cpuContext->setCpl(0);   // Ring 0 on reset
+        $cpuContext->setIopl(0);  // IOPL=0 on reset
+        $cpuContext->setNt(false); // NT flag clear
+
+        // ========================================
+        // A20 Line
+        // Enable A20 for full memory access (QEMU enables by default)
+        // ========================================
+        $cpuContext->enableA20(true);
+
+        // ========================================
+        // Paging: Disabled on reset
+        // ========================================
+        $cpuContext->setPagingEnabled(false);
+
+        // ========================================
+        // EFER (Extended Feature Enable Register): 0 on reset
+        // ========================================
+        $mem->writeEfer(0);
+
+        $this->machine->option()->logger()->debug(
+            sprintf('BIOS: Initialized CPU state - Real Mode 16-bit, CR0=0x%08X, A20=enabled, IF=0', $cr0)
+        );
+    }
+
+    /**
+     * Initialize segment registers (DS, ES, SS, FS, GS) and stack pointer.
+     * On x86 reset: selector=0, base=0, limit=0xFFFF for all data segments.
+     */
+    protected function initializeSegmentRegisters(): void
+    {
+        $mem = $this->runtime()->memoryAccessor();
+
+        // ========================================
+        // Data Segment Registers: All 0 on reset
+        // In real mode, segment base = segment << 4
+        // ========================================
+        $mem->write16Bit(RegisterType::DS, 0x0000);
+        $mem->write16Bit(RegisterType::ES, 0x0000);
+        $mem->write16Bit(RegisterType::SS, 0x0000);
+        $mem->write16Bit(RegisterType::FS, 0x0000);
+        $mem->write16Bit(RegisterType::GS, 0x0000);
+
+        // ========================================
+        // Stack Pointer
+        // On reset, SP is undefined but typically set by BIOS
+        // Set SP to top of conventional memory segment (0x0000:0xFFFE)
+        // This gives 64KB stack space in real mode
+        // ========================================
+        $mem->write16Bit(RegisterType::ESP, 0xFFFE);
+
+        // ========================================
+        // General Purpose Registers
+        // On reset, EAX contains CPU identification info
+        // Other registers are undefined but we zero them
+        // ========================================
+        $mem->writeBySize(RegisterType::EAX, 0x00000000, 32);
+        $mem->writeBySize(RegisterType::EBX, 0x00000000, 32);
+        $mem->writeBySize(RegisterType::ECX, 0x00000000, 32);
+        $mem->writeBySize(RegisterType::EDX, 0x00000000, 32);
+        $mem->writeBySize(RegisterType::ESI, 0x00000000, 32);
+        $mem->writeBySize(RegisterType::EDI, 0x00000000, 32);
+        $mem->writeBySize(RegisterType::EBP, 0x00000000, 32);
+
+        $this->machine->option()->logger()->debug(
+            'BIOS: Initialized segment registers DS=ES=SS=FS=GS=0, SP=0xFFFE'
         );
     }
 
