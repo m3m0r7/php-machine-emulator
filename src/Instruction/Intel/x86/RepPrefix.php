@@ -20,7 +20,21 @@ class RepPrefix implements InstructionInterface
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
         $reader = $runtime->memory();
+        $cpu = $runtime->context()->cpu();
+
+        // Handle prefix bytes that may appear between REP and the string instruction
+        // 66 = Operand size override, 67 = Address size override
+        // Prefixes can appear in any order, so loop until we find a non-prefix opcode
         $nextOpcode = $reader->byte();
+
+        while ($nextOpcode === 0x66 || $nextOpcode === 0x67) {
+            if ($nextOpcode === 0x66) {
+                $cpu->setOperandSizeOverride(true);
+            } elseif ($nextOpcode === 0x67) {
+                $cpu->setAddressSizeOverride(true);
+            }
+            $nextOpcode = $reader->byte();
+        }
 
         // Handle two-byte opcodes (0x0F prefix)
         $opcodes = [$nextOpcode];

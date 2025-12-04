@@ -16,6 +16,7 @@ use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit;
 use PHPMachineEmulator\Instruction\RegisterInterface;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\LogicBoard\LogicBoardInterface;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
@@ -41,6 +42,7 @@ class Runtime implements RuntimeInterface
     protected array $shutdown = [];
     protected int $instructionCount = 0;
     protected MemoryStream $memory;
+    protected int $zeroOpcodeCount = 0;
 
     public function __construct(
         protected MachineInterface $machine,
@@ -184,14 +186,36 @@ class Runtime implements RuntimeInterface
 
             $this->memoryAccessor->setInstructionFetch(false);
 
+            // Detect infinite loop: 3 consecutive 0x00 opcodes
+            if (count($opcodes) === 1 && $opcodes[0] === 0x00) {
+                $this->zeroOpcodeCount++;
+                if ($this->zeroOpcodeCount >= 255) {
+                    throw new ExecutionException(sprintf(
+                        'Infinite loop detected: 255 consecutive 0x00 opcodes at IP=0x%05X',
+                        $ipBefore
+                    ));
+                }
+            } else {
+                $this->zeroOpcodeCount = 0;
+            }
+
             // Debug: trace ALL opcodes with full register state
             $cf = $this->memoryAccessor->shouldCarryFlag() ? 1 : 0;
-            $eax = $this->memoryAccessor->fetch(\PHPMachineEmulator\Instruction\RegisterType::EAX)->asBytesBySize(32);
-            $edx = $this->memoryAccessor->fetch(\PHPMachineEmulator\Instruction\RegisterType::EDX)->asBytesBySize(32);
+            $zf = $this->memoryAccessor->shouldZeroFlag() ? 1 : 0;
+            $sf = $this->memoryAccessor->shouldSignFlag() ? 1 : 0;
+            $of = $this->memoryAccessor->shouldOverflowFlag() ? 1 : 0;
+            $eax = $this->memoryAccessor->fetch(RegisterType::EAX)->asBytesBySize(32);
+            $ebx = $this->memoryAccessor->fetch(RegisterType::EBX)->asBytesBySize(32);
+            $ecx = $this->memoryAccessor->fetch(RegisterType::ECX)->asBytesBySize(32);
+            $edx = $this->memoryAccessor->fetch(RegisterType::EDX)->asBytesBySize(32);
+            $esi = $this->memoryAccessor->fetch(RegisterType::ESI)->asBytesBySize(32);
+            $edi = $this->memoryAccessor->fetch(RegisterType::EDI)->asBytesBySize(32);
+            $ebp = $this->memoryAccessor->fetch(RegisterType::EBP)->asBytesBySize(32);
+            $esp = $this->memoryAccessor->fetch(RegisterType::ESP)->asBytesBySize(32);
             $opcodeStr = implode(' ', array_map(fn($b) => sprintf('0x%02X', $b), $opcodes));
             $this->machine->option()->logger()->debug(sprintf(
-                'EXEC: IP=0x%04X op=%s CF=%d EAX=0x%08X EDX=0x%08X',
-                $ipBefore, $opcodeStr, $cf, $eax, $edx
+                'EXEC: IP=0x%05X op=%-12s FL[CF=%d ZF=%d SF=%d OF=%d] EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X',
+                $ipBefore, $opcodeStr, $cf, $zf, $sf, $of, $eax, $ebx, $ecx, $edx, $esi, $edi, $ebp, $esp
             ));
 
             $result = $this->execute($opcodes);

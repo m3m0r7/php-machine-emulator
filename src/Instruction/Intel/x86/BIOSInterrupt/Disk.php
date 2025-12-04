@@ -217,7 +217,7 @@ class Disk implements InterruptInterface
         $ma = $runtime->memoryAccessor();
         // EDD version 3.0, features: bit0 (extended disk access), bit1 (EDD)
         $ma->writeToHighBit(RegisterType::EAX, 0x30); // AH = version
-        $ma->write16Bit(RegisterType::BX, 0xAA55);
+        $ma->write16Bit(RegisterType::EBX, 0xAA55);
         $ma->write16Bit(RegisterType::ECX, 0x0003);
         $ma->setCarryFlag(false);
     }
@@ -453,11 +453,8 @@ class Disk implements InterruptInterface
         $ma->write16Bit($buffer + 18, $bytesPerSector);
         // EDD configuration params (set to zero/invalid)
         $ma->write16Bit($buffer + 20, 0); // reserved
-        $ma->write32Bit($buffer + 22, 0); // host bus type ptr (none)
-        $ma->write32Bit($buffer + 26, 0); // iface type ptr (none)
-        $ma->write64Bit($buffer + 30, 0); // I/O ports / legacy base
-        $ma->write64Bit($buffer + 38, 0); // legacy CHS info
-        $ma->write32Bit($buffer + 46, 0); // checksum etc.
+        $ma->writeBySize($buffer + 22, 0, 32); // host bus type ptr (none)
+        // Note: buffer size is typically 0x1A (26 bytes), so we don't need more fields
 
         $ma->writeToHighBit(RegisterType::EAX, 0x00);
         $ma->setCarryFlag(false);

@@ -252,10 +252,10 @@ class System implements InterruptInterface
             }
         }
 
-        $ma->writeBySize(RegisterType::EAX, 0x534D4150, 32);
+        $ma->writeBySize(RegisterType::EAX, 0x534D4150, 32); // Return 'SMAP' signature
         $ma->writeBySize(RegisterType::EBX, $index + 1, 32); // next entry index
         $ma->writeBySize(RegisterType::ECX, min(20, $ecx), 32);
-        $ma->writeToHighBit(RegisterType::EAX, 0x00);
+        // Note: Do NOT overwrite EAX here - SMAP signature must be returned
         $ma->setCarryFlag(false);
     }
 

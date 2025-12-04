@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Exception\ExecutionException;
+use PHPMachineEmulator\Exception\NullPointerException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -137,6 +138,14 @@ class Group5 implements InstructionInterface
             $pos
         ));
 
+        // Check for NULL pointer call
+        if ($target === 0) {
+            throw new NullPointerException(sprintf(
+                'CALL to NULL pointer (0x00000000) at IP=0x%05X - possible uninitialized function pointer or failed module load',
+                $pos - 2
+            ));
+        }
+
         $runtime->memoryAccessor()->push(RegisterType::ESP, $pos, $runtime->context()->cpu()->operandSize());
 
         if ($runtime->option()->shouldChangeOffset()) {
@@ -157,6 +166,14 @@ class Group5 implements InstructionInterface
             $modRegRM->mode(),
             $modRegRM->registerOrMemoryAddress()
         ));
+
+        // Check for NULL pointer jump
+        if ($target === 0) {
+            throw new NullPointerException(sprintf(
+                'JMP to NULL pointer (0x00000000) at IP=0x%05X - possible uninitialized function pointer or failed module load',
+                $runtime->memory()->offset() - 2
+            ));
+        }
 
         if ($runtime->option()->shouldChangeOffset()) {
             $runtime->memory()->setOffset($target);
