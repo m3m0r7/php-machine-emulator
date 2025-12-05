@@ -40,4 +40,9 @@ class TestScreenContext implements RuntimeScreenContextInterface
     {
         $this->output = '';
     }
+
+    public function flushIfNeeded(): void
+    {
+        // No-op for tests
+    }
 }

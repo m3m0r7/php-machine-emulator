@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Runtime;
 
 use PHPMachineEmulator\Instruction\Intel\x86\ApicState;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit;
 use PHPMachineEmulator\Instruction\Intel\x86\Cmos;
 use PHPMachineEmulator\Instruction\Intel\x86\KeyboardController;
 use PHPMachineEmulator\Instruction\Intel\x86\PicState;
@@ -71,6 +72,7 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     private ApicState $apicState;
     private KeyboardController $keyboardController;
     private Cmos $cmos;
+    private Pit $pit;
 
     // Iteration context (for REP prefix, etc.)
     private IterationContextInterface $iterationContext;
@@ -84,6 +86,7 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
         $this->picState = new PicState($this->apicState);
         $this->keyboardController = new KeyboardController($this->picState);
         $this->cmos = new Cmos();
+        $this->pit = new Pit();
         $this->iterationContext = new IterationContext();
     }
 
@@ -509,6 +512,11 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function cmos(): Cmos
     {
         return $this->cmos;
+    }
+
+    public function pit(): Pit
+    {
+        return $this->pit;
     }
 
     public function iteration(): IterationContextInterface

@@ -63,4 +63,9 @@ class TestScreenWriter implements ScreenWriterInterface
     {
         return $this->output;
     }
+
+    public function flushIfNeeded(): void
+    {
+        // No-op for testing
+    }
 }

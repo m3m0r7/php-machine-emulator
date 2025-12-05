@@ -170,4 +170,205 @@ class ISO9660
     {
         return $this->resource;
     }
+
+    /**
+     * Read a file from the ISO filesystem.
+     *
+     * @param string $path Path to the file (e.g., "/boot/isolinux/isolinux.cfg")
+     * @return string|null File contents or null if not found
+     */
+    public function readFile(string $path): ?string
+    {
+        $entry = $this->findPath($path);
+        if ($entry === null || $entry['isDir']) {
+            return null;
+        }
+
+        // Read file data from ISO
+        $offset = $entry['lba'] * self::SECTOR_SIZE;
+        $data = $this->readAt($offset, $entry['size']);
+
+        return $data !== false ? $data : null;
+    }
+
+    /**
+     * Read directory entries from the ISO filesystem.
+     *
+     * @param string $path Path to the directory
+     * @return array|null Array of entries or null if not found
+     */
+    public function readDirectory(string $path): ?array
+    {
+        if ($path === '' || $path === '/') {
+            // Root directory
+            $lba = $this->primaryDescriptor->rootDirectoryLBA;
+            $size = $this->primaryDescriptor->rootDirectorySize;
+        } else {
+            $entry = $this->findPath($path);
+            if ($entry === null || !$entry['isDir']) {
+                return null;
+            }
+            $lba = $entry['lba'];
+            $size = $entry['size'];
+        }
+
+        return $this->parseDirectory($lba, $size);
+    }
+
+    /**
+     * Find a file or directory by path.
+     *
+     * @param string $path Path to find
+     * @return array|null Entry info or null if not found
+     */
+    private function findPath(string $path): ?array
+    {
+        // Normalize path
+        $path = trim($path, '/');
+        if ($path === '') {
+            return [
+                'name' => '',
+                'lba' => $this->primaryDescriptor->rootDirectoryLBA,
+                'size' => $this->primaryDescriptor->rootDirectorySize,
+                'isDir' => true,
+            ];
+        }
+
+        $parts = explode('/', $path);
+        $currentLba = $this->primaryDescriptor->rootDirectoryLBA;
+        $currentSize = $this->primaryDescriptor->rootDirectorySize;
+
+        foreach ($parts as $i => $part) {
+            $isLast = ($i === count($parts) - 1);
+            $entries = $this->parseDirectory($currentLba, $currentSize);
+
+            if ($entries === null) {
+                return null;
+            }
+
+            $found = false;
+            foreach ($entries as $entry) {
+                // Case-insensitive comparison for ISO9660
+                if (strcasecmp($entry['name'], $part) === 0) {
+                    if ($isLast) {
+                        return $entry;
+                    }
+                    if (!$entry['isDir']) {
+                        return null; // Not a directory but we need to go deeper
+                    }
+                    $currentLba = $entry['lba'];
+                    $currentSize = $entry['size'];
+                    $found = true;
+                    break;
+                }
+            }
+
+            if (!$found) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse a directory at the given LBA.
+     *
+     * @return array Array of directory entries
+     */
+    private function parseDirectory(int $lba, int $size): array
+    {
+        $entries = [];
+        $offset = $lba * self::SECTOR_SIZE;
+        $data = $this->readAt($offset, $size);
+
+        if ($data === false) {
+            return [];
+        }
+
+        $pos = 0;
+        while ($pos < strlen($data)) {
+            // Directory record length
+            $recordLen = ord($data[$pos]);
+
+            if ($recordLen === 0) {
+                // End of sector, skip to next sector boundary
+                $nextSector = ((int)($pos / self::SECTOR_SIZE) + 1) * self::SECTOR_SIZE;
+                if ($nextSector >= strlen($data)) {
+                    break;
+                }
+                $pos = $nextSector;
+                continue;
+            }
+
+            if ($pos + $recordLen > strlen($data)) {
+                break;
+            }
+
+            $record = substr($data, $pos, $recordLen);
+            $entry = $this->parseDirectoryRecord($record);
+
+            if ($entry !== null && $entry['name'] !== '' && $entry['name'] !== '.' && $entry['name'] !== '..') {
+                $entries[] = $entry;
+            }
+
+            $pos += $recordLen;
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Parse a single directory record.
+     */
+    private function parseDirectoryRecord(string $record): ?array
+    {
+        if (strlen($record) < 33) {
+            return null;
+        }
+
+        // Extended Attribute Record Length (byte 1)
+        // $extAttrLen = ord($record[1]);
+
+        // Location of Extent (bytes 2-9, both-endian)
+        $lba = unpack('V', substr($record, 2, 4))[1];
+
+        // Data Length (bytes 10-17, both-endian)
+        $size = unpack('V', substr($record, 10, 4))[1];
+
+        // File Flags (byte 25)
+        $flags = ord($record[25]);
+        $isDir = ($flags & 0x02) !== 0;
+
+        // File Identifier Length (byte 32)
+        $nameLen = ord($record[32]);
+
+        if ($nameLen === 0) {
+            return null;
+        }
+
+        // File Identifier (bytes 33+)
+        $name = substr($record, 33, $nameLen);
+
+        // Handle . and .. entries
+        if ($nameLen === 1 && ord($name[0]) === 0) {
+            $name = '.';
+        } elseif ($nameLen === 1 && ord($name[0]) === 1) {
+            $name = '..';
+        } else {
+            // Remove version number (;1) and trailing dots
+            $semicolon = strpos($name, ';');
+            if ($semicolon !== false) {
+                $name = substr($name, 0, $semicolon);
+            }
+            $name = rtrim($name, '.');
+        }
+
+        return [
+            'name' => $name,
+            'lba' => $lba,
+            'size' => $size,
+            'isDir' => $isDir,
+        ];
+    }
 }

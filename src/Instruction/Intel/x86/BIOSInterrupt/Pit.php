@@ -13,7 +13,6 @@ class Pit
     private ?int $latchedCount0 = null;
     private int $readFlipFlop0 = 0;
     private int $writeFlipFlop0 = 0;
-    private static ?Pit $instance = null;
 
     public function writeControl(int $value): void
     {
@@ -98,11 +97,6 @@ class Pit
             }
         }
         return $ret;
-    }
-
-    public static function shared(): Pit
-    {
-        return self::$instance ??= new Pit();
     }
 
     private function loadCounter0(): void

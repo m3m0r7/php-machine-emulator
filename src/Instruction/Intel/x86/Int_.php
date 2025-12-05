@@ -9,6 +9,7 @@ use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\BIOSInterrupt;
+use PHPMachineEmulator\Exception\NotImplementedException;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Disk;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Keyboard;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\MemorySize;
@@ -75,6 +76,7 @@ class Int_ implements InstructionInterface
             BIOSInterrupt::TIME_OF_DAY_INTERRUPT => ($this->interruptInstances[TimeOfDay::class] ??= new TimeOfDay())
                 ->process($runtime),
             BIOSInterrupt::SYSTEM_INTERRUPT => ($this->interruptInstances[System::class] ??= new System())->process($runtime),
+            BIOSInterrupt::COMBOOT_INTERRUPT => throw new NotImplementedException('INT 22h (COMBOOT API) is not implemented'),
             BIOSInterrupt::DOS_TERMINATE_INTERRUPT => null,
             BIOSInterrupt::DOS_INTERRUPT => null,
             default => $this->handleUnknownInterrupt($runtime, $vector),
@@ -142,6 +144,20 @@ class Int_ implements InstructionInterface
             return;
         }
 
+        // Check if IVT points to default BIOS handler (F000:FF53 = IRET stub)
+        // In this case, we should handle the interrupt directly instead of jumping to IRET
+        if ($segment === 0xF000 && $offset === 0xFF53) {
+            $handled = $this->handleBiosInterruptDirectly($runtime, $vector);
+            if ($handled) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'INT vector 0x%02X: IVT points to default handler, handled directly',
+                    $vector
+                ));
+                $this->nestedCount[$key]--;
+                return;
+            }
+        }
+
         // Push state (FLAGS, CS, IP)
         $ma = $runtime->memoryAccessor();
         $flags =
@@ -181,6 +197,48 @@ class Int_ implements InstructionInterface
         }
 
         $this->nestedCount[$key]--;
+    }
+
+    /**
+     * Handle BIOS interrupt directly when IVT points to default IRET handler.
+     * This is called when software (like ISOLINUX) executes INT xx and IVT has not been
+     * overwritten with a custom handler.
+     *
+     * @return bool True if interrupt was handled, false otherwise
+     */
+    private function handleBiosInterruptDirectly(RuntimeInterface $runtime, int $vector): bool
+    {
+        $operand = BIOSInterrupt::tryFrom($vector);
+
+        if ($operand === null) {
+            // Not a known BIOS interrupt, let it fall through to default handling
+            return false;
+        }
+
+        $runtime->option()->logger()->debug(sprintf(
+            'INT 0x%02X: Handling BIOS interrupt directly (IVT points to default handler)',
+            $vector
+        ));
+
+        match ($operand) {
+            BIOSInterrupt::TIMER_INTERRUPT => ($this->interruptInstances[Timer::class] ??= new Timer())
+                ->process($runtime),
+            BIOSInterrupt::VIDEO_INTERRUPT => ($this->interruptInstances[Video::class] ??= new Video($runtime))
+                ->process($runtime),
+            BIOSInterrupt::MEMORY_SIZE_INTERRUPT => ($this->interruptInstances[MemorySize::class] ??= new MemorySize())
+                ->process($runtime),
+            BIOSInterrupt::DISK_INTERRUPT => ($this->interruptInstances[Disk::class] ??= new Disk($runtime))
+                ->process($runtime),
+            BIOSInterrupt::KEYBOARD_INTERRUPT => ($this->interruptInstances[Keyboard::class] ??= new Keyboard($runtime))
+                ->process($runtime),
+            BIOSInterrupt::TIME_OF_DAY_INTERRUPT => ($this->interruptInstances[TimeOfDay::class] ??= new TimeOfDay())
+                ->process($runtime),
+            BIOSInterrupt::SYSTEM_INTERRUPT => ($this->interruptInstances[System::class] ??= new System())->process($runtime),
+            BIOSInterrupt::COMBOOT_INTERRUPT => throw new NotImplementedException('INT 22h (COMBOOT API) is not implemented'),
+            BIOSInterrupt::DOS_TERMINATE_INTERRUPT, BIOSInterrupt::DOS_INTERRUPT => null,
+        };
+
+        return true;
     }
 
     private function protectedModeInterrupt(RuntimeInterface $runtime, int $vector, int $returnIp, ?int $errorCode = null, bool $isSoftware = false): void

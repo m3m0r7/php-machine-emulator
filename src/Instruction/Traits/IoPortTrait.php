@@ -6,7 +6,19 @@ namespace PHPMachineEmulator\Instruction\Traits;
 
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Ata;
-use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Ata as AtaPort;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Cmos as CmosPort;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Kbc as KbcPort;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Pci as PciPort;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Pic as PicPort;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Pit as PitPort;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Serial as SerialPort;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\SystemControl as SystemControlPort;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Vga\Attribute as VgaAttribute;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Vga\Crtc as VgaCrtc;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Vga\General as VgaGeneral;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Vga\Graphics as VgaGraphics;
+use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Vga\Sequencer as VgaSequencer;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -106,53 +118,57 @@ trait IoPortTrait
             'flip_flop' => false,
         ];
 
-        if ($port === 0x60) {
+        // Keyboard Controller
+        if ($port === KbcPort::DATA->value) {
             return $kbd->readData($runtime);
         }
-
-        if ($port === 0x64) {
+        if ($port === KbcPort::STATUS_COMMAND->value) {
             return $kbd->pollAndReadStatus($runtime);
         }
 
-        if ($port === 0x1F0 || $port === 0x170) {
+        // ATA/IDE
+        if (AtaPort::isDataPort($port)) {
             return $ata->readDataWord();
         }
-        if ($port === 0x1F7 || $port === 0x177 || $port === 0x3F6 || $port === 0x376) {
+        if (AtaPort::isStatusPort($port)) {
             return $ata->readStatus();
         }
-        if (($port >= 0x1F2 && $port <= 0x1F6) || ($port >= 0x172 && $port <= 0x176)) {
+        if (AtaPort::isRegisterPort($port)) {
             return $ata->readRegister($port);
         }
-        if ($port >= 0xCC00 && $port <= 0xCC07) {
+        if (AtaPort::isBusMasterPort($port)) {
             return $ata->readBusMaster($port);
         }
 
-        if ($port === 0x21) {
+        // PIC
+        if ($port === PicPort::MASTER_DATA->value) {
             return $picState->imrMaster;
         }
-        if ($port === 0xA1) {
+        if ($port === PicPort::SLAVE_DATA->value) {
             return $picState->imrSlave;
         }
-
-        if (in_array($port, [0x40, 0x41, 0x42, 0x43], true)) {
-            return Pit::shared()->readCounter();
-        }
-
-        if ($port === 0x20) {
+        if ($port === PicPort::MASTER_COMMAND->value) {
             return $picState->readCommandPort(false);
         }
-        if ($port === 0xA0) {
+        if ($port === PicPort::SLAVE_COMMAND->value) {
             return $picState->readCommandPort(true);
         }
 
-        if ($port === 0x92) {
+        // PIT
+        if (PitPort::isPort($port)) {
+            return $ctx->pit()->readCounter();
+        }
+
+        // System Control (A20 gate)
+        if ($port === SystemControlPort::PORT_A->value) {
             return $runtime->context()->cpu()->isA20Enabled() ? 0x02 : 0x00;
         }
 
-        if ($port === 0xCF8) {
+        // PCI Configuration
+        if ($port === PciPort::CONFIG_ADDRESS->value) {
             return $pciConfigAddr;
         }
-        if ($port === 0xCFC) {
+        if ($port === PciPort::CONFIG_DATA->value) {
             $bus = ($pciConfigAddr >> 16) & 0xFF;
             $dev = ($pciConfigAddr >> 11) & 0x1F;
             $func = ($pciConfigAddr >> 8) & 0x7;
@@ -161,44 +177,46 @@ trait IoPortTrait
         }
 
         // VGA read stubs
-        if ($port === 0x3C2 || $port === 0x3CC) {
+        if ($port === VgaGeneral::INPUT_STATUS_0 || $port === VgaGeneral::MISC_OUTPUT_READ) {
             return $vga['misc_output'];
         }
-        if ($port === 0x3C4) {
+        if ($port === VgaSequencer::INDEX->value) {
             return $vga['seq_idx'];
         }
-        if ($port === 0x3C5) {
+        if ($port === VgaSequencer::DATA->value) {
             return $vga['seq'][$vga['seq_idx']] ?? 0;
         }
-        if ($port === 0x3CE) {
+        if ($port === VgaGraphics::INDEX->value) {
             return $vga['gfx_idx'];
         }
-        if ($port === 0x3CF) {
+        if ($port === VgaGraphics::DATA->value) {
             return $vga['gfx'][$vga['gfx_idx']] ?? 0;
         }
-        if ($port === 0x3D4 || $port === 0x3B4) {
+        if ($port === VgaCrtc::INDEX_COLOR->value || $port === VgaCrtc::INDEX_MONO->value) {
             return $vga['crtc_idx'];
         }
-        if ($port === 0x3D5 || $port === 0x3B5) {
+        if ($port === VgaCrtc::DATA_COLOR->value || $port === VgaCrtc::DATA_MONO->value) {
             return $vga['crtc'][$vga['crtc_idx']] ?? 0;
         }
-        if ($port === 0x3C0) {
+        if ($port === VgaAttribute::INDEX_DATA_WRITE->value) {
             $vga['flip_flop'] = !$vga['flip_flop'];
             return 0;
         }
-        if ($port === 0x3C1) {
+        if ($port === VgaAttribute::DATA_READ->value) {
             return $vga['attr'][$vga['attr_idx']] ?? 0;
         }
-        if ($port === 0x3DA) {
+        if ($port === VgaGeneral::INPUT_STATUS_1_COLOR) {
             $vga['flip_flop'] = false;
             return 0x09;
         }
 
-        if (in_array($port, [0x70, 0x71], true)) {
-            return $port === 0x71 ? $cmos->read() : 0;
+        // CMOS/RTC
+        if ($port === CmosPort::ADDRESS->value || $port === CmosPort::DATA->value) {
+            return $port === CmosPort::DATA->value ? $cmos->read() : 0;
         }
 
-        if ($port === 0x3F8) {
+        // Serial Port
+        if ($port === SerialPort::COM1_DATA->value) {
             return 0;
         }
 
@@ -216,9 +234,9 @@ trait IoPortTrait
 
         $ctx = $runtime->context()->cpu();
         $picState = $ctx->picState();
+        $pit = $ctx->pit();
         static $ata;
         $ata ??= new Ata($runtime);
-        $pit = Pit::shared();
         $kbd = $ctx->keyboardController();
         $cmos = $ctx->cmos();
         static $pciConfigAddr = 0;
@@ -239,21 +257,24 @@ trait IoPortTrait
             'flip_flop' => false,
         ];
 
-        if ($port === 0x3F8) {
+        // Serial Port
+        if ($port === SerialPort::COM1_DATA->value) {
             $runtime->option()->IO()->output()->write(chr($value & 0xFF));
             return;
         }
 
-        if ($port === 0x92) {
+        // System Control (A20 gate)
+        if ($port === SystemControlPort::PORT_A->value) {
             $runtime->context()->cpu()->enableA20(($value & 0x02) !== 0);
             return;
         }
 
-        if ($port === 0xCF8) {
+        // PCI Configuration
+        if ($port === PciPort::CONFIG_ADDRESS->value) {
             $pciConfigAddr = $value;
             return;
         }
-        if ($port === 0xCFC) {
+        if ($port === PciPort::CONFIG_DATA->value) {
             $bus = ($pciConfigAddr >> 16) & 0xFF;
             $dev = ($pciConfigAddr >> 11) & 0x1F;
             $func = ($pciConfigAddr >> 8) & 0x7;
@@ -262,49 +283,50 @@ trait IoPortTrait
             return;
         }
 
-        if ($port === 0x1F0 || $port === 0x170) {
+        // ATA/IDE
+        if (AtaPort::isDataPort($port)) {
             $ata->writeDataWord($value);
             return;
         }
-        if (($port >= 0x1F1 && $port <= 0x1F7) || ($port >= 0x171 && $port <= 0x177)) {
+        if (AtaPort::isWritableRegisterPort($port)) {
             $ata->writeRegister($port, $value);
             return;
         }
-        if ($port >= 0xCC00 && $port <= 0xCC07) {
+        if (AtaPort::isBusMasterPort($port)) {
             $ata->writeBusMaster($port, $value);
             return;
         }
 
         // VGA writes
-        if ($port === 0x3C2) {
+        if ($port === VgaGeneral::MISC_OUTPUT_WRITE) {
             $vga['misc_output'] = $value & 0xFF;
             return;
         }
-        if ($port === 0x3C4) {
+        if ($port === VgaSequencer::INDEX->value) {
             $vga['seq_idx'] = $value & 0x1F;
             return;
         }
-        if ($port === 0x3C5) {
+        if ($port === VgaSequencer::DATA->value) {
             $vga['seq'][$vga['seq_idx']] = $value & 0xFF;
             return;
         }
-        if ($port === 0x3CE) {
+        if ($port === VgaGraphics::INDEX->value) {
             $vga['gfx_idx'] = $value & 0x1F;
             return;
         }
-        if ($port === 0x3CF) {
+        if ($port === VgaGraphics::DATA->value) {
             $vga['gfx'][$vga['gfx_idx']] = $value & 0xFF;
             return;
         }
-        if ($port === 0x3D4 || $port === 0x3B4) {
+        if ($port === VgaCrtc::INDEX_COLOR->value || $port === VgaCrtc::INDEX_MONO->value) {
             $vga['crtc_idx'] = $value & 0x3F;
             return;
         }
-        if ($port === 0x3D5 || $port === 0x3B5) {
+        if ($port === VgaCrtc::DATA_COLOR->value || $port === VgaCrtc::DATA_MONO->value) {
             $vga['crtc'][$vga['crtc_idx']] = $value & 0xFF;
             return;
         }
-        if ($port === 0x3C0) {
+        if ($port === VgaAttribute::INDEX_DATA_WRITE->value) {
             if ($vga['flip_flop'] === false) {
                 $vga['attr_idx'] = $value & 0x1F;
             } else {
@@ -313,60 +335,56 @@ trait IoPortTrait
             $vga['flip_flop'] = !$vga['flip_flop'];
             return;
         }
-        if ($port === 0x3C3) {
+        if ($port === VgaGeneral::VGA_ENABLE) {
             $vga['feature'] = $value & 0xFF;
             return;
         }
-        if ($port === 0x3DA) {
+        if ($port === VgaGeneral::INPUT_STATUS_1_COLOR) {
             $vga['flip_flop'] = false;
             return;
         }
 
-        if ($port === 0x20) {
+        // PIC
+        if ($port === PicPort::MASTER_COMMAND->value) {
             $picState->writeCommandMaster($value & 0xFF);
             return;
         }
-        if ($port === 0xA0) {
+        if ($port === PicPort::SLAVE_COMMAND->value) {
             $picState->writeCommandSlave($value & 0xFF);
             return;
         }
-        if ($port === 0x21) {
+        if ($port === PicPort::MASTER_DATA->value) {
             $picState->writeDataMaster($value & 0xFF);
             return;
         }
-        if ($port === 0xA1) {
+        if ($port === PicPort::SLAVE_DATA->value) {
             $picState->writeDataSlave($value & 0xFF);
             return;
         }
 
-        if (in_array($port, [0x40, 0x41, 0x42], true)) {
-            $pit->writeChannel($port - 0x40, $value & 0xFF);
+        // PIT
+        if ($port >= PitPort::CHANNEL_0->value && $port <= PitPort::CHANNEL_2->value) {
+            $pit->writeChannel(PitPort::channelFromPort($port), $value & 0xFF);
             return;
         }
-        if ($port === 0x43) {
+        if ($port === PitPort::CONTROL->value) {
             $pit->writeControl($value & 0xFF);
             return;
         }
 
-        if ($port === 0x64) {
+        // Keyboard Controller
+        if ($port === KbcPort::STATUS_COMMAND->value) {
             $kbd->writeCommand($value, $runtime);
             return;
         }
-        if ($port === 0x60) {
+        if ($port === KbcPort::DATA->value) {
             $kbd->writeDataPort($value, $runtime);
             return;
         }
 
-        if ($port === 0x70) {
+        // CMOS/RTC
+        if ($port === CmosPort::ADDRESS->value) {
             $cmos->writeIndex($value & 0xFF);
-            return;
-        }
-
-        if (in_array($port, [0x20, 0x21, 0xA0, 0xA1], true)) {
-            return;
-        }
-
-        if (in_array($port, [0x70, 0x71], true)) {
             return;
         }
     }

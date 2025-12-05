@@ -19,4 +19,5 @@ enum BIOSInterrupt: int
     case TIME_OF_DAY_INTERRUPT = 0x1A;
     case DOS_TERMINATE_INTERRUPT = 0x20;
     case DOS_INTERRUPT = 0x21;
+    case COMBOOT_INTERRUPT = 0x22;
 }

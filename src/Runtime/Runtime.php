@@ -14,7 +14,6 @@ use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Frame\Frame;
 use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
-use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Pit;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\LogicBoard\LogicBoardInterface;
@@ -78,7 +77,7 @@ class Runtime implements RuntimeInterface
 
         // Initialize ticker registry with default tickers
         $this->tickerRegistry = new TickerRegistry();
-        $this->tickerRegistry->register(new PitTicker(Pit::shared()));
+        $this->tickerRegistry->register(new PitTicker($this->context->cpu()->pit()));
         $this->tickerRegistry->register(new ApicTicker());
 
         // Initialize interrupt delivery handler with interrupt sources
