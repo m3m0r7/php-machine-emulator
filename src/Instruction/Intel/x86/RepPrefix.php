@@ -40,7 +40,9 @@ class RepPrefix implements InstructionInterface
         // Set up iteration handler: handles ECX decrement and loop control
         $iterationContext->setIterate(function (InstructionExecutorInterface $executor) use ($runtime, $opcode): ExecutionStatus {
             $lastResult = ExecutionStatus::SUCCESS;
+            // This will be set to the string instruction's IP after first execute
             $stringInstructionIp = $executor->instructionPointer();
+            $firstIteration = true;
 
             while (true) {
                 // Check ECX before decrement
@@ -53,6 +55,9 @@ class RepPrefix implements InstructionInterface
                 $counter--;
                 $this->writeIndex($runtime, RegisterType::ECX, $counter);
 
+                // Remember the IP before execute (this is where the string instruction starts)
+                $ipBeforeExecute = $executor->instructionPointer();
+
                 // Execute the instruction
                 $result = $executor->execute();
                 $lastResult = $result;
@@ -60,9 +65,13 @@ class RepPrefix implements InstructionInterface
                 // If result is CONTINUE (prefix), restore ECX and return to process more prefixes
                 if ($result === ExecutionStatus::CONTINUE) {
                     $this->writeIndex($runtime, RegisterType::ECX, $counter + 1);
-                    // Update string instruction IP for next iteration
-                    $stringInstructionIp = $executor->instructionPointer();
                     return ExecutionStatus::CONTINUE;
+                }
+
+                // After first successful string instruction, save its start position
+                if ($firstIteration) {
+                    $stringInstructionIp = $ipBeforeExecute;
+                    $firstIteration = false;
                 }
 
                 // If result is not SUCCESS, stop iteration
@@ -74,9 +83,6 @@ class RepPrefix implements InstructionInterface
                 if ($counter <= 0) {
                     break;
                 }
-
-                // Reset IP to string instruction start for next iteration
-                $executor->setInstructionPointer($stringInstructionIp);
 
                 // For string instructions that don't check ZF, continue as long as ECX > 0
                 $lastInstruction = $executor->lastInstruction();
@@ -100,6 +106,9 @@ class RepPrefix implements InstructionInterface
                         break;
                     }
                 }
+
+                // Reset IP to string instruction start for next iteration
+                $executor->setInstructionPointer($stringInstructionIp);
             }
 
             return $lastResult;
