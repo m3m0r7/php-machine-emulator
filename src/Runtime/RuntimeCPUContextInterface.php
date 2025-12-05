@@ -106,4 +106,15 @@ interface RuntimeCPUContextInterface
     public function apicState(): \PHPMachineEmulator\Instruction\Intel\x86\ApicState;
     public function keyboardController(): \PHPMachineEmulator\Instruction\Intel\x86\KeyboardController;
     public function cmos(): \PHPMachineEmulator\Instruction\Intel\x86\Cmos;
+
+    // ========================================
+    // Iteration context (for REP prefix, etc.)
+    // ========================================
+    public function iteration(): IterationContextInterface;
+
+    // ========================================
+    // Instruction pointer for iteration
+    // ========================================
+    public function currentInstructionPointer(): int;
+    public function setCurrentInstructionPointer(int $ip): void;
 }

@@ -6,11 +6,26 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Runtime\InstructionExecutorInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class RepPrefix implements InstructionInterface
 {
     use Instructable;
+
+    /**
+     * String instructions that don't check ZF (MOVS, STOS, LODS, INS, OUTS).
+     * These instructions continue iteration as long as ECX > 0.
+     */
+    private const NO_ZF_CHECK_INSTRUCTIONS = [
+        Movsb::class,
+        Movsw::class,
+        Stosb::class,
+        Stosw::class,
+        Lodsb::class,
+        Lodsw::class,
+        // INS/OUTS would go here if implemented
+    ];
 
     public function opcodes(): array
     {
@@ -19,75 +34,77 @@ class RepPrefix implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
     {
-        $reader = $runtime->memory();
         $cpu = $runtime->context()->cpu();
+        $iterationContext = $cpu->iteration();
 
-        // Handle prefix bytes that may appear between REP and the string instruction
-        // 66 = Operand size override, 67 = Address size override
-        // Prefixes can appear in any order, so loop until we find a non-prefix opcode
-        $nextOpcode = $reader->byte();
+        // Set up iteration handler: handles ECX decrement and loop control
+        $iterationContext->setIterate(function (InstructionExecutorInterface $executor) use ($runtime, $opcode): ExecutionStatus {
+            $lastResult = ExecutionStatus::SUCCESS;
+            $stringInstructionIp = $executor->instructionPointer();
 
-        while ($nextOpcode === 0x66 || $nextOpcode === 0x67) {
-            if ($nextOpcode === 0x66) {
-                $cpu->setOperandSizeOverride(true);
-            } elseif ($nextOpcode === 0x67) {
-                $cpu->setAddressSizeOverride(true);
+            while (true) {
+                // Check ECX before decrement
+                $counter = $this->readIndex($runtime, RegisterType::ECX);
+                if ($counter <= 0) {
+                    break;
+                }
+
+                // Decrement ECX
+                $counter--;
+                $this->writeIndex($runtime, RegisterType::ECX, $counter);
+
+                // Execute the instruction
+                $result = $executor->execute();
+                $lastResult = $result;
+
+                // If result is CONTINUE (prefix), restore ECX and return to process more prefixes
+                if ($result === ExecutionStatus::CONTINUE) {
+                    $this->writeIndex($runtime, RegisterType::ECX, $counter + 1);
+                    // Update string instruction IP for next iteration
+                    $stringInstructionIp = $executor->instructionPointer();
+                    return ExecutionStatus::CONTINUE;
+                }
+
+                // If result is not SUCCESS, stop iteration
+                if ($result !== ExecutionStatus::SUCCESS) {
+                    return $result;
+                }
+
+                // Check if we should continue iterating
+                if ($counter <= 0) {
+                    break;
+                }
+
+                // Reset IP to string instruction start for next iteration
+                $executor->setInstructionPointer($stringInstructionIp);
+
+                // For string instructions that don't check ZF, continue as long as ECX > 0
+                $lastInstruction = $executor->lastInstruction();
+                $checksZF = true;
+                if ($lastInstruction !== null) {
+                    foreach (self::NO_ZF_CHECK_INSTRUCTIONS as $noZfClass) {
+                        if ($lastInstruction instanceof $noZfClass) {
+                            $checksZF = false;
+                            break;
+                        }
+                    }
+                }
+
+                // REPNE/REPE termination for CMPS/SCAS based on ZF
+                if ($checksZF) {
+                    $zf = $runtime->memoryAccessor()->shouldZeroFlag();
+                    if ($opcode === 0xF2 && $zf) { // REPNZ/REPNE: stop when ZF=1
+                        break;
+                    }
+                    if ($opcode === 0xF3 && !$zf) { // REPE/REPZ: stop when ZF=0
+                        break;
+                    }
+                }
             }
-            $nextOpcode = $reader->byte();
-        }
 
-        // Handle two-byte opcodes (0x0F prefix)
-        $opcodes = [$nextOpcode];
-        if ($nextOpcode === 0x0F) {
-            $secondByte = $reader->byte();
-            $opcodes = [$nextOpcode, $secondByte];
-        }
+            return $lastResult;
+        });
 
-        // String instructions that don't check ZF (MOVS, STOS, LODS, INS, OUTS)
-        $noZfCheck = in_array($nextOpcode, [0xA4, 0xA5, 0xAA, 0xAB, 0xAC, 0xAD, 0x6C, 0x6D, 0x6E, 0x6F], true);
-
-        // REP count uses CX/ECX depending on address-size
-        $counter = $this->readIndex($runtime, RegisterType::ECX);
-
-        // Debug: log REP STOSD
-        $edi = $this->readIndex($runtime, RegisterType::EDI);
-        if ($nextOpcode === 0xAB) {
-            $eax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(32);
-            $runtime->option()->logger()->debug(sprintf(
-                'REP STOSD start: ECX=%d (0x%08X) EDI=0x%08X EAX=0x%08X endAddr=0x%08X',
-                $counter, $counter, $edi, $eax, $edi + ($counter * 4)
-            ));
-        }
-
-        if ($counter === 0) {
-            return ExecutionStatus::SUCCESS;
-        }
-
-        [$instruction, $opcodeKey] = $this->instructionList->findInstruction($opcodes);
-
-        while ($counter > 0) {
-            $result = $instruction->process($runtime, $opcodeKey);
-            $counter--;
-            $this->writeIndex($runtime, RegisterType::ECX, $counter);
-
-            if ($result !== ExecutionStatus::SUCCESS) {
-                return $result;
-            }
-
-            // REPNE/REPE termination for CMPS/SCAS based on ZF
-            if ($noZfCheck) {
-                continue;
-            }
-
-            $zf = $runtime->memoryAccessor()->shouldZeroFlag();
-            if ($opcode === 0xF2 && $zf) { // REPNZ/REPNE: stop when ZF=1
-                break;
-            }
-            if ($opcode === 0xF3 && !$zf) { // REPE/REPZ: stop when ZF=0
-                break;
-            }
-        }
-
-        return ExecutionStatus::SUCCESS;
+        return ExecutionStatus::CONTINUE;
     }
 }

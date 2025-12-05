@@ -14,6 +14,7 @@ use PHPMachineEmulator\Runtime\RuntimeOption;
 
 class Machine implements MachineInterface
 {
+    protected array $createdRuntimes = [];
     protected array $runtimes = [];
 
     public function __construct(
@@ -48,20 +49,23 @@ class Machine implements MachineInterface
     public function runtime(int $entrypoint = 0x0000): RuntimeInterface
     {
         $architectureType = $this->logicBoardContext->cpu()->architectureType();
+        $cacheKey = $architectureType->value;
 
         foreach ($this->runtimes as $archType => [$runtimeClassName, $runtimeVideoClassName, $runtimeObserverCollection, $runtimeServiceCollection]) {
-            if ($archType === $architectureType->value) {
-                $this->option()->logger()->info("Selected runtime is {$architectureType->value}");
-                return $this->createRuntime(
-                    new ArchitectureProvider(
-                        new $runtimeVideoClassName(),
-                        new $runtimeClassName(),
-                        new $runtimeObserverCollection(),
-                        new $runtimeServiceCollection(),
-                    ),
-                    $entrypoint,
-                );
+            if ($archType !== $architectureType->value) {
+                continue;
             }
+
+            $this->option()->logger()->info("Selected runtime is {$architectureType->value}");
+            return $this->createdRuntimes[$cacheKey] ??= $this->createRuntime(
+                new ArchitectureProvider(
+                    new $runtimeVideoClassName(),
+                    new $runtimeClassName(),
+                    new $runtimeObserverCollection(),
+                    new $runtimeServiceCollection(),
+                ),
+                $entrypoint,
+            );
         }
 
         throw new PHPMachineEmulatorException("Runtime not found for architecture: {$architectureType->value}");

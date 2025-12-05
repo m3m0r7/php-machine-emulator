@@ -72,12 +72,19 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     private KeyboardController $keyboardController;
     private Cmos $cmos;
 
+    // Iteration context (for REP prefix, etc.)
+    private IterationContextInterface $iterationContext;
+
+    // Current instruction pointer (for iteration rewind)
+    private int $currentInstructionPointer = 0;
+
     public function __construct()
     {
         $this->apicState = new ApicState();
         $this->picState = new PicState($this->apicState);
         $this->keyboardController = new KeyboardController($this->picState);
         $this->cmos = new Cmos();
+        $this->iterationContext = new IterationContext();
     }
 
     public function setOperandSizeOverride(bool $flag = true): void
@@ -502,5 +509,20 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function cmos(): Cmos
     {
         return $this->cmos;
+    }
+
+    public function iteration(): IterationContextInterface
+    {
+        return $this->iterationContext;
+    }
+
+    public function currentInstructionPointer(): int
+    {
+        return $this->currentInstructionPointer;
+    }
+
+    public function setCurrentInstructionPointer(int $ip): void
+    {
+        $this->currentInstructionPointer = $ip;
     }
 }

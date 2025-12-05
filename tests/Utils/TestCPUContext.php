@@ -9,6 +9,8 @@ use PHPMachineEmulator\Instruction\Intel\x86\Cmos;
 use PHPMachineEmulator\Instruction\Intel\x86\KeyboardController;
 use PHPMachineEmulator\Instruction\Intel\x86\PicState;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Runtime\IterationContext;
+use PHPMachineEmulator\Runtime\IterationContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeCPUContextInterface;
 
 class TestCPUContext implements RuntimeCPUContextInterface
@@ -38,6 +40,7 @@ class TestCPUContext implements RuntimeCPUContextInterface
     private ApicState $apicState;
     private KeyboardController $keyboardController;
     private Cmos $cmos;
+    private IterationContextInterface $iterationContext;
 
     public function __construct()
     {
@@ -45,6 +48,7 @@ class TestCPUContext implements RuntimeCPUContextInterface
         $this->picState = new PicState($this->apicState);
         $this->keyboardController = new KeyboardController($this->picState);
         $this->cmos = new Cmos();
+        $this->iterationContext = new IterationContext();
     }
 
     public function setOperandSizeOverride(bool $flag = true): void
@@ -386,5 +390,22 @@ class TestCPUContext implements RuntimeCPUContextInterface
     public function clearRex(): void
     {
         $this->rex = 0;
+    }
+
+    public function iteration(): IterationContextInterface
+    {
+        return $this->iterationContext;
+    }
+
+    private int $currentInstructionPointer = 0;
+
+    public function currentInstructionPointer(): int
+    {
+        return $this->currentInstructionPointer;
+    }
+
+    public function setCurrentInstructionPointer(int $ip): void
+    {
+        $this->currentInstructionPointer = $ip;
     }
 }

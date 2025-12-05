@@ -42,7 +42,6 @@ class Runtime implements RuntimeInterface
     protected array $shutdown = [];
     protected int $instructionCount = 0;
     protected MemoryStream $memory;
-    protected int $zeroOpcodeCount = 0;
 
     public function __construct(
         protected MachineInterface $machine,
@@ -152,84 +151,35 @@ class Runtime implements RuntimeInterface
         $this->initialize();
 
         $instructionList = $this->architectureProvider->instructionList();
-        $maxOpcodeLength = $instructionList->getMaxOpcodeLength();
+        $executor = new InstructionExecutor($this, $instructionList, $this->interruptDeliveryHandler);
+
+        $cpu = $this->context->cpu();
+        $iterationContext = $cpu->iteration();
 
         while (!$this->memory->isEOF()) {
             $this->instructionCount++;
             $this->tickTimers();
-            $ipBefore = $this->memory->offset();
-            $this->memoryAccessor->setInstructionFetch(true);
 
-            // Read first byte
-            $firstByte = $this->memory->byte();
-            $opcodes = [$firstByte];
+            // Execute instruction with iteration context
+            // The iterate() method will handle REP loops internally if a handler is set
+            $result = $iterationContext->iterate($executor);
 
-            // Try to match multi-byte opcodes
-            if ($maxOpcodeLength > 1 && !$this->memory->isEOF()) {
-                $startPos = $this->memory->offset();
-                $peekBytes = [$firstByte];
-
-                // Peek ahead for potential multi-byte opcode
-                for ($i = 1; $i < $maxOpcodeLength && !$this->memory->isEOF(); $i++) {
-                    $peekBytes[] = $this->memory->byte();
-                    if ($instructionList->isMultiByteOpcode($peekBytes)) {
-                        $opcodes = $peekBytes;
-                        break;
-                    }
-                }
-
-                // If no multi-byte match found, rewind to after first byte
-                if (count($opcodes) === 1) {
-                    $this->memory->setOffset($startPos);
-                }
+            // Handle prefix chain (CONTINUE means keep fetching)
+            if ($result === ExecutionStatus::CONTINUE) {
+                continue;
             }
 
-            $this->memoryAccessor->setInstructionFetch(false);
+            // Clear iteration context and transient overrides
+            $iterationContext->clear();
+            $cpu->clearTransientOverrides();
 
-            // Detect infinite loop: 3 consecutive 0x00 opcodes
-            if (count($opcodes) === 1 && $opcodes[0] === 0x00) {
-                $this->zeroOpcodeCount++;
-                if ($this->zeroOpcodeCount >= 255) {
-                    throw new ExecutionException(sprintf(
-                        'Infinite loop detected: 255 consecutive 0x00 opcodes at IP=0x%05X',
-                        $ipBefore
-                    ));
-                }
-            } else {
-                $this->zeroOpcodeCount = 0;
-            }
-
-            // Debug: trace ALL opcodes with full register state
-            $cf = $this->memoryAccessor->shouldCarryFlag() ? 1 : 0;
-            $zf = $this->memoryAccessor->shouldZeroFlag() ? 1 : 0;
-            $sf = $this->memoryAccessor->shouldSignFlag() ? 1 : 0;
-            $of = $this->memoryAccessor->shouldOverflowFlag() ? 1 : 0;
-            $eax = $this->memoryAccessor->fetch(RegisterType::EAX)->asBytesBySize(32);
-            $ebx = $this->memoryAccessor->fetch(RegisterType::EBX)->asBytesBySize(32);
-            $ecx = $this->memoryAccessor->fetch(RegisterType::ECX)->asBytesBySize(32);
-            $edx = $this->memoryAccessor->fetch(RegisterType::EDX)->asBytesBySize(32);
-            $esi = $this->memoryAccessor->fetch(RegisterType::ESI)->asBytesBySize(32);
-            $edi = $this->memoryAccessor->fetch(RegisterType::EDI)->asBytesBySize(32);
-            $ebp = $this->memoryAccessor->fetch(RegisterType::EBP)->asBytesBySize(32);
-            $esp = $this->memoryAccessor->fetch(RegisterType::ESP)->asBytesBySize(32);
-            $opcodeStr = implode(' ', array_map(fn($b) => sprintf('0x%02X', $b), $opcodes));
-            $this->machine->option()->logger()->debug(sprintf(
-                'EXEC: IP=0x%05X op=%-12s FL[CF=%d ZF=%d SF=%d OF=%d] EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X',
-                $ipBefore, $opcodeStr, $cf, $zf, $sf, $of, $eax, $ebx, $ecx, $edx, $esi, $edi, $ebp, $esp
-            ));
-
-            $result = $this->execute($opcodes);
+            // Handle exit/halt
             if ($result === ExecutionStatus::EXIT) {
                 $this->machine->option()->logger()->info('Exited program');
                 $this->processShutdownCallbacks();
-
                 $frameSet = $this->frame->pop();
-
                 throw new ExitException(
                     'The executor received exit code',
-
-                    // NOTE: Use value as a status code if appended frame is available.
-                    //       If but not returned, use zero (successfully number) always.
                     (int) $frameSet?->value() ?? 0,
                 );
             }
@@ -332,23 +282,14 @@ class Runtime implements RuntimeInterface
             [$instruction, $opcodeKey] = $instructionList->findInstruction($opcodes);
 
             try {
-                $result = $instruction->process($this, $opcodeKey);
-
-                // Don't clear transient overrides for prefix instructions
-                if ($result !== ExecutionStatus::CONTINUE) {
-                    $this->context->cpu()->clearTransientOverrides();
-                }
-
-                return $result;
+                return $instruction->process($this, $opcodeKey);
             } catch (FaultException $e) {
-                $this->context->cpu()->clearTransientOverrides();
                 $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
                 if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {
                     return ExecutionStatus::SUCCESS;
                 }
                 throw $e;
             } catch (ExecutionException $e) {
-                $this->context->cpu()->clearTransientOverrides();
                 $this->machine->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
                 throw $e;
             }
