@@ -15,4 +15,6 @@ interface RuntimeScreenContextInterface
     public function start(): void;
 
     public function stop(): void;
+
+    public function flushIfNeeded(): void;
 }

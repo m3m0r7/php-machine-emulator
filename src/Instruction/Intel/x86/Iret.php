@@ -58,11 +58,8 @@ class Iret implements InstructionInterface
 
         $this->writeCodeSegment($runtime, $cs, $nextCpl, $descriptor);
         if ($runtime->option()->shouldChangeOffset()) {
-            if (!$runtime->context()->cpu()->isProtectedMode()) {
-                $linear = $ip & $mask;
-            } else {
-                $linear = $this->linearCodeAddress($runtime, $cs & 0xFFFF, $ip, $opSize);
-            }
+            // Calculate linear address considering CS segment
+            $linear = $this->linearCodeAddress($runtime, $cs & 0xFFFF, $ip, $opSize);
             $runtime->option()->logger()->debug(sprintf('IRET: CS=0x%04X IP=0x%04X linear=0x%05X flags=0x%04X', $cs, $ip, $linear, $flags));
             $runtime->memory()->setOffset($linear);
         }

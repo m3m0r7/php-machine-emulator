@@ -19,6 +19,6 @@ class ApicTicker implements TickerInterface
 
     public function interval(): int
     {
-        return 10;
+        return 0;
     }
 }

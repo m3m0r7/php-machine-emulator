@@ -52,10 +52,13 @@ class Keyboard implements InterruptInterface
         $screenWriter = $runtime->context()->screen()->screenWriter();
         assert($screenWriter instanceof WindowScreenWriter);
 
-        // $runtime->option()->logger()->debug(sprintf('INT 16h: SDL mode, AH=0x%02X', $function));
+        $runtime->option()->logger()->debug(sprintf('INT 16h: SDL mode, AH=0x%02X', $function));
 
         // Process SDL events to update keyboard state
         $screenWriter->window()->processEvents();
+
+        // Flush screen if needed (batched rendering)
+        $screenWriter->flushIfNeeded();
 
         switch ($function) {
             case 0x00: // Wait for keypress and return it

@@ -128,4 +128,9 @@ class TerminalScreenWriter implements ScreenWriterInterface
 
         return sprintf("\033[38;5;%d;48;5;%dm", $ansiFg, $ansiBg);
     }
+
+    public function flushIfNeeded(): void
+    {
+        // Terminal output is immediate, no batching needed
+    }
 }

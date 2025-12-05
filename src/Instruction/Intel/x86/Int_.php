@@ -14,6 +14,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Keyboard;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\MemorySize;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\System;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Timer;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\TimeOfDay;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Video;
 use PHPMachineEmulator\Instruction\Intel\x86\DOSInterrupt\Dos;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -71,6 +72,8 @@ class Int_ implements InstructionInterface
                 ->process($runtime),
             BIOSInterrupt::KEYBOARD_INTERRUPT => ($this->interruptInstances[Keyboard::class] ??= new Keyboard($runtime))
                 ->process($runtime),
+            BIOSInterrupt::TIME_OF_DAY_INTERRUPT => ($this->interruptInstances[TimeOfDay::class] ??= new TimeOfDay())
+                ->process($runtime),
             BIOSInterrupt::SYSTEM_INTERRUPT => ($this->interruptInstances[System::class] ??= new System())->process($runtime),
             BIOSInterrupt::DOS_TERMINATE_INTERRUPT => null,
             BIOSInterrupt::DOS_INTERRUPT => null,
@@ -94,6 +97,11 @@ class Int_ implements InstructionInterface
     private function handleUnknownInterrupt(RuntimeInterface $runtime, int $vector): ExecutionStatus
     {
         $returnOffset = $runtime->memory()->offset();
+        $runtime->option()->logger()->debug(sprintf(
+            'INT 0x%02X: Not implemented as BIOS service, delegating to IVT-based interrupt handling (return=0x%05X)',
+            $vector,
+            $returnOffset
+        ));
         $this->vectorInterrupt($runtime, $vector, $returnOffset);
         return ExecutionStatus::SUCCESS;
     }

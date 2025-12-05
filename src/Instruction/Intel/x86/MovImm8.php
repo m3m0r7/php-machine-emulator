@@ -48,13 +48,18 @@ class MovImm8 implements InstructionInterface
 
         if ($opcode >= 0xB4) {
             // NOTE: move instruction for high-bit registers (AH/CH/DH/BH)
+            $value = $enhancedStreamReader->streamReader()->byte();
+            $runtime->option()->logger()->debug(sprintf(
+                'MOV xH, 0x%02X: opcode=0x%02X register=%s',
+                $value,
+                $opcode,
+                $register->name
+            ));
             $runtime
                 ->memoryAccessor()
                 ->writeToHighBit(
                     $register,
-                    $enhancedStreamReader
-                        ->streamReader()
-                        ->byte(),
+                    $value,
                 );
 
             return ExecutionStatus::SUCCESS;

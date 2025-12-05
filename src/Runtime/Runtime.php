@@ -81,8 +81,10 @@ class Runtime implements RuntimeInterface
         $this->tickerRegistry->register(new PitTicker(Pit::shared()));
         $this->tickerRegistry->register(new ApicTicker());
 
-        // Initialize interrupt delivery handler
+        // Initialize interrupt delivery handler with interrupt sources
         $this->interruptDeliveryHandler = new InterruptDeliveryHandler($this->architectureProvider);
+        $this->interruptDeliveryHandler->register(new Interrupt\ApicInterruptSource());
+        $this->interruptDeliveryHandler->register(new Interrupt\PicInterruptSource());
 
         if ($this->option()->shouldShowHeader()) {
             $this->showHeader();
@@ -217,10 +219,11 @@ class Runtime implements RuntimeInterface
         // Execute registered tickers
         $this->tickerRegistry->tick($this, $this->instructionCount);
 
-        // Deliver pending interrupts (only on tick intervals)
-        if ($this->instructionCount % 10 === 0) {
-            $this->interruptDeliveryHandler->deliverPendingInterrupts($this);
-        }
+        // Deliver pending interrupts
+        $this->interruptDeliveryHandler->deliverPendingInterrupts($this);
+
+        // Flush screen if needed (batched rendering)
+        $this->context->screen()->flushIfNeeded();
     }
 
     public function addressMap(): AddressMapInterface

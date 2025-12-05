@@ -70,6 +70,7 @@ class Pit
         if ($this->counter0 > 0) {
             $this->counter0--;
             if ($this->counter0 === 0) {
+                error_log(sprintf('PIT: counter0 reached 0, reload0=0x%04X, calling irq0=%s', $this->reload0, $irq0 ? 'yes' : 'no'));
                 if ($irq0) {
                     $irq0();
                 }

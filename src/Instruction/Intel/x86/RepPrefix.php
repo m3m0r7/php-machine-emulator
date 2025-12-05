@@ -24,7 +24,19 @@ class RepPrefix implements InstructionInterface
         Stosw::class,
         Lodsb::class,
         Lodsw::class,
-        // INS/OUTS would go here if implemented
+        Ins::class,
+        Outs::class,
+    ];
+
+    /**
+     * Instructions that should NOT be repeated even with REP prefix.
+     * REP acts as a hint/padding for these instructions.
+     * - REP RET (0xF3 0xC3): AMD branch prediction bug workaround
+     * - REP NOP (0xF3 0x90): PAUSE instruction for spin-wait loops
+     */
+    private const NON_REPEATING_INSTRUCTIONS = [
+        Ret::class,
+        Nop::class,
     ];
 
     public function opcodes(): array
@@ -68,6 +80,21 @@ class RepPrefix implements InstructionInterface
                     return ExecutionStatus::CONTINUE;
                 }
 
+                $lastInstruction = $executor->lastInstruction();
+
+                // Check if this is a non-repeating instruction (REP RET, REP NOP/PAUSE)
+                // For these, REP acts as a hint/padding, not a repeat prefix
+                // Restore ECX and return immediately after single execution
+                if ($lastInstruction !== null) {
+                    foreach (self::NON_REPEATING_INSTRUCTIONS as $nonRepClass) {
+                        if ($lastInstruction instanceof $nonRepClass) {
+                            // Restore ECX (REP doesn't decrement for these)
+                            $this->writeIndex($runtime, RegisterType::ECX, $counter + 1);
+                            return $result;
+                        }
+                    }
+                }
+
                 // After first successful string instruction, save its start position
                 if ($firstIteration) {
                     $stringInstructionIp = $ipBeforeExecute;
@@ -85,7 +112,6 @@ class RepPrefix implements InstructionInterface
                 }
 
                 // For string instructions that don't check ZF, continue as long as ECX > 0
-                $lastInstruction = $executor->lastInstruction();
                 $checksZF = true;
                 if ($lastInstruction !== null) {
                     foreach (self::NO_ZF_CHECK_INSTRUCTIONS as $noZfClass) {

@@ -62,4 +62,9 @@ class BufferScreenWriter implements ScreenWriterInterface
     {
         // Buffer mode: no visual output for fill
     }
+
+    public function flushIfNeeded(): void
+    {
+        // Buffer mode: no batching needed
+    }
 }

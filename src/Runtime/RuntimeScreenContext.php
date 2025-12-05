@@ -82,4 +82,9 @@ class RuntimeScreenContext implements RuntimeScreenContextInterface
     {
         $this->screenWriter->fillArea($row, $col, $width, $height, $attribute);
     }
+
+    public function flushIfNeeded(): void
+    {
+        $this->screenWriter->flushIfNeeded();
+    }
 }

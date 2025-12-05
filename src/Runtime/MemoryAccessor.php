@@ -211,6 +211,14 @@ class MemoryAccessor implements MemoryAccessorInterface
         $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
         $newValue = ($current & ~0xFF00) | (($value & 0xFF) << 8);
 
+        $this->runtime->option()->logger()->debug(sprintf(
+            'writeToHighBit: register=%s current=0x%08X value=0x%02X newValue=0x%08X',
+            $registerType instanceof RegisterType ? $registerType->name : $registerType,
+            $current,
+            $value,
+            $newValue
+        ));
+
         // Store directly without byte swapping
         [$address, $previousValue] = $this->processRegisterWrite(
             $registerType,

@@ -9,15 +9,28 @@ use PHPMachineEmulator\Instruction\Intel\x86\Int_;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
- * Handles delivery of pending interrupts from APIC and PIC.
+ * Handles delivery of pending interrupts from registered interrupt sources.
  */
 class InterruptDeliveryHandler implements InterruptDeliveryHandlerInterface
 {
     private const INT_OPCODE = 0xCD;
 
+    /** @var InterruptSourceInterface[] */
+    private array $sources = [];
+
     public function __construct(
         private readonly ArchitectureProviderInterface $architectureProvider,
     ) {}
+
+    /**
+     * Register an interrupt source.
+     * Sources are checked in registration order (first registered = highest priority).
+     */
+    public function register(InterruptSourceInterface $source): self
+    {
+        $this->sources[] = $source;
+        return $this;
+    }
 
     public function deliverPendingInterrupts(RuntimeInterface $runtime): bool
     {
@@ -29,40 +42,19 @@ class InterruptDeliveryHandler implements InterruptDeliveryHandlerInterface
             return false;
         }
 
-        // Try APIC first
-        if ($this->deliverApicInterrupt($runtime)) {
-            return true;
+        // Try each interrupt source in priority order
+        foreach ($this->sources as $source) {
+            if (!$source->isEnabled($runtime)) {
+                continue;
+            }
+
+            $vector = $source->pendingVector($runtime);
+            if ($vector !== null) {
+                return $this->raiseInterrupt($runtime, $vector);
+            }
         }
 
-        // Then try PIC
-        return $this->deliverPicInterrupt($runtime);
-    }
-
-    private function deliverApicInterrupt(RuntimeInterface $runtime): bool
-    {
-        $apic = $runtime->context()->cpu()->apicState();
-        if (!$apic->apicEnabled()) {
-            return false;
-        }
-
-        $vector = $apic->pendingVector();
-        if ($vector === null) {
-            return false;
-        }
-
-        return $this->raiseInterrupt($runtime, $vector);
-    }
-
-    private function deliverPicInterrupt(RuntimeInterface $runtime): bool
-    {
-        $picState = $runtime->context()->cpu()->picState();
-        $vector = $picState->pendingVector();
-
-        if ($vector === null) {
-            return false;
-        }
-
-        return $this->raiseInterrupt($runtime, $vector);
+        return false;
     }
 
     public function raiseFault(RuntimeInterface $runtime, int $vector, int $ip, ?int $errorCode): bool

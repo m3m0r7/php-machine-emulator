@@ -26,6 +26,15 @@ class WindowScreenWriter implements ScreenWriterInterface
     /** @var int Current text attribute (default: white on black = 0x07) */
     protected int $currentAttribute = 0x07;
 
+    /** @var bool Screen needs redraw */
+    protected bool $dirty = false;
+
+    /** @var float Last redraw time */
+    protected float $lastRedrawTime = 0;
+
+    /** @var float Minimum interval between redraws (seconds) */
+    protected const REDRAW_INTERVAL = 0.008; // ~120 FPS for smoother updates
+
     public function __construct(
         protected VideoTypeInfo $videoTypeInfo,
         ?WindowOption $windowOption = null,
@@ -79,8 +88,8 @@ class WindowScreenWriter implements ScreenWriterInterface
 
         $this->cursorX++;
 
-        // Redraw entire screen
-        $this->redrawScreen();
+        // Mark for redraw (batched)
+        $this->markDirty();
     }
 
     protected function getColorFromAttribute(int $colorIndex): Color
@@ -126,6 +135,32 @@ class WindowScreenWriter implements ScreenWriterInterface
 
         // Present to screen
         $this->canvas->present();
+        $this->dirty = false;
+        $this->lastRedrawTime = microtime(true);
+    }
+
+    /**
+     * Mark screen as needing redraw.
+     */
+    protected function markDirty(): void
+    {
+        $this->dirty = true;
+    }
+
+    /**
+     * Flush screen if dirty.
+     * Rate limiting is applied to avoid excessive redraws, but dirty screens
+     * are always flushed to ensure text visibility.
+     */
+    public function flushIfNeeded(): void
+    {
+        if (!$this->dirty) {
+            return;
+        }
+
+        // Always redraw if dirty - rate limiting happens naturally
+        // through the game loop's timing
+        $this->redrawScreen();
     }
 
     public function dot(int $x, int $y, ColorInterface $color): void
@@ -191,7 +226,7 @@ class WindowScreenWriter implements ScreenWriterInterface
             $this->textBuffer[$currentRow][$currentCol] = ['char' => $char, 'attr' => $attr];
         }
 
-        $this->redrawScreen();
+        $this->markDirty();
     }
 
     public function clear(): void
@@ -213,7 +248,7 @@ class WindowScreenWriter implements ScreenWriterInterface
                 $this->textBuffer[$r][$c] = ['char' => ' ', 'attr' => $attribute];
             }
         }
-        $this->redrawScreen();
+        $this->markDirty();
     }
 
     public function setCurrentAttribute(int $attribute): void
