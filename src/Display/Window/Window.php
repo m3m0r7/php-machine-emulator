@@ -12,6 +12,12 @@ use PHPMachineEmulator\Exception\WindowException;
 class Window
 {
     public const SDL_QUIT_EVENT = 0x100;
+    public const SDL_KEYDOWN_EVENT = 0x300;
+
+    // SDL key modifiers
+    public const KMOD_LGUI = 0x0400;  // Left Cmd key (macOS)
+    public const KMOD_RGUI = 0x0800;  // Right Cmd key (macOS)
+    public const KMOD_GUI = 0x0C00;   // Either Cmd key
 
     // SDL Mouse button masks (from SDL_GetMouseState)
     public const SDL_BUTTON_LEFT = 1;
@@ -59,6 +65,7 @@ class Window
     protected function getSDLDefinitions(): string
     {
         return <<<CDEF
+            typedef uint16_t Uint16;
             typedef uint32_t Uint32;
             typedef uint8_t Uint8;
             typedef int32_t Sint32;
@@ -67,6 +74,24 @@ class Window
             typedef struct SDL_Window SDL_Window;
             typedef struct SDL_Renderer SDL_Renderer;
             typedef struct SDL_Texture SDL_Texture;
+
+            typedef struct SDL_Keysym {
+                Uint32 scancode;
+                Sint32 sym;
+                Uint16 mod;
+                Uint32 unused;
+            } SDL_Keysym;
+
+            typedef struct SDL_KeyboardEvent {
+                Uint32 type;
+                Uint32 timestamp;
+                Uint32 windowID;
+                Uint8 state;
+                Uint8 repeat;
+                Uint8 padding2;
+                Uint8 padding3;
+                SDL_Keysym keysym;
+            } SDL_KeyboardEvent;
 
             typedef struct SDL_Event {
                 Uint32 type;
@@ -161,6 +186,18 @@ class Window
         while ($this->ffi->SDL_PollEvent(FFI::addr($this->event))) {
             if ($this->event->type === self::SDL_QUIT_EVENT) {
                 return false;
+            }
+
+            // Check for Cmd+Q (macOS) to quit
+            if ($this->event->type === self::SDL_KEYDOWN_EVENT) {
+                $keyEvent = $this->ffi->cast('SDL_KeyboardEvent*', FFI::addr($this->event));
+                $scancode = $keyEvent->keysym->scancode;
+                $mod = $keyEvent->keysym->mod;
+
+                // Q key scancode is 20, check if GUI (Cmd) modifier is pressed
+                if ($scancode === SDLScancode::Q->value && ($mod & self::KMOD_GUI) !== 0) {
+                    return false;
+                }
             }
         }
         return true;

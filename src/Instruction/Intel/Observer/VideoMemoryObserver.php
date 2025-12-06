@@ -25,7 +25,7 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
     protected float $lastFlushTime = 0.0;
 
     /** @var float Minimum interval between flushes (seconds) */
-    protected const FLUSH_INTERVAL = 0.016; // ~60 FPS
+    protected const FLUSH_INTERVAL = 5000;
 
     public function addressRange(): ?array
     {

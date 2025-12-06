@@ -10,6 +10,7 @@ use PHPMachineEmulator\Display\Pixel\VgaPaletteColor;
 use PHPMachineEmulator\Display\Window\Window;
 use PHPMachineEmulator\Display\Window\WindowCanvas;
 use PHPMachineEmulator\Display\Window\WindowOption;
+use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class WindowScreenWriter implements ScreenWriterInterface
@@ -154,6 +155,11 @@ class WindowScreenWriter implements ScreenWriterInterface
      */
     public function flushIfNeeded(): void
     {
+        // Process SDL events (window close, Cmd+Q, etc.)
+        if (!$this->window->processEvents()) {
+            throw new HaltException('Window closed by user');
+        }
+
         // Flush buffered dots (graphics mode)
         if (!empty($this->dotBuffer)) {
             $this->flushDotBuffer();
