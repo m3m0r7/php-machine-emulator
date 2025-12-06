@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Traits;
 
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Trait for CPU flags operations.
@@ -84,35 +85,38 @@ trait FlagsTrait
     /**
      * Update flags after arithmetic operation.
      *
-     * @param int $result The result of the operation
+     * @param int|UInt64 $result The result of the operation
      * @param int $size Operand size in bits (8, 16, 32, or 64)
      * @param bool $updateCf Whether to update carry flag
      * @param bool $updateOf Whether to update overflow flag
      */
     protected function updateArithmeticFlags(
         RuntimeInterface $runtime,
-        int $result,
+        int|UInt64 $result,
         int $size,
         bool $updateCf = true,
         bool $updateOf = true
     ): void {
         $ma = $runtime->memoryAccessor();
+
+        if ($size === 64) {
+            $this->updateArithmeticFlags64($runtime, $result, $updateCf, $updateOf);
+            return;
+        }
+
         $mask = match ($size) {
             8 => 0xFF,
             16 => 0xFFFF,
-            32 => 0xFFFFFFFF,
-            64 => 0xFFFFFFFFFFFFFFFF,
             default => 0xFFFFFFFF,
         };
         $signBit = match ($size) {
             8 => 0x80,
             16 => 0x8000,
-            32 => 0x80000000,
-            64 => 0x8000000000000000,
             default => 0x80000000,
         };
 
-        $maskedResult = $result & $mask;
+        $resultInt = $result instanceof UInt64 ? $result->low32() : $result;
+        $maskedResult = $resultInt & $mask;
 
         // Zero flag
         $ma->setZeroFlag($maskedResult === 0);
@@ -132,10 +136,40 @@ trait FlagsTrait
     }
 
     /**
+     * Update flags after 64-bit arithmetic operation.
+     */
+    protected function updateArithmeticFlags64(
+        RuntimeInterface $runtime,
+        int|UInt64 $result,
+        bool $updateCf = true,
+        bool $updateOf = true
+    ): void {
+        $ma = $runtime->memoryAccessor();
+
+        $uint64 = $result instanceof UInt64 ? $result : UInt64::of($result);
+
+        // Zero flag
+        $ma->setZeroFlag($uint64->isZero());
+
+        // Sign flag (bit 63)
+        $ma->setSignFlag($uint64->isNegativeSigned());
+
+        // Parity flag (count of set bits in low byte)
+        $lowByte = $uint64->low32() & 0xFF;
+        $bitCount = 0;
+        for ($i = 0; $i < 8; $i++) {
+            if (($lowByte & (1 << $i)) !== 0) {
+                $bitCount++;
+            }
+        }
+        $ma->setParityFlag(($bitCount % 2) === 0);
+    }
+
+    /**
      * Update flags after logical operation.
      * Logical operations clear CF and OF.
      */
-    protected function updateLogicalFlags(RuntimeInterface $runtime, int $result, int $size): void
+    protected function updateLogicalFlags(RuntimeInterface $runtime, int|UInt64 $result, int $size): void
     {
         $ma = $runtime->memoryAccessor();
 

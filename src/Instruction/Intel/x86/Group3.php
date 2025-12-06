@@ -12,6 +12,7 @@ use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class Group3 implements InstructionInterface
 {
@@ -198,13 +199,14 @@ class Group3 implements InstructionInterface
 
             $flag = ($product >> 16) !== 0;
         } else {
-            $product = ($acc & 0xFFFFFFFF) * ($operand & 0xFFFFFFFF);
-            $low = $product & 0xFFFFFFFF;
-            $high = ($product >> 32) & 0xFFFFFFFF;
+            // Use UInt64 for 32-bit × 32-bit = 64-bit result
+            $product = UInt64::of($acc & 0xFFFFFFFF)->mul($operand & 0xFFFFFFFF);
+            $low = $product->low32();
+            $high = $product->high32();
 
             $runtime->option()->logger()->debug(sprintf(
-                'MUL32: EAX=0x%08X × operand=0x%08X = 0x%016X (EAX=0x%08X, EDX=0x%08X)',
-                $acc, $operand, $product, $low, $high
+                'MUL32: EAX=0x%08X × operand=0x%08X = %s (EAX=0x%08X, EDX=0x%08X)',
+                $acc, $operand, $product->toHex(), $low, $high
             ));
 
             $ma
@@ -313,17 +315,18 @@ class Group3 implements InstructionInterface
         } else {
             $ax = $ma->fetch(RegisterType::EAX)->asBytesBySize(32);
             $dx = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
-            $dividee = (($dx & 0xFFFFFFFF) << 32) | ($ax & 0xFFFFFFFF);
+            // Use UInt64 for EDX:EAX (64-bit dividend)
+            $dividend = UInt64::fromParts($ax, $dx);
 
-            $quotient = intdiv($dividee, $divider);
-            $remainder = $dividee % $divider;
-            if ($quotient > 0xFFFFFFFF) {
+            $quotient = $dividend->div($divider);
+            $remainder = $dividend->mod($divider);
+            if ($quotient->gt(0xFFFFFFFF)) {
                 throw new FaultException(0x00, 0, 'Divide overflow');
             }
 
             $ma
-                ->writeBySize(RegisterType::EAX, $quotient & 0xFFFFFFFF, 32)
-                ->writeBySize(RegisterType::EDX, $remainder & 0xFFFFFFFF, 32);
+                ->writeBySize(RegisterType::EAX, $quotient->low32(), 32)
+                ->writeBySize(RegisterType::EDX, $remainder->low32(), 32);
         }
 
 

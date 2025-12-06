@@ -10,6 +10,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * WRMSR (0x0F 0x30)
@@ -34,15 +35,15 @@ class Wrmsr implements InstructionInterface
         $ecx = $ma->fetch(RegisterType::ECX)->asBytesBySize(32);
         $eax = $ma->fetch(RegisterType::EAX)->asBytesBySize(32);
         $edx = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
-        $value = ($edx << 32) | ($eax & 0xFFFFFFFF);
+        $value = UInt64::fromParts($eax, $edx);
 
-        Rdmsr::writeMsr($ecx, $value & 0xFFFFFFFFFFFFFFFF);
+        Rdmsr::writeMsr($ecx, $value);
 
         if ($ecx === 0x1B) { // APIC_BASE
-            $enable = ($value & (1 << 11)) !== 0;
-            $runtime->context()->cpu()->apicState()->setApicBase($value & 0xFFFFF000, $enable);
+            $enable = !$value->and(1 << 11)->isZero();
+            $runtime->context()->cpu()->apicState()->setApicBase($value->and(0xFFFFF000)->low32(), $enable);
         } elseif ($ecx === 0xC0000080) { // EFER
-            $ma->writeEfer($value);
+            $ma->writeEfer($value->toInt());
         }
 
         return ExecutionStatus::SUCCESS;

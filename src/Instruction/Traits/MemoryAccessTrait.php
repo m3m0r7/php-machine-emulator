@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Instruction\Traits;
 
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Trait for memory access operations.
@@ -45,7 +46,7 @@ trait MemoryAccessTrait
     /**
      * Read 64-bit value from linear address.
      */
-    protected function readMemory64(RuntimeInterface $runtime, int $address): int
+    protected function readMemory64(RuntimeInterface $runtime, int $address): UInt64
     {
         $physical = $this->translateLinear($runtime, $address);
         return $this->readPhysical64($runtime, $physical);
@@ -109,14 +110,22 @@ trait MemoryAccessTrait
     /**
      * Write 64-bit value to linear address.
      */
-    protected function writeMemory64(RuntimeInterface $runtime, int $address, int $value): void
+    protected function writeMemory64(RuntimeInterface $runtime, int $address, UInt64|int $value): void
     {
         $physical = $this->translateLinear($runtime, $address, true);
-        if ($this->writeMmio($runtime, $physical, $value, 64)) {
-            return;
+        if ($value instanceof UInt64) {
+            if ($this->writeMmio($runtime, $physical, $value->low32(), 64)) {
+                return;
+            }
+            $this->writeMemory32($runtime, $address, $value->low32());
+            $this->writeMemory32($runtime, $address + 4, $value->high32());
+        } else {
+            if ($this->writeMmio($runtime, $physical, $value, 64)) {
+                return;
+            }
+            $this->writeMemory32($runtime, $address, $value & 0xFFFFFFFF);
+            $this->writeMemory32($runtime, $address + 4, ($value >> 32) & 0xFFFFFFFF);
         }
-        $this->writeMemory32($runtime, $address, $value & 0xFFFFFFFF);
-        $this->writeMemory32($runtime, $address + 4, ($value >> 32) & 0xFFFFFFFF);
     }
 
     /**
@@ -243,85 +252,73 @@ trait MemoryAccessTrait
 
         $pdpteAddr = ($cr3 + ($pdpIndex * 8)) & 0xFFFFFFFF;
         $pdpte = $this->readPhysical64($runtime, $pdpteAddr);
-        if (($pdpte & 0x1) === 0) {
+        if ($pdpte->and(0x1)->isZero()) {
             $err = ($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0);
             throw new FaultException(0x0E, $err, 'PDPT entry not present');
         }
-        if (($pdpte & (~0x7FF)) !== 0) {
-            $err = 0x08 | ($runtime->memoryAccessor()->shouldInstructionFetch() ? 0x10 : 0);
-            throw new FaultException(0x0E, $err, 'Reserved bit set in PDPT');
-        }
-        if ($user && (($pdpte & 0x4) === 0)) {
+        if ($user && $pdpte->and(0x4)->isZero()) {
             $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
             throw new FaultException(0x0E, $err, 'PDPT entry not user accessible');
         }
-        if ($isWrite && (($pdpte & 0x2) === 0)) {
+        if ($isWrite && $pdpte->and(0x2)->isZero()) {
             $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
             throw new FaultException(0x0E, $err, 'PDPT entry not writable');
         }
 
         // Mark PDPT accessed
-        $this->writePhysical64($runtime, $pdpteAddr, $pdpte | (1 << 5));
+        $this->writePhysical64($runtime, $pdpteAddr, $pdpte->or(1 << 5));
 
-        $pdeAddr = (($pdpte & 0xFFFFFF000) + ($dirIndex * 8)) & 0xFFFFFFFF;
+        $pdeAddr = ($pdpte->and(0xFFFFFF000)->low32() + ($dirIndex * 8)) & 0xFFFFFFFF;
         $pde = $this->readPhysical64($runtime, $pdeAddr);
-        if (($pde & 0x1) === 0) {
+        if ($pde->and(0x1)->isZero()) {
             $err = ($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0);
             throw new FaultException(0x0E, $err, 'Page directory entry not present');
         }
-        $isLarge = ($pde & (1 << 7)) !== 0;
-        if (($pde & (~0x7FF)) !== 0) {
-            $err = 0x08 | ($runtime->memoryAccessor()->shouldInstructionFetch() ? 0x10 : 0);
-            throw new FaultException(0x0E, $err, 'Reserved bit set in PDE');
-        }
-        if ($user && (($pde & 0x4) === 0)) {
+        $isLarge = !$pde->and(1 << 7)->isZero();
+        if ($user && $pde->and(0x4)->isZero()) {
             $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
             throw new FaultException(0x0E, $err, 'Page directory entry not user accessible');
         }
-        if ($isWrite && (($pde & 0x2) === 0)) {
+        if ($isWrite && $pde->and(0x2)->isZero()) {
             $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
             throw new FaultException(0x0E, $err, 'Page directory entry not writable');
         }
 
         if ($isLarge) {
-            $pde |= 0x20;
+            $pde = $pde->or(0x20);
             if ($isWrite) {
-                $pde |= 0x40;
+                $pde = $pde->or(0x40);
             }
             $this->writePhysical64($runtime, $pdeAddr, $pde);
-            $base = $pde & 0xFFE00000;
+            $base = $pde->and(0xFFE00000)->low32();
             $phys = ($base + ($linear & 0x1FFFFF)) & 0xFFFFFFFF;
             return $phys;
         }
 
-        $pteAddr = (($pde & 0xFFFFFF000) + ($tableIndex * 8)) & 0xFFFFFFFF;
+        $pteAddr = ($pde->and(0xFFFFFF000)->low32() + ($tableIndex * 8)) & 0xFFFFFFFF;
         $pte = $this->readPhysical64($runtime, $pteAddr);
-        if (($pte & 0x1) === 0) {
+        if ($pte->and(0x1)->isZero()) {
             $err = ($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0);
             throw new FaultException(0x0E, $err, 'Page table entry not present');
         }
-        if (($pte & (~0x7FF)) !== 0) {
-            $err = 0x08 | ($runtime->memoryAccessor()->shouldInstructionFetch() ? 0x10 : 0);
-            throw new FaultException(0x0E, $err, 'Reserved bit set in PTE');
-        }
-        if ($user && (($pte & 0x4) === 0)) {
+        if ($user && $pte->and(0x4)->isZero()) {
             $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
             throw new FaultException(0x0E, $err, 'Page table entry not user accessible');
         }
-        if ($isWrite && (($pte & 0x2) === 0)) {
+        if ($isWrite && $pte->and(0x2)->isZero()) {
             $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
             throw new FaultException(0x0E, $err, 'Page table entry not writable');
         }
 
-        $pde |= 0x20;
+        $pde = $pde->or(0x20);
         $this->writePhysical64($runtime, $pdeAddr, $pde);
-        $pte |= 0x20;
+        $pte = $pte->or(0x20);
         if ($isWrite) {
-            $pte |= 0x40;
+            $pte = $pte->or(0x40);
         }
         $this->writePhysical64($runtime, $pteAddr, $pte);
 
-        $phys = ($pte & 0xFFFFFF000) + $offset;
+        $phys = $pte->and(0xFFFFFF000)->low32() + $offset;
         return $phys & 0xFFFFFFFF;
     }
 
@@ -396,11 +393,11 @@ trait MemoryAccessTrait
     /**
      * Read 64-bit value from physical address.
      */
-    protected function readPhysical64(RuntimeInterface $runtime, int $address): int
+    protected function readPhysical64(RuntimeInterface $runtime, int $address): UInt64
     {
         $lo = $this->readPhysical32($runtime, $address);
         $hi = $this->readPhysical32($runtime, $address + 4);
-        return ($hi << 32) | $lo;
+        return UInt64::fromParts($lo, $hi);
     }
 
     /**
@@ -415,12 +412,15 @@ trait MemoryAccessTrait
     /**
      * Write 64-bit value to physical address.
      */
-    protected function writePhysical64(RuntimeInterface $runtime, int $address, int $value): void
+    protected function writePhysical64(RuntimeInterface $runtime, int $address, UInt64|int $value): void
     {
-        $lo = $value & 0xFFFFFFFF;
-        $hi = ($value >> 32) & 0xFFFFFFFF;
-        $this->writePhysical32($runtime, $address, $lo);
-        $this->writePhysical32($runtime, $address + 4, $hi);
+        if ($value instanceof UInt64) {
+            $this->writePhysical32($runtime, $address, $value->low32());
+            $this->writePhysical32($runtime, $address + 4, $value->high32());
+        } else {
+            $this->writePhysical32($runtime, $address, $value & 0xFFFFFFFF);
+            $this->writePhysical32($runtime, $address + 4, ($value >> 32) & 0xFFFFFFFF);
+        }
     }
 
     /**

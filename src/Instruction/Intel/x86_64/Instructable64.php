@@ -10,6 +10,7 @@ use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Instructable64 trait for x86_64 instructions.
@@ -317,25 +318,25 @@ trait Instructable64
         if ($mod === 0b00 && ($rm & 0b111) === 0b101) {
             // RIP-relative addressing in 64-bit mode
             $disp32 = $reader->int32();
-            $rip = $runtime->memory()->offset();
-            $address = ($rip + $disp32) & 0xFFFFFFFFFFFFFFFF;
-            return [$address, $segment];
+            $rip = UInt64::of($runtime->memory()->offset());
+            $address = $rip->add($this->signExtend32to64($disp32));
+            return [$address->toInt(), $segment];
         }
 
         // Get base register value
         $baseRegType = $this->getRegisterType64($rm);
-        $base = $runtime->memoryAccessor()->fetch($baseRegType)->asBytesBySize(64);
+        $base = UInt64::of($runtime->memoryAccessor()->fetch($baseRegType)->asBytesBySize(64));
 
         // Add displacement based on mod
         $displacement = match ($mod) {
-            0b00 => 0,
+            0b00 => UInt64::zero(),
             0b01 => $this->signExtend8to64($reader->byte()),
             0b10 => $this->signExtend32to64($reader->int32()),
-            default => 0,
+            default => UInt64::zero(),
         };
 
-        $address = ($base + $displacement) & 0xFFFFFFFFFFFFFFFF;
-        return [$address, $segment];
+        $address = $base->add($displacement);
+        return [$address->toInt(), $segment];
     }
 
     /**
@@ -361,76 +362,80 @@ trait Instructable64
         $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         // Calculate base
-        $baseValue = 0;
+        $baseValue = UInt64::zero();
         if ($mod === 0b00 && ($base & 0b111) === 0b101) {
             // No base register, disp32 follows
             $baseValue = $this->signExtend32to64($reader->int32());
         } else {
             $baseRegType = $this->getRegisterType64($base);
-            $baseValue = $runtime->memoryAccessor()->fetch($baseRegType)->asBytesBySize(64);
+            $baseValue = UInt64::of($runtime->memoryAccessor()->fetch($baseRegType)->asBytesBySize(64));
 
             // Add displacement
-            $baseValue += match ($mod) {
+            $displacement = match ($mod) {
                 0b01 => $this->signExtend8to64($reader->byte()),
                 0b10 => $this->signExtend32to64($reader->int32()),
-                default => 0,
+                default => UInt64::zero(),
             };
+            $baseValue = $baseValue->add($displacement);
         }
 
         // Calculate index (index == 4 without REX.X means no index)
-        $indexValue = 0;
+        $indexValue = UInt64::zero();
         if ($index !== 0b0100) {
             $indexRegType = $this->getRegisterType64($index);
-            $indexValue = $runtime->memoryAccessor()->fetch($indexRegType)->asBytesBySize(64);
-            $indexValue <<= $scale;
+            $indexValue = UInt64::of($runtime->memoryAccessor()->fetch($indexRegType)->asBytesBySize(64));
+            $indexValue = $indexValue->shl($scale);
         }
 
-        $address = ($baseValue + $indexValue) & 0xFFFFFFFFFFFFFFFF;
-        return [$address, $segment];
+        $address = $baseValue->add($indexValue);
+        return [$address->toInt(), $segment];
     }
 
     /**
      * Sign-extend 8-bit value to 64-bit.
      */
-    private function signExtend8to64(int $value): int
+    private function signExtend8to64(int $value): UInt64
     {
         if (($value & 0x80) !== 0) {
-            return $value | 0xFFFFFFFFFFFFFF00;
+            // Sign extend: set upper 56 bits
+            return UInt64::of($value & 0xFF)->or('18446744073709551360'); // 0xFFFFFFFFFFFFFF00
         }
-        return $value & 0xFF;
+        return UInt64::of($value & 0xFF);
     }
 
     /**
      * Sign-extend 32-bit value to 64-bit.
      */
-    private function signExtend32to64(int $value): int
+    private function signExtend32to64(int $value): UInt64
     {
         if (($value & 0x80000000) !== 0) {
-            return $value | 0xFFFFFFFF00000000;
+            // Sign extend: set upper 32 bits
+            return UInt64::of($value & 0xFFFFFFFF)->or('18446744069414584320'); // 0xFFFFFFFF00000000
         }
-        return $value & 0xFFFFFFFF;
+        return UInt64::of($value & 0xFFFFFFFF);
     }
 
     /**
      * Push value onto stack (64-bit mode).
      */
-    protected function push64(RuntimeInterface $runtime, int $value): void
+    protected function push64(RuntimeInterface $runtime, UInt64|int $value): void
     {
-        $rsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(64);
-        $rsp = ($rsp - 8) & 0xFFFFFFFFFFFFFFFF;
-        $runtime->memoryAccessor()->writeBySize(RegisterType::ESP, $rsp, 64);
-        $this->writeMemory64($runtime, $rsp, $value);
+        $rspValue = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(64);
+        $rsp = UInt64::of($rspValue)->sub(8);
+        $runtime->memoryAccessor()->writeBySize(RegisterType::ESP, $rsp->toInt(), 64);
+        $this->writeMemory64($runtime, $rsp->low32(), $value);
     }
 
     /**
      * Pop value from stack (64-bit mode).
      */
-    protected function pop64(RuntimeInterface $runtime): int
+    protected function pop64(RuntimeInterface $runtime): UInt64
     {
-        $rsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(64);
-        $value = $this->readMemory64($runtime, $rsp);
-        $rsp = ($rsp + 8) & 0xFFFFFFFFFFFFFFFF;
-        $runtime->memoryAccessor()->writeBySize(RegisterType::ESP, $rsp, 64);
+        $rspValue = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(64);
+        $rsp = UInt64::of($rspValue);
+        $value = $this->readMemory64($runtime, $rsp->low32());
+        $rsp = $rsp->add(8);
+        $runtime->memoryAccessor()->writeBySize(RegisterType::ESP, $rsp->toInt(), 64);
         return $value;
     }
 }

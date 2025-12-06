@@ -10,6 +10,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * RDMSR (0x0F 0x32)
@@ -19,6 +20,7 @@ class Rdmsr implements InstructionInterface
 {
     use Instructable;
 
+    /** @var array<int, UInt64|int> */
     private static array $msr = [];
 
     public function opcodes(): array
@@ -34,31 +36,36 @@ class Rdmsr implements InstructionInterface
 
         $ma = $runtime->memoryAccessor();
         $ecx = $ma->fetch(RegisterType::ECX)->asBytesBySize(32);
-        $value = self::$msr[$ecx] ?? 0;
-
-        if ($ecx === 0x10) { // TSC MSR
-            $value = ((int) (microtime(true) * 1_000_000)) & 0xFFFFFFFFFFFFFFFF;
-        } elseif ($ecx === 0x1B) { // APIC_BASE
-            $value = $runtime->context()->cpu()->apicState()->readMsrApicBase();
-        } elseif ($ecx === 0xC0000080) { // EFER
-            $value = $ma->readEfer();
-        } elseif (in_array($ecx, [0x174, 0x175, 0x176], true)) { // SYSENTER_CS/ESP/EIP
-            $value = self::$msr[$ecx] ?? 0;
+        $value = self::$msr[$ecx] ?? UInt64::zero();
+        if (!$value instanceof UInt64) {
+            $value = UInt64::of($value);
         }
 
-        $this->writeRegisterBySize($runtime, RegisterType::EAX, $value & 0xFFFFFFFF, 32);
-        $this->writeRegisterBySize($runtime, RegisterType::EDX, ($value >> 32) & 0xFFFFFFFF, 32);
+        if ($ecx === 0x10) { // TSC MSR
+            $value = UInt64::of((int) (microtime(true) * 1_000_000));
+        } elseif ($ecx === 0x1B) { // APIC_BASE
+            $value = UInt64::of($runtime->context()->cpu()->apicState()->readMsrApicBase());
+        } elseif ($ecx === 0xC0000080) { // EFER
+            $value = UInt64::of($ma->readEfer());
+        } elseif (in_array($ecx, [0x174, 0x175, 0x176], true)) { // SYSENTER_CS/ESP/EIP
+            $stored = self::$msr[$ecx] ?? 0;
+            $value = $stored instanceof UInt64 ? $stored : UInt64::of($stored);
+        }
+
+        $this->writeRegisterBySize($runtime, RegisterType::EAX, $value->low32(), 32);
+        $this->writeRegisterBySize($runtime, RegisterType::EDX, $value->high32(), 32);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    public static function writeMsr(int $index, int $value): void
+    public static function writeMsr(int $index, UInt64|int $value): void
     {
-        self::$msr[$index] = $value;
+        self::$msr[$index] = $value instanceof UInt64 ? $value : UInt64::of($value);
     }
 
-    public static function readMsr(int $index): int
+    public static function readMsr(int $index): UInt64
     {
-        return self::$msr[$index] ?? 0;
+        $value = self::$msr[$index] ?? 0;
+        return $value instanceof UInt64 ? $value : UInt64::of($value);
     }
 }

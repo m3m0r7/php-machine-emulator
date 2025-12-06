@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * MOVSXD - Move with Sign-Extension Doubleword (64-bit mode only).
@@ -42,11 +43,11 @@ class Movsxd implements InstructionInterface
             // MOVSXD r64, r/m32: Read 32-bit, sign-extend to 64-bit
             $value32 = $this->readRm($runtime, $reader, $modRegRM, 32);
 
-            // Sign-extend 32-bit to 64-bit
+            // Sign-extend 32-bit to 64-bit using UInt64
+            $value64 = UInt64::of($value32 & 0xFFFFFFFF);
             if (($value32 & 0x80000000) !== 0) {
-                $value64 = $value32 | 0xFFFFFFFF00000000;
-            } else {
-                $value64 = $value32 & 0xFFFFFFFF;
+                // Set upper 32 bits for sign extension
+                $value64 = $value64->or('18446744069414584320'); // 0xFFFFFFFF00000000
             }
 
             // Write to 64-bit register (with REX.R extension)
@@ -54,7 +55,7 @@ class Movsxd implements InstructionInterface
             if ($cpu->rexR()) {
                 $regCode |= 0b1000;  // R8-R15
             }
-            $this->writeRegisterBySize($runtime, $regCode, $value64, 64);
+            $this->writeRegisterBySize($runtime, $regCode, $value64->toInt(), 64);
         } else {
             // Without REX.W: acts as 32-bit MOV
             $value32 = $this->readRm($runtime, $reader, $modRegRM, 32);
