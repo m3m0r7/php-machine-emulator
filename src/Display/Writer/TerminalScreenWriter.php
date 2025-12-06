@@ -13,6 +13,9 @@ class TerminalScreenWriter implements ScreenWriterInterface
     protected int $cursorRow = 0;
     protected int $cursorCol = 0;
 
+    /** @var string Buffered output for batch writing */
+    protected string $outputBuffer = '';
+
     public function __construct(protected RuntimeInterface $runtime, protected VideoTypeInfo $videoTypeInfo)
     {
     }
@@ -28,11 +31,12 @@ class TerminalScreenWriter implements ScreenWriterInterface
 
     public function dot(int $x, int $y, ColorInterface $color): void
     {
-        // Move cursor to x, y position
-        $this->setCursorPosition($y, $x);
-
-        $dot = sprintf(
-            "\033[38;2;%d;%d;%d;48;2;%d;%d;%d;1m",
+        // Buffer the cursor move and dot sequence instead of immediate write
+        // ANSI escape sequence: move cursor then draw colored space
+        $this->outputBuffer .= sprintf(
+            "\033[%d;%dH\033[38;2;%d;%d;%d;48;2;%d;%d;%d;1m \033[0m",
+            $y + 1,
+            $x + 1,
             $color->red(),
             $color->green(),
             $color->blue(),
@@ -40,13 +44,6 @@ class TerminalScreenWriter implements ScreenWriterInterface
             $color->green(),
             $color->blue(),
         );
-
-        $dot .= ' ';
-
-        // NOTE: Reset the ASCII sequence
-        $dot .= "\033[0m";
-
-        $this->write($dot);
     }
 
     public function newline(): void
@@ -131,6 +128,12 @@ class TerminalScreenWriter implements ScreenWriterInterface
 
     public function flushIfNeeded(): void
     {
-        // Terminal output is immediate, no batching needed
+        if ($this->outputBuffer === '') {
+            return;
+        }
+
+        // Write all buffered output at once
+        $this->write($this->outputBuffer);
+        $this->outputBuffer = '';
     }
 }

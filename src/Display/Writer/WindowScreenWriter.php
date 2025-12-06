@@ -154,6 +154,13 @@ class WindowScreenWriter implements ScreenWriterInterface
      */
     public function flushIfNeeded(): void
     {
+        // Flush buffered dots (graphics mode)
+        if (!empty($this->dotBuffer)) {
+            $this->flushDotBuffer();
+            return;
+        }
+
+        // Flush text mode changes
         if (!$this->dirty) {
             return;
         }
@@ -163,14 +170,37 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->redrawScreen();
     }
 
+    /** @var array<int, array{x: int, y: int, color: Color}> Buffered dot writes */
+    protected array $dotBuffer = [];
+
     public function dot(int $x, int $y, ColorInterface $color): void
     {
-        $pixelX = $x * $this->pixelSize;
-        $pixelY = $y * $this->pixelSize;
-        $size = $this->pixelSize;
         $windowColor = new Color($color->red(), $color->green(), $color->blue());
 
-        $this->canvas->rect($pixelX, $pixelY, $size, $size, $windowColor);
+        // Buffer the dot for batch rendering
+        $this->dotBuffer[] = [
+            'x' => $x * $this->pixelSize,
+            'y' => $y * $this->pixelSize,
+            'color' => $windowColor,
+        ];
+    }
+
+    /**
+     * Flush buffered dots to the canvas and present.
+     */
+    protected function flushDotBuffer(): void
+    {
+        if (empty($this->dotBuffer)) {
+            return;
+        }
+
+        $size = $this->pixelSize;
+        foreach ($this->dotBuffer as $dot) {
+            $this->canvas->rect($dot['x'], $dot['y'], $size, $size, $dot['color']);
+        }
+
+        $this->canvas->present();
+        $this->dotBuffer = [];
     }
 
     public function newline(): void

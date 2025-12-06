@@ -13,10 +13,20 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 class VideoInitializerObserver implements MemoryAccessorObserverInterface
 {
     protected ?CursorInterface $cursor = null;
+    protected ?int $cachedVideoTypeFlagAddress = null;
+
+    public function addressRange(): ?array
+    {
+        // This observer watches a single specific address
+        // Return null to indicate dynamic address (depends on runtime)
+        return null;
+    }
 
     public function shouldMatch(RuntimeInterface $runtime, int $address, ?int $previousValue, ?int $nextValue): bool
     {
-        return $address === $runtime->video()->videoTypeFlagAddress();
+        // Cache the video type flag address to avoid repeated lookups
+        $this->cachedVideoTypeFlagAddress ??= $runtime->video()->videoTypeFlagAddress();
+        return $address === $this->cachedVideoTypeFlagAddress;
     }
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): void

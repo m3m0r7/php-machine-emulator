@@ -606,20 +606,27 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     private function processObservers(int $address, int|null $previousValue, int|null $nextValue): void
     {
-        foreach ($this->memoryAccessorObserverCollection as $memoryAccessorObserverCollection) {
-            assert($memoryAccessorObserverCollection instanceof MemoryAccessorObserverInterface);
+        foreach ($this->memoryAccessorObserverCollection as $observer) {
+            assert($observer instanceof MemoryAccessorObserverInterface);
 
-            if (!$memoryAccessorObserverCollection->shouldMatch($this->runtime, $address, $previousValue, $nextValue)) {
+            // Fast path: check address range before calling shouldMatch
+            $range = $observer->addressRange();
+            if ($range !== null) {
+                if ($address < $range['min'] || $address > $range['max']) {
+                    continue;
+                }
+            }
+
+            if (!$observer->shouldMatch($this->runtime, $address, $previousValue, $nextValue)) {
                 continue;
             }
 
-            $memoryAccessorObserverCollection
-                ->observe(
-                    $this->runtime,
-                    $address,
-                    $previousValue,
-                    $nextValue,
-                );
+            $observer->observe(
+                $this->runtime,
+                $address,
+                $previousValue,
+                $nextValue,
+            );
         }
     }
 
