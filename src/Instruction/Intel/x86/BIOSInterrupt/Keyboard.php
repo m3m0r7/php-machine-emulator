@@ -96,7 +96,7 @@ class Keyboard implements InterruptInterface
                 break;
             }
             // Timeout after 500ms to avoid infinite loop
-            if ((microtime(true) - $releaseWaitStart) > 0.5) {
+            if ((microtime(true) - $releaseWaitStart) > 0.15) {
                 $runtime->option()->logger()->debug('INT 16h: timeout waiting for key release');
                 break;
             }
