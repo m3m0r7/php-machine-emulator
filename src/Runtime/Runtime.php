@@ -157,6 +157,8 @@ class Runtime implements RuntimeInterface
         $cpu = $this->context->cpu();
         $iterationContext = $cpu->iteration();
 
+
+
         while (!$this->memory->isEOF()) {
             $this->instructionCount++;
             $this->tickTimers();
