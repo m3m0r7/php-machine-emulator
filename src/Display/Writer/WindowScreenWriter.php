@@ -24,10 +24,16 @@ class WindowScreenWriter implements ScreenWriterInterface
     /** @var array<int, array<int, array{char: string, attr: int}>> Text buffer [row][col] => {char, attr} */
     protected array $textBuffer = [];
 
+    /** @var array<int, array<int, array{char: string, attr: int}>> Previous frame buffer for diff rendering */
+    protected array $prevBuffer = [];
+
+    /** @var array<int, array{row: int, col: int}> List of dirty cells that need redraw */
+    protected array $dirtyCells = [];
+
     /** @var int Current text attribute (default: white on black = 0x07) */
     protected int $currentAttribute = 0x07;
 
-    /** @var bool Screen needs redraw */
+    /** @var bool Screen needs full redraw */
     protected bool $dirty = false;
 
     /** @var float Last redraw time */
@@ -35,6 +41,9 @@ class WindowScreenWriter implements ScreenWriterInterface
 
     /** @var float Minimum interval between redraws (seconds) */
     protected const REDRAW_INTERVAL = 0.008; // ~120 FPS for smoother updates
+
+    /** @var array<int, Color> Cached VGA color objects */
+    protected static array $colorCache = [];
 
     public function __construct(
         protected VideoTypeInfo $videoTypeInfo,
@@ -95,7 +104,10 @@ class WindowScreenWriter implements ScreenWriterInterface
 
     protected function getColorFromAttribute(int $colorIndex): Color
     {
-        return VgaPaletteColor::fromIndex($colorIndex)->toColor();
+        if (!isset(self::$colorCache[$colorIndex])) {
+            self::$colorCache[$colorIndex] = VgaPaletteColor::fromIndex($colorIndex)->toColor();
+        }
+        return self::$colorCache[$colorIndex];
     }
 
     protected function redrawScreen(): void
@@ -106,11 +118,12 @@ class WindowScreenWriter implements ScreenWriterInterface
         $charWidth = 8;
         $charHeight = 16;
 
+        // Group by color for batch rendering
+        $bgRectsByColor = [];
+        $fgCharsByColor = [];
+
         foreach ($this->textBuffer as $row => $cols) {
             foreach ($cols as $col => $cell) {
-                $x = $col * $charWidth;
-                $y = $row * $charHeight;
-
                 // Handle both old format (string) and new format (array with char/attr)
                 if (is_array($cell)) {
                     $char = $cell['char'];
@@ -120,18 +133,35 @@ class WindowScreenWriter implements ScreenWriterInterface
                     $attr = $this->currentAttribute;
                 }
 
-                // Extract foreground and background colors from attribute
-                $fgColor = $attr & 0x0F;
+                $x = $col * $charWidth;
+                $y = $row * $charHeight;
                 $bgColor = ($attr >> 4) & 0x0F;
+                $fgColor = $attr & 0x0F;
 
-                // Draw background rectangle
-                $bgColorObj = $this->getColorFromAttribute($bgColor);
-                $this->canvas->rect($x, $y, $charWidth, $charHeight, $bgColorObj);
+                // Group backgrounds by color
+                if (!isset($bgRectsByColor[$bgColor])) {
+                    $bgRectsByColor[$bgColor] = [];
+                }
+                $bgRectsByColor[$bgColor][] = ['x' => $x, 'y' => $y, 'w' => $charWidth, 'h' => $charHeight];
 
-                // Draw character with foreground color
-                $fgColorObj = $this->getColorFromAttribute($fgColor);
-                $this->canvas->text($x, $y, $char, $fgColorObj, 1);
+                // Group foreground chars by color (skip spaces)
+                if ($char !== ' ' && $char !== "\0") {
+                    if (!isset($fgCharsByColor[$fgColor])) {
+                        $fgCharsByColor[$fgColor] = [];
+                    }
+                    $fgCharsByColor[$fgColor][] = ['x' => $x, 'y' => $y, 'char' => $char];
+                }
             }
+        }
+
+        // Batch draw backgrounds by color
+        foreach ($bgRectsByColor as $colorIndex => $rects) {
+            $this->canvas->rectBatch($rects, $this->getColorFromAttribute($colorIndex));
+        }
+
+        // Batch draw foreground characters by color
+        foreach ($fgCharsByColor as $colorIndex => $chars) {
+            $this->canvas->textBatch($chars, $this->getColorFromAttribute($colorIndex));
         }
 
         // Present to screen
@@ -268,6 +298,7 @@ class WindowScreenWriter implements ScreenWriterInterface
     public function clear(): void
     {
         $this->textBuffer = [];
+        $this->prevBuffer = [];
         $this->resetCursor();
         $this->canvas->clear(Color::asBlack());
         $this->canvas->present();

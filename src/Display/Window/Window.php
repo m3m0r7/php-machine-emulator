@@ -127,6 +127,7 @@ class Window
             void SDL_RenderPresent(SDL_Renderer* renderer);
             int SDL_RenderDrawPoint(SDL_Renderer* renderer, int x, int y);
             int SDL_RenderFillRect(SDL_Renderer* renderer, const SDL_Rect* rect);
+            int SDL_RenderFillRects(SDL_Renderer* renderer, const SDL_Rect* rects, int count);
 
             int SDL_PollEvent(SDL_Event* event);
             void SDL_Delay(Uint32 ms);

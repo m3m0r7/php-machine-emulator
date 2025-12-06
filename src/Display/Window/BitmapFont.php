@@ -9,6 +9,12 @@ class BitmapFont
     protected static ?array $glyphs = null;
     protected static ?array $cp437Glyphs = null;
 
+    /** @var array<string, array<array{0: int, 1: int}>> Pre-computed pixel positions for each glyph */
+    protected static array $glyphPixelsCache = [];
+
+    /** @var array<string, int> Cached pixel counts per glyph */
+    protected static array $glyphPixelCountCache = [];
+
     public static function getGlyph(string $char): ?array
     {
         // First check standard glyphs
@@ -20,6 +26,53 @@ class BitmapFont
         // For extended ASCII (CP437), use byte value lookup
         $byte = ord($char);
         return self::cp437Glyphs()[$byte] ?? null;
+    }
+
+    /**
+     * Get pre-computed pixel positions for a glyph (relative to top-left).
+     * Returns array of [x, y] positions where pixels should be drawn.
+     * @return array<array{0: int, 1: int}>|null
+     */
+    public static function getGlyphPixels(string $char): ?array
+    {
+        if (isset(self::$glyphPixelsCache[$char])) {
+            return self::$glyphPixelsCache[$char];
+        }
+
+        $glyph = self::getGlyph($char);
+        if ($glyph === null) {
+            return null;
+        }
+
+        $pixels = [];
+        for ($row = 0; $row < 8; $row++) {
+            $rowData = $glyph[$row];
+            if ($rowData === 0) {
+                continue; // Skip empty rows
+            }
+            for ($col = 0; $col < 8; $col++) {
+                if ($rowData & (0x80 >> $col)) {
+                    $pixels[] = [$col, $row];
+                }
+            }
+        }
+
+        self::$glyphPixelsCache[$char] = $pixels;
+        self::$glyphPixelCountCache[$char] = count($pixels);
+        return $pixels;
+    }
+
+    /**
+     * Get cached pixel count for a glyph (avoids count() call).
+     */
+    public static function getGlyphPixelCount(string $char): int
+    {
+        if (isset(self::$glyphPixelCountCache[$char])) {
+            return self::$glyphPixelCountCache[$char];
+        }
+        // Trigger cache population
+        $pixels = self::getGlyphPixels($char);
+        return $pixels !== null ? self::$glyphPixelCountCache[$char] : 0;
     }
 
     public static function glyphs(): array
