@@ -14,6 +14,7 @@ use PHPMachineEmulator\Runtime\RuntimeContext;
 use PHPMachineEmulator\Runtime\RuntimeContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeCPUContext;
 use PHPMachineEmulator\Runtime\RuntimeScreenContextInterface;
+use PHPMachineEmulator\Runtime\Device\DeviceManager;
 use PHPUnit\Framework\TestCase;
 
 class MemoryAccessorGprTest extends TestCase
@@ -24,8 +25,9 @@ class MemoryAccessorGprTest extends TestCase
     {
         $cpuContext = new RuntimeCPUContext();
         $screenContext = $this->createMock(RuntimeScreenContextInterface::class);
+        $deviceManager = new DeviceManager();
 
-        $runtimeContext = new RuntimeContext($cpuContext, $screenContext);
+        $runtimeContext = new RuntimeContext($cpuContext, $screenContext, $deviceManager);
 
         $register = new Register();
 

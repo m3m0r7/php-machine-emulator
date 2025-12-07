@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Utils;
 
-use PHPMachineEmulator\Stream\KeyboardReaderStream;
 use PHPMachineEmulator\Stream\StreamReaderInterface;
 
-class EmulatedKeyboardStream extends KeyboardReaderStream implements StreamReaderInterface
+/**
+ * Emulated keyboard stream for testing purposes.
+ * Does not extend KeyboardReaderStream to avoid resource requirement.
+ */
+class EmulatedKeyboardStream implements StreamReaderInterface
 {
     private int $pos = 0;
 
@@ -17,6 +20,47 @@ class EmulatedKeyboardStream extends KeyboardReaderStream implements StreamReade
 
     public function char(): string
     {
-        return $this->input[$this->pos++ % strlen($this->input)];
+        if ($this->pos >= strlen($this->input)) {
+            return "\0"; // Return null character when input exhausted
+        }
+        return $this->input[$this->pos++];
+    }
+
+    public function byte(): int
+    {
+        $char = $this->char();
+        return ord($char);
+    }
+
+    public function offset(): int
+    {
+        return $this->pos;
+    }
+
+    public function setOffset(int $newOffset): StreamReaderInterface
+    {
+        $this->pos = $newOffset;
+        return $this;
+    }
+
+    public function isEOF(): bool
+    {
+        return $this->pos >= strlen($this->input);
+    }
+
+    public function signedByte(): int
+    {
+        $byte = $this->byte();
+        return $byte > 127 ? $byte - 256 : $byte;
+    }
+
+    public function short(): int
+    {
+        return $this->byte() | ($this->byte() << 8);
+    }
+
+    public function dword(): int
+    {
+        return $this->byte() | ($this->byte() << 8) | ($this->byte() << 16) | ($this->byte() << 24);
     }
 }

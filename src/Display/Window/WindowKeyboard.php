@@ -8,6 +8,9 @@ use FFI;
 
 class WindowKeyboard
 {
+    /** @var array<int, bool> Track keys that have been consumed (waiting for release) */
+    private array $consumedKeys = [];
+
     public function __construct(
         protected FFI $ffi,
     ) {
@@ -70,17 +73,33 @@ class WindowKeyboard
      * This returns the first pressed key found and its BIOS representation.
      * For use with INT 16h AH=00h (wait for keypress)
      *
+     * A key is only returned once per press - subsequent calls will return null
+     * until the key is released and pressed again.
+     *
      * @return int|null AX value (AH=scan code, AL=ASCII) or null if no key pressed
      */
     public function pollKeyPress(): ?int
     {
-        $pressed = $this->getPressedKeys();
-        if (empty($pressed)) {
-            return null;
+        $keyboardState = $this->ffi->SDL_GetKeyboardState(null);
+
+        // First, clear consumed keys that have been released
+        foreach ($this->consumedKeys as $scancodeValue => $consumed) {
+            if ($keyboardState[$scancodeValue] === 0) {
+                unset($this->consumedKeys[$scancodeValue]);
+            }
         }
 
-        foreach ($pressed as $scancode) {
-            if (!$scancode->isModifier()) {
+        // Find a newly pressed key (not already consumed)
+        foreach (SDLScancode::cases() as $scancode) {
+            if ($keyboardState[$scancode->value] !== 0 && !$scancode->isModifier()) {
+                // Skip if this key was already consumed (still held down)
+                if (isset($this->consumedKeys[$scancode->value])) {
+                    continue;
+                }
+
+                // Mark as consumed so it won't repeat
+                $this->consumedKeys[$scancode->value] = true;
+
                 return SDLKeyMapper::toBiosKeyCode($scancode->value, $this->isShiftPressed());
             }
         }

@@ -1,19 +1,22 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
 use PHPMachineEmulator\Display\Writer\WindowScreenWriter;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Runtime\Device\KeyboardContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
+/**
+ * INT 16h - Keyboard BIOS interrupt handler.
+ * Uses non-blocking async approach via DeviceManager/KeyboardContext.
+ */
 class Keyboard implements InterruptInterface
 {
-    protected bool $isTty;
+    protected bool $isTty = false;
     protected bool $useSDL = false;
-    protected ?int $lastKeyPressed = null;
-    protected int $lastKeyTime = 0;
-    protected const KEY_REPEAT_DELAY_MS = 150; // Delay before key can be registered again
 
     public function __construct(protected RuntimeInterface $runtime)
     {
@@ -40,35 +43,37 @@ class Keyboard implements InterruptInterface
     {
         $ah = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asHighBit();
 
-        if ($this->useSDL) {
-            $this->processSDL($runtime, $ah);
-        } else {
-            $this->processStdin($runtime, $ah);
+        // Get the first keyboard context
+        $keyboards = $runtime->context()->devices()->keyboards();
+        $keyboard = $keyboards[0] ?? null;
+
+        if ($keyboard === null) {
+            // No keyboard registered, return 0
+            $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, 0);
+            return;
         }
-    }
 
-    protected function processSDL(RuntimeInterface $runtime, int $function): void
-    {
-        $screenWriter = $runtime->context()->screen()->screenWriter();
-        assert($screenWriter instanceof WindowScreenWriter);
+        $runtime->option()->logger()->debug(sprintf('INT 16h: AH=0x%02X', $ah));
 
-        $runtime->option()->logger()->debug(sprintf('INT 16h: SDL mode, AH=0x%02X', $function));
-
-        // Process SDL events to update keyboard state
-        $screenWriter->window()->processEvents();
-
-        // Flush screen if needed (batched rendering)
-        $screenWriter->flushIfNeeded();
-
-        switch ($function) {
+        switch ($ah) {
             case 0x00: // Wait for keypress and return it
             case 0x10: // Extended keyboard read (same as 0x00 but for enhanced keyboard)
-                $this->waitForKeypress($runtime, $screenWriter);
+                $this->handleWaitForKeypress($runtime, $keyboard, $ah);
                 break;
 
             case 0x01: // Check for keypress (non-blocking)
             case 0x11: // Extended keystroke status (same as 0x01 but for enhanced keyboard)
-                $this->checkKeypress($runtime, $screenWriter);
+                $this->handleCheckKeypress($runtime, $keyboard);
+                break;
+
+            case 0x02: // Get shift flags
+                // Return shift key status (simplified: no modifiers pressed)
+                $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, 0x00);
+                break;
+
+            case 0x12: // Extended shift flags
+                // Return extended shift key status
+                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, 0x0000);
                 break;
 
             default:
@@ -78,116 +83,110 @@ class Keyboard implements InterruptInterface
         }
     }
 
-    protected function waitForKeypress(RuntimeInterface $runtime, WindowScreenWriter $screenWriter): void
-    {
-        // Reset state at start of wait
-        $this->lastKeyPressed = null;
+    /**
+     * Handle INT 16h AH=0x00/0x10 - Wait for keypress.
+     * Non-blocking: sets waiting state and returns immediately.
+     * DeviceManagerTicker will complete the operation when key is available.
+     */
+    private function handleWaitForKeypress(
+        RuntimeInterface $runtime,
+        KeyboardContextInterface $keyboard,
+        int $function
+    ): void {
+        // Check if key is already available
+        if ($keyboard->hasKey()) {
+            $key = $keyboard->dequeueKey();
+            if ($key !== null) {
+                $keyCode = ($key['scancode'] << 8) | $key['ascii'];
+                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
 
-        $runtime->option()->logger()->debug('INT 16h: waitForKeypress started');
-
-        // First, wait until all keys are released to avoid detecting
-        // keys that were pressed before this call (e.g., Enter from menu selection)
-        $releaseWaitStart = microtime(true);
-        while (true) {
-            $screenWriter->window()->processEvents();
-            $keyCode = $screenWriter->pollKeyPress();
-            if ($keyCode === null) {
-                // All keys released
-                break;
+                $runtime->option()->logger()->debug(sprintf(
+                    'INT 16h: immediate key available, keyCode=0x%04X',
+                    $keyCode
+                ));
+                return;
             }
-            // Timeout after 500ms to avoid infinite loop
-            if ((microtime(true) - $releaseWaitStart) > 0.15) {
-                $runtime->option()->logger()->debug('INT 16h: timeout waiting for key release');
-                break;
-            }
-            usleep(1000);
         }
 
-        $runtime->option()->logger()->debug('INT 16h: waiting for new keypress');
+        // No key available, try to poll input directly
+        if ($this->useSDL) {
+            // SDL mode: poll events and check for key press
+            $screenWriter = $runtime->context()->screen()->screenWriter();
+            if ($screenWriter instanceof WindowScreenWriter) {
+                $screenWriter->window()->processEvents();
+                $screenWriter->flushIfNeeded();
 
-        // Wait until a key is pressed
-        while (true) {
-            $screenWriter->window()->processEvents();
-            $keyCode = $screenWriter->pollKeyPress();
-
-            if ($keyCode !== null) {
-                // Accept any new key
-                if ($keyCode !== $this->lastKeyPressed) {
-                    $this->lastKeyPressed = $keyCode;
+                $keyCode = $screenWriter->pollKeyPress();
+                if ($keyCode !== null) {
+                    $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
 
                     $runtime->option()->logger()->debug(sprintf(
-                        'INT 16h: key pressed, keyCode=0x%04X (AH=0x%02X, AL=0x%02X char=%s)',
-                        $keyCode,
-                        ($keyCode >> 8) & 0xFF,
-                        $keyCode & 0xFF,
-                        chr($keyCode & 0xFF)
+                        'INT 16h: SDL polled key, keyCode=0x%04X',
+                        $keyCode
                     ));
-
-                    // AH = scan code, AL = ASCII
-                    $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode & 0xFFFF);
                     return;
                 }
-            } else {
-                // No key pressed, reset tracking
-                $this->lastKeyPressed = null;
-            }
-
-            usleep(1000); // 1ms delay to avoid busy loop
-        }
-    }
-
-    protected function checkKeypress(RuntimeInterface $runtime, WindowScreenWriter $screenWriter): void
-    {
-        $currentTimeMs = (int)(microtime(true) * 1000);
-        $keyCode = $screenWriter->pollKeyPress();
-
-        if ($keyCode !== null) {
-            // Check if this is a new keypress or enough time has passed
-            if ($keyCode !== $this->lastKeyPressed ||
-                ($currentTimeMs - $this->lastKeyTime) > self::KEY_REPEAT_DELAY_MS) {
-                $this->lastKeyPressed = $keyCode;
-                $this->lastKeyTime = $currentTimeMs;
-
-                // Key available: ZF=0, AX=keycode
-                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode & 0xFFFF);
-                // Clear ZF (key available)
-                $runtime->memoryAccessor()->setZeroFlag(false);
-            } else {
-                // Same key still held, treat as no new keypress
-                $this->setNoKeyAvailable($runtime);
             }
         } else {
-            // No key pressed, reset tracking
-            $this->lastKeyPressed = null;
-            $this->setNoKeyAvailable($runtime);
+            // Non-SDL mode: poll from IO input
+            $byte = $runtime->option()->IO()->input()->byte();
+            if ($byte !== null && $byte !== 0) {
+                // Convert LF to CR for terminal compatibility
+                if ($byte === 0x0A) {
+                    $byte = 0x0D;
+                }
+                // Return key in AX (scancode 0, ascii = byte)
+                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $byte);
+
+                $runtime->option()->logger()->debug(sprintf(
+                    'INT 16h: polled key, ascii=0x%02X',
+                    $byte
+                ));
+                return;
+            }
         }
+
+        // Set waiting state for async completion by DeviceManagerTicker
+        $keyboard->setWaitingForKey(true, $function);
+
+        $runtime->option()->logger()->debug('INT 16h: waiting for key (async)');
+
+        // Rewind IP to re-execute INT 16h instruction on next cycle
+        // INT 16h is a 2-byte instruction (CD 16)
+        $currentOffset = $runtime->memory()->offset();
+        $runtime->memory()->setOffset($currentOffset - 2);
+
+        // Return with AX=0 for now, will be updated by DeviceManagerTicker
+        $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, 0);
     }
 
-    protected function setNoKeyAvailable(RuntimeInterface $runtime): void
-    {
-        // No key available: ZF=1
+    /**
+     * Handle INT 16h AH=0x01/0x11 - Check for keypress (non-blocking).
+     */
+    private function handleCheckKeypress(
+        RuntimeInterface $runtime,
+        KeyboardContextInterface $keyboard
+    ): void {
+        if ($keyboard->hasKey()) {
+            $key = $keyboard->peekKey();
+            if ($key !== null) {
+                $keyCode = ($key['scancode'] << 8) | $key['ascii'];
+                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
+                // Clear ZF - key available
+                $runtime->memoryAccessor()->setZeroFlag(false);
+
+                $runtime->option()->logger()->debug(sprintf(
+                    'INT 16h: key check - available, keyCode=0x%04X, ZF=0',
+                    $keyCode
+                ));
+                return;
+            }
+        }
+
+        // No key available
+        // Set ZF - no key available
         $runtime->memoryAccessor()->setZeroFlag(true);
-    }
 
-    protected function processStdin(RuntimeInterface $runtime, int $function): void
-    {
-        $byte = $runtime
-            ->option()
-            ->IO()
-            ->input()
-            ->byte();
-
-        // NOTE: Convert the break line (0x0A) to the carriage return (0x0D)
-        //       because it is applying duplication breaking lines in using terminal.
-        if ($byte === 0x0A) {
-            $byte = 0x0D;
-        }
-
-        $runtime
-            ->memoryAccessor()
-            ->writeToLowBit(
-                RegisterType::EAX,
-                $byte,
-            );
+        $runtime->option()->logger()->debug('INT 16h: key check - none available, ZF=1');
     }
 }

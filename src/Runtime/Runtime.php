@@ -19,9 +19,12 @@ use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\LogicBoard\LogicBoardInterface;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
+use PHPMachineEmulator\Runtime\Device\DeviceManager;
+use PHPMachineEmulator\Runtime\Device\KeyboardContext;
 use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandler;
 use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandlerInterface;
 use PHPMachineEmulator\Runtime\Ticker\ApicTicker;
+use PHPMachineEmulator\Runtime\Ticker\DeviceManagerTicker;
 use PHPMachineEmulator\Runtime\Ticker\PitTicker;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
@@ -64,7 +67,11 @@ class Runtime implements RuntimeInterface
                 ->observers(),
         );
 
-        // Initialize RuntimeContext with CPU and Screen contexts
+        // Initialize DeviceManager with keyboard context
+        $deviceManager = new DeviceManager();
+        $deviceManager->register(new KeyboardContext());
+
+        // Initialize RuntimeContext with CPU, Screen, and Device contexts
         $screenContext = new RuntimeScreenContext(
             $this->logicBoard()->display()->screenWriterFactory(),
             $this,
@@ -73,12 +80,14 @@ class Runtime implements RuntimeInterface
         $this->context = new RuntimeContext(
             $this->runtimeOption->cpuContext(),
             $screenContext,
+            $deviceManager,
         );
 
         // Initialize ticker registry with default tickers
         $this->tickerRegistry = new TickerRegistry();
         $this->tickerRegistry->register(new PitTicker($this->context->cpu()->pit()));
         $this->tickerRegistry->register(new ApicTicker());
+        $this->tickerRegistry->register(new DeviceManagerTicker($deviceManager));
 
         // Initialize interrupt delivery handler with interrupt sources
         $this->interruptDeliveryHandler = new InterruptDeliveryHandler($this->architectureProvider);

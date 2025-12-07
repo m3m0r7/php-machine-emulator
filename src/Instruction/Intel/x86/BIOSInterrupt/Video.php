@@ -34,7 +34,9 @@ class Video implements InterruptInterface
             $runtime->option()->logger()->debug(sprintf('PRINT: %s (0x%02X)', chr($al), $al));
         }
 
-        match ($serviceFunction = VideoServiceFunction::from($ah)) {
+        $serviceFunction = VideoServiceFunction::tryFrom($ah);
+
+        match ($serviceFunction) {
             VideoServiceFunction::SET_VIDEO_MODE => $this->setVideoMode($runtime, $fetchResult),
             VideoServiceFunction::TELETYPE_OUTPUT => $this->teletypeOutput($runtime, $fetchResult),
             VideoServiceFunction::SET_CURSOR_SHAPE => null, // stub
@@ -52,8 +54,8 @@ class Video implements InterruptInterface
             VideoServiceFunction::WRITE_PIXEL => null, // stub
             VideoServiceFunction::GET_CURRENT_VIDEO_MODE => $this->getCurrentVideoMode($runtime),
             VideoServiceFunction::PALETTE_ATTRIBUTE_CONTROL => $this->handlePaletteControl($runtime, $fetchResult),
-            // VBE extensions (0x4Fxx)
-            default => $this->handleVbe($runtime, $fetchResult),
+            // VBE extensions (0x4Fxx) or unsupported functions
+            default => $this->handleExtendedOrUnsupported($runtime, $fetchResult, $ah),
         };
     }
 
@@ -382,5 +384,43 @@ class Video implements InterruptInterface
         $ma = $runtime->memoryAccessor();
         $ma->write16Bit(RegisterType::BX, $this->currentMode & 0x1FF);
         $ma->write16Bit(RegisterType::AX, 0x004F);
+    }
+
+    /**
+     * Handle extended or unsupported video functions.
+     */
+    protected function handleExtendedOrUnsupported(
+        RuntimeInterface $runtime,
+        MemoryAccessorFetchResultInterface $fetchResult,
+        int $ah
+    ): void {
+        // VBE functions (AH=0x4F)
+        if ($ah === 0x4F) {
+            $this->handleVbe($runtime, $fetchResult);
+            return;
+        }
+
+        // AH=0x1C: Video State Save/Restore (stub - just return function not supported)
+        if ($ah === 0x1C) {
+            $al = $fetchResult->asLowBit();
+            $ma = $runtime->memoryAccessor();
+
+            // AL=0x00: Get state buffer size
+            // AL=0x01: Save state
+            // AL=0x02: Restore state
+            // Return AL=0x1C (function supported) with minimal implementation
+            $ma->writeToLowBit(RegisterType::EAX, 0x1C);
+
+            if ($al === 0x00) {
+                // Return buffer size in BX (64 bytes / 64 = 1 block)
+                $ma->write16Bit(RegisterType::EBX, 0x0001);
+            }
+
+            $runtime->option()->logger()->debug(sprintf('INT 10h AH=0x1C AL=0x%02X (Video State): stub', $al));
+            return;
+        }
+
+        // Other unsupported functions - log and ignore
+        $runtime->option()->logger()->debug(sprintf('INT 10h AH=0x%02X: unsupported function', $ah));
     }
 }

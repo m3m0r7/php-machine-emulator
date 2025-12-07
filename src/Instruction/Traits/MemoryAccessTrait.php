@@ -87,16 +87,6 @@ trait MemoryAccessTrait
      */
     protected function writeMemory32(RuntimeInterface $runtime, int $address, int $value): void
     {
-        // Debug: trace writes near stack area
-        if ($address >= 0x7FFC0 && $address <= 0x7FFD0) {
-            $runtime->option()->logger()->debug(sprintf(
-                'WRITE32 to stack: addr=0x%X value=0x%08X IP=0x%X',
-                $address,
-                $value & 0xFFFFFFFF,
-                $runtime->memory()->offset()
-            ));
-        }
-
         $physical = $this->translateLinear($runtime, $address, true);
         if ($this->writeMmio($runtime, $physical, $value & 0xFFFFFFFF, 32)) {
             return;
