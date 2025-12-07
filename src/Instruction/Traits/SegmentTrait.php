@@ -41,6 +41,11 @@ trait SegmentTrait
 
     /**
      * Calculate linear address from segment:offset.
+     *
+     * Supports Big Real Mode (Unreal Mode):
+     * When in real mode but a segment has a cached descriptor with extended limit
+     * (from a previous protected mode load), use that cached descriptor's limit
+     * to allow access beyond the normal 64KB real mode limit.
      */
     protected function segmentOffsetAddress(RuntimeInterface $runtime, RegisterType $segment, int $offset): int
     {
@@ -62,6 +67,25 @@ trait SegmentTrait
                 }
                 return ($descriptor['base'] + $effOffset) & $linearMask;
             }
+        }
+
+        // Big Real Mode (Unreal Mode) support:
+        // If we have a cached descriptor with extended limit, use it
+        // This happens when code loads a 4GB segment in PM, then returns to RM
+        $cachedDescriptor = $runtime->context()->cpu()->getCachedSegmentDescriptor($segment);
+        if ($cachedDescriptor !== null && $addressSize === 32) {
+            // Using 32-bit addressing in real mode with cached descriptor
+            $effOffset = $offset & 0xFFFFFFFF;
+
+            // Check against cached limit (usually 4GB for Big Real Mode)
+            if (isset($cachedDescriptor['limit']) && $effOffset > $cachedDescriptor['limit']) {
+                // Limit exceeded - fall back to normal real mode
+                $effOffset = $offset & 0xFFFF;
+            }
+
+            // In Big Real Mode, base is from the cached descriptor (usually 0)
+            $base = $cachedDescriptor['base'] ?? 0;
+            return ($base + $effOffset) & $linearMask;
         }
 
         return ($this->segmentBase($runtime, $segment) + ($offset & $offsetMask)) & $linearMask;

@@ -31,7 +31,16 @@ class Lea implements InstructionInterface
         [$address] = $this->effectiveAddressInfo($runtime, $reader, $modRegRM);
 
         $size = $runtime->context()->cpu()->operandSize();
-        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $cpu = $runtime->context()->cpu();
+
+        // In real mode without A20 enabled, addresses are masked to 20 bits
+        // In real mode with A20, full 32-bit is available
+        // In protected mode, full 32-bit addressing is used
+        if (!$cpu->isProtectedMode() && !$cpu->isA20Enabled()) {
+            $mask = 0xFFFFF; // 20-bit mask for real mode
+        } else {
+            $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        }
 
         $regCode = $modRegRM->registerOrOPCode();
 

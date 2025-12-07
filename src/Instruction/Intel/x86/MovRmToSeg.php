@@ -33,6 +33,20 @@ class MovRmToSeg implements InstructionInterface
             $value
         ));
 
+        // In protected mode, cache the segment descriptor for Big Real Mode support
+        if ($runtime->context()->cpu()->isProtectedMode() && $value !== 0) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $value);
+            if ($descriptor !== null && $descriptor['present']) {
+                $runtime->context()->cpu()->cacheSegmentDescriptor($seg, $descriptor);
+                $runtime->option()->logger()->debug(sprintf(
+                    'Cached segment descriptor for %s: base=0x%08X limit=0x%08X',
+                    $seg->name,
+                    $descriptor['base'],
+                    $descriptor['limit']
+                ));
+            }
+        }
+
         $runtime->memoryAccessor()->write16Bit($seg, $value);
 
         if ($seg === RegisterType::SS) {

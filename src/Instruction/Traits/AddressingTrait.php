@@ -80,6 +80,16 @@ trait AddressingTrait
 
         $linear = $this->segmentOffsetAddress($runtime, $segment, $offset);
 
+        // Debug: log when accessing high memory in real mode
+        if (!$runtime->context()->cpu()->isProtectedMode() && $offset >= 0x100000) {
+            $segVal = $runtime->memoryAccessor()->fetch($segment)->asByte();
+            $runtime->option()->logger()->debug(sprintf(
+                'rmLinearAddress HIGH: offset=0x%08X segment=%s(0x%04X) linear=0x%08X A20=%d',
+                $offset, $segment->name, $segVal, $linear,
+                $runtime->context()->cpu()->isA20Enabled() ? 1 : 0
+            ));
+        }
+
         return $linear;
     }
 
@@ -198,7 +208,9 @@ trait AddressingTrait
         // In 32-bit mode, all values and calculations must be masked to 32 bits
         // The index value from a register might appear as a large positive number in PHP
         // but should be treated as a signed 32-bit value for address calculation
-        $mask = $runtime->context()->cpu()->isProtectedMode() ? 0xFFFFFFFF : 0xFFFFF;
+        // Note: Always use 32-bit mask here - the final masking for real mode happens in
+        // segmentOffsetAddress, which also handles Big Real Mode (Unreal Mode) support
+        $mask = 0xFFFFFFFF;
 
         // Mask all components to 32 bits before calculation
         $baseVal32 = $baseVal & 0xFFFFFFFF;

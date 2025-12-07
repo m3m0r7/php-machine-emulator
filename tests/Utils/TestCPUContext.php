@@ -416,4 +416,29 @@ class TestCPUContext implements RuntimeCPUContextInterface
     {
         $this->currentInstructionPointer = $ip;
     }
+
+    // ========================================
+    // Big Real Mode (Unreal Mode) support
+    // ========================================
+
+    private array $segmentDescriptorCache = [];
+
+    public function cacheSegmentDescriptor(RegisterType $segment, array $descriptor): void
+    {
+        $this->segmentDescriptorCache[$segment->name] = $descriptor;
+    }
+
+    public function getCachedSegmentDescriptor(RegisterType $segment): ?array
+    {
+        return $this->segmentDescriptorCache[$segment->name] ?? null;
+    }
+
+    public function hasExtendedSegmentLimit(RegisterType $segment): bool
+    {
+        $cached = $this->getCachedSegmentDescriptor($segment);
+        if ($cached === null) {
+            return false;
+        }
+        return isset($cached['limit']) && $cached['limit'] > 0xFFFF;
+    }
 }

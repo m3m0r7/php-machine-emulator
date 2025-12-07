@@ -67,6 +67,14 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     // Segment override
     private ?RegisterType $segmentOverride = null;
 
+    // Segment descriptor cache (shadow registers)
+    // Each segment has a cached descriptor from the last load in protected mode
+    // This allows "Big Real Mode" / "Unreal Mode" to work:
+    // - Load segment with 4GB limit in protected mode
+    // - Switch to real mode (cached limit remains)
+    // - Access memory above 1MB using 32-bit addressing
+    private array $segmentDescriptorCache = [];
+
     // Hardware state
     private PicState $picState;
     private ApicState $apicState;
@@ -458,6 +466,47 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function ldtr(): array
     {
         return $this->ldtr;
+    }
+
+    /**
+     * Cache segment descriptor when loading in protected mode.
+     * This is essential for Big Real Mode (Unreal Mode) support.
+     *
+     * @param RegisterType $segment The segment register (DS, ES, FS, GS, SS, CS)
+     * @param array $descriptor The descriptor with 'base', 'limit', 'present' keys
+     */
+    public function cacheSegmentDescriptor(RegisterType $segment, array $descriptor): void
+    {
+        $this->segmentDescriptorCache[$segment->name] = $descriptor;
+    }
+
+    /**
+     * Get cached segment descriptor.
+     * Returns null if no cached descriptor exists.
+     *
+     * @param RegisterType $segment The segment register
+     * @return array|null The cached descriptor or null
+     */
+    public function getCachedSegmentDescriptor(RegisterType $segment): ?array
+    {
+        return $this->segmentDescriptorCache[$segment->name] ?? null;
+    }
+
+    /**
+     * Check if a segment has a cached descriptor with extended limit.
+     * This indicates Big Real Mode capability for that segment.
+     *
+     * @param RegisterType $segment The segment register
+     * @return bool True if segment has cached descriptor with limit > 64KB
+     */
+    public function hasExtendedSegmentLimit(RegisterType $segment): bool
+    {
+        $cached = $this->getCachedSegmentDescriptor($segment);
+        if ($cached === null) {
+            return false;
+        }
+        // Check if limit exceeds normal real mode 64KB limit
+        return isset($cached['limit']) && $cached['limit'] > 0xFFFF;
     }
 
     public function setIopl(int $iopl): void

@@ -67,6 +67,17 @@ class MemoryAccessor implements MemoryAccessorInterface
             ));
         }
 
+        // Debug: trace writes to 0xB1B0-0xB1D0 area (bcopyxx source buffer)
+        if ($address >= 0xB1B0 && $address <= 0xB1D0) {
+            $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
+            $caller = isset($bt[2]) ? ($bt[2]['class'] ?? '') . '::' . ($bt[2]['function'] ?? '') : 'unknown';
+            $ip = $this->runtime->memory()->offset();
+            $this->runtime->option()->logger()->debug(sprintf(
+                'WRITE to bcopyxx source (0xB1Bx): IP=0x%04X address=0x%08X byte=0x%02X caller=%s',
+                $ip, $address, $value & 0xFF, $caller
+            ));
+        }
+
         // Debug: trace writes to stack pointer save area (0x38B8-0x38BC)
         if ($address >= 0x38B8 && $address <= 0x38BC) {
             $this->runtime->option()->logger()->debug(sprintf(
