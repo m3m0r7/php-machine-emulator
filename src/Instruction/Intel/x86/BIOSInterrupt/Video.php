@@ -20,6 +20,13 @@ class Video implements InterruptInterface
     private static int $vbeModeInfoAddr = 0x2200;
     private static int $vbeModeListAddr = 0x2000;
 
+    // ANSI escape sequence parser state (static to persist across instances)
+    private const ANSI_STATE_NORMAL = 0;
+    private const ANSI_STATE_ESC = 1;      // Got ESC (0x1B)
+    private const ANSI_STATE_CSI = 2;      // Got ESC [
+    private static int $ansiState = self::ANSI_STATE_NORMAL;
+    private static string $ansiBuffer = '';
+
     public function __construct(protected RuntimeInterface $runtime)
     {
     }
@@ -94,6 +101,46 @@ class Video implements InterruptInterface
     {
         $char = $fetchResult->asLowBit();
 
+        // ANSI escape sequence state machine
+        if (self::$ansiState === self::ANSI_STATE_ESC) {
+            if ($char === 0x5B) { // '['
+                // ESC [ - CSI sequence start
+                self::$ansiState = self::ANSI_STATE_CSI;
+                self::$ansiBuffer = '';
+                return;
+            }
+            // Not a CSI sequence, reset and output ESC as-is (or ignore)
+            self::$ansiState = self::ANSI_STATE_NORMAL;
+            // Fall through to handle the current character
+        }
+
+        if (self::$ansiState === self::ANSI_STATE_CSI) {
+            // Collecting CSI parameters
+            // Parameters are digits 0-9, semicolons, and terminated by a letter
+            if (($char >= 0x30 && $char <= 0x3F) || $char === 0x3B) {
+                // 0-9, :, ;, <, =, >, ? - parameter bytes
+                self::$ansiBuffer .= chr($char);
+                return;
+            }
+            if ($char >= 0x40 && $char <= 0x7E) {
+                // Final byte (command)
+                $this->executeAnsiCommand($runtime, chr($char), self::$ansiBuffer);
+                self::$ansiState = self::ANSI_STATE_NORMAL;
+                self::$ansiBuffer = '';
+                return;
+            }
+            // Invalid sequence, reset
+            self::$ansiState = self::ANSI_STATE_NORMAL;
+            self::$ansiBuffer = '';
+            // Fall through to handle the current character
+        }
+
+        // Check for ESC character
+        if ($char === 0x1B) {
+            self::$ansiState = self::ANSI_STATE_ESC;
+            return;
+        }
+
         // Handle control characters
         if ($char === 0x0D) {
             // CR - Carriage Return: move to beginning of line
@@ -131,6 +178,126 @@ class Video implements InterruptInterface
         if ($this->cursorCol >= $cols) {
             $this->cursorCol = 0;
             $this->cursorRow++;
+        }
+    }
+
+    /**
+     * Execute an ANSI CSI command.
+     */
+    protected function executeAnsiCommand(RuntimeInterface $runtime, string $command, string $params): void
+    {
+        // Parse parameters (semicolon-separated numbers)
+        $args = array_map('intval', explode(';', $params));
+        if (empty($args) || ($args[0] === 0 && $params === '')) {
+            $args = [1]; // Default parameter
+        }
+
+        switch ($command) {
+            case 'H': // CUP - Cursor Position (row;col)
+            case 'f': // HVP - Horizontal and Vertical Position
+                $row = ($args[0] ?? 1) - 1; // 1-based to 0-based
+                $col = ($args[1] ?? 1) - 1;
+                $this->cursorRow = max(0, $row);
+                $this->cursorCol = max(0, $col);
+                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+                break;
+
+            case 'A': // CUU - Cursor Up
+                $n = $args[0] ?? 1;
+                $this->cursorRow = max(0, $this->cursorRow - $n);
+                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+                break;
+
+            case 'B': // CUD - Cursor Down
+                $n = $args[0] ?? 1;
+                $this->cursorRow += $n;
+                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+                break;
+
+            case 'C': // CUF - Cursor Forward
+                $n = $args[0] ?? 1;
+                $this->cursorCol += $n;
+                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+                break;
+
+            case 'D': // CUB - Cursor Back
+                $n = $args[0] ?? 1;
+                $this->cursorCol = max(0, $this->cursorCol - $n);
+                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+                break;
+
+            case 'J': // ED - Erase in Display
+                $n = $args[0] ?? 0;
+                if ($n === 2) {
+                    // Clear entire screen
+                    $runtime->context()->screen()->clear();
+                    $this->cursorRow = 0;
+                    $this->cursorCol = 0;
+                }
+                // 0 = clear from cursor to end, 1 = clear from start to cursor (not implemented)
+                break;
+
+            case 'K': // EL - Erase in Line
+                // 0 = clear from cursor to end of line
+                // 1 = clear from start of line to cursor
+                // 2 = clear entire line
+                // Stub for now
+                break;
+
+            case 'm': // SGR - Select Graphic Rendition (colors, attributes)
+                $this->handleSgr($runtime, $args);
+                break;
+
+            case 's': // SCP - Save Cursor Position
+                // Stub
+                break;
+
+            case 'u': // RCP - Restore Cursor Position
+                // Stub
+                break;
+
+            default:
+                // Unknown command, ignore
+                break;
+        }
+    }
+
+    /**
+     * Handle SGR (Select Graphic Rendition) - text attributes and colors.
+     */
+    protected function handleSgr(RuntimeInterface $runtime, array $args): void
+    {
+        foreach ($args as $code) {
+            switch ($code) {
+                case 0: // Reset
+                    $runtime->context()->screen()->setCurrentAttribute(0x07); // Default white on black
+                    break;
+                case 1: // Bold/bright
+                    $attr = $runtime->context()->screen()->getCurrentAttribute();
+                    $runtime->context()->screen()->setCurrentAttribute($attr | 0x08); // Set bright bit
+                    break;
+                case 7: // Reverse video
+                    $attr = $runtime->context()->screen()->getCurrentAttribute();
+                    $fg = $attr & 0x0F;
+                    $bg = ($attr >> 4) & 0x0F;
+                    $runtime->context()->screen()->setCurrentAttribute(($fg << 4) | $bg);
+                    break;
+                case 30: case 31: case 32: case 33: case 34: case 35: case 36: case 37:
+                    // Foreground color (30-37 -> 0-7)
+                    $attr = $runtime->context()->screen()->getCurrentAttribute();
+                    $fg = $code - 30;
+                    $runtime->context()->screen()->setCurrentAttribute(($attr & 0xF8) | $fg);
+                    break;
+                case 40: case 41: case 42: case 43: case 44: case 45: case 46: case 47:
+                    // Background color (40-47 -> 0-7)
+                    $attr = $runtime->context()->screen()->getCurrentAttribute();
+                    $bg = $code - 40;
+                    $runtime->context()->screen()->setCurrentAttribute(($attr & 0x0F) | ($bg << 4));
+                    break;
+                default:
+                    // Ignore unknown SGR codes
+                    break;
+            }
         }
     }
 

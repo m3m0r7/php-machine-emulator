@@ -6,7 +6,15 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Exception\NullPointerException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
+use PHPMachineEmulator\Instruction\Intel\BIOSInterrupt;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Disk;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Keyboard;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\MemorySize;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\System;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Timer;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\TimeOfDay;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Video;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
@@ -241,6 +249,55 @@ class Group5 implements InstructionInterface
         $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
         $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
 
+        // Check if jumping to the default BIOS IVT handler (F000:FF53)
+        // This happens when a custom interrupt handler chains to the original BIOS handler
+        // We determine the BIOS service to call by looking at the AH register value
+        if (!$runtime->context()->cpu()->isProtectedMode() && $segment === 0xF000 && $offset === 0xFF53) {
+            $ah = ($runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(16) >> 8) & 0xFF;
+
+            // Determine interrupt vector based on AH value
+            // Common BIOS services:
+            // AH=0x00-0x1F: Video (INT 10h)
+            // AH=0x41,0x42,0x02,0x03,0x08,0x15: Disk (INT 13h)
+            // AH=0x00-0x12 and AH >= 0x80: Keyboard (INT 16h)
+            $intVector = match (true) {
+                $ah === 0x42 || $ah === 0x02 || $ah === 0x03 || $ah === 0x08 || $ah === 0x15 || $ah === 0x41 => 0x13, // Disk
+                $ah === 0x0E || $ah === 0x00 || $ah === 0x01 || $ah === 0x02 || $ah === 0x03 || $ah === 0x06 || $ah === 0x07 || $ah === 0x0B || $ah === 0x0C || $ah === 0x0F || $ah === 0x10 || $ah === 0x11 || $ah === 0x12 || $ah === 0x13 => 0x10, // Video
+                default => 0x10, // Default to video
+            };
+
+            $runtime->option()->logger()->debug(sprintf(
+                'JMP FAR to BIOS IVT handler [F000:FF53]: AH=0x%02X -> INT 0x%02X',
+                $ah,
+                $intVector
+            ));
+
+            // Execute the BIOS handler for this interrupt vector
+            $this->executeBiosHandler($runtime, $intVector);
+
+            // Now execute IRET to return to the caller
+            // Pop IP, CS, FLAGS from stack and return to caller
+            $ma = $runtime->memoryAccessor();
+            $ip = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+            $cs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+            $flags = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+            $this->writeCodeSegment($runtime, $cs);
+            $linear = $this->linearCodeAddress($runtime, $cs & 0xFFFF, $ip, 16);
+            $runtime->option()->logger()->debug(sprintf(
+                'JMP FAR -> BIOS -> IRET: CS=0x%04X IP=0x%04X linear=0x%05X flags=0x%04X',
+                $cs, $ip, $linear, $flags
+            ));
+            $runtime->memory()->setOffset($linear);
+            $ma->setCarryFlag(($flags & 0x1) !== 0);
+            $ma->setParityFlag(($flags & (1 << 2)) !== 0);
+            $ma->setZeroFlag(($flags & (1 << 6)) !== 0);
+            $ma->setSignFlag(($flags & (1 << 7)) !== 0);
+            $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
+            $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);
+            $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);
+            return ExecutionStatus::SUCCESS;
+        }
+
         if ($runtime->option()->shouldChangeOffset()) {
             if ($runtime->context()->cpu()->isProtectedMode()) {
                 $gate = $this->readCallGateDescriptor($runtime, $segment);
@@ -318,5 +375,33 @@ class Group5 implements InstructionInterface
             $modRegRM->digit(),
             $ip
         ));
+    }
+
+    private array $biosHandlerInstances = [];
+
+    protected function executeBiosHandler(RuntimeInterface $runtime, int $vector): void
+    {
+        $operand = BIOSInterrupt::tryFrom($vector);
+
+        if ($operand === null) {
+            return;
+        }
+
+        match ($operand) {
+            BIOSInterrupt::TIMER_INTERRUPT => ($this->biosHandlerInstances[Timer::class] ??= new Timer())
+                ->process($runtime),
+            BIOSInterrupt::VIDEO_INTERRUPT => ($this->biosHandlerInstances[Video::class] ??= new Video($runtime))
+                ->process($runtime),
+            BIOSInterrupt::MEMORY_SIZE_INTERRUPT => ($this->biosHandlerInstances[MemorySize::class] ??= new MemorySize())
+                ->process($runtime),
+            BIOSInterrupt::DISK_INTERRUPT => ($this->biosHandlerInstances[Disk::class] ??= new Disk($runtime))
+                ->process($runtime),
+            BIOSInterrupt::KEYBOARD_INTERRUPT => ($this->biosHandlerInstances[Keyboard::class] ??= new Keyboard($runtime))
+                ->process($runtime),
+            BIOSInterrupt::TIME_OF_DAY_INTERRUPT => ($this->biosHandlerInstances[TimeOfDay::class] ??= new TimeOfDay())
+                ->process($runtime),
+            BIOSInterrupt::SYSTEM_INTERRUPT => ($this->biosHandlerInstances[System::class] ??= new System())->process($runtime),
+            default => null,
+        };
     }
 }

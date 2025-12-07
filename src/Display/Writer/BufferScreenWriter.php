@@ -12,6 +12,7 @@ class BufferScreenWriter implements ScreenWriterInterface
 {
     protected int $cursorRow = 0;
     protected int $cursorCol = 0;
+    protected int $currentAttribute = 0x07; // Default: white on black
 
     public function __construct(protected RuntimeInterface $runtime, protected VideoTypeInfo $videoTypeInfo)
     {
@@ -66,5 +67,15 @@ class BufferScreenWriter implements ScreenWriterInterface
     public function flushIfNeeded(): void
     {
         // Buffer mode: no batching needed
+    }
+
+    public function setCurrentAttribute(int $attribute): void
+    {
+        $this->currentAttribute = $attribute;
+    }
+
+    public function getCurrentAttribute(): int
+    {
+        return $this->currentAttribute;
     }
 }

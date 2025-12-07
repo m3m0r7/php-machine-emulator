@@ -17,4 +17,6 @@ interface ScreenWriterInterface
     public function clear(): void;
     public function fillArea(int $row, int $col, int $width, int $height, int $attribute): void;
     public function flushIfNeeded(): void;
+    public function setCurrentAttribute(int $attribute): void;
+    public function getCurrentAttribute(): int;
 }

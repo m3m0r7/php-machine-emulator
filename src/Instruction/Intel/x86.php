@@ -142,6 +142,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Emms;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Fxsave;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Group0;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Group6;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PHPBIOSCall;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\ImulRegRm;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\JccNear;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Lxs;
@@ -408,6 +409,7 @@ class x86 implements InstructionListInterface
             CacheOp::class,
             Emms::class,
             Fxsave::class,
+            PHPBIOSCall::class,
         ];
     }
 

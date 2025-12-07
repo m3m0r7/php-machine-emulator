@@ -12,6 +12,7 @@ class TerminalScreenWriter implements ScreenWriterInterface
 {
     protected int $cursorRow = 0;
     protected int $cursorCol = 0;
+    protected int $currentAttribute = 0x07; // Default: white on black
 
     /** @var string Buffered output for batch writing */
     protected string $outputBuffer = '';
@@ -135,5 +136,15 @@ class TerminalScreenWriter implements ScreenWriterInterface
         // Write all buffered output at once
         $this->write($this->outputBuffer);
         $this->outputBuffer = '';
+    }
+
+    public function setCurrentAttribute(int $attribute): void
+    {
+        $this->currentAttribute = $attribute;
+    }
+
+    public function getCurrentAttribute(): int
+    {
+        return $this->currentAttribute;
     }
 }

@@ -642,16 +642,116 @@ class BIOS
 
     /**
      * Initialize ROM area with BIOS identification and default interrupt handlers.
+     *
+     * ISOLINUX and other bootloaders use RETF to call BIOS services indirectly.
+     * They push a return address, set up registers (e.g., AH=42h for disk read),
+     * then RETF to F000:xxxx. We use PHPBIOSCall (0F FF xx) to handle these directly.
+     *
+     * This also allows custom interrupt handlers to call "original" BIOS handlers
+     * via jmp far [orig_intXX] without causing infinite loops through IVT.
      */
     protected function initializeROM(): void
     {
         $mem = $this->runtime()->memoryAccessor();
 
-        // Place default IRET handler at F000:FF53 (physical address 0xFFF53)
-        // IRET opcode = 0xCF
+        // ========================================
+        // BIOS Interrupt Trampolines using PHPBIOSCall
+        // ========================================
+        // Each trampoline is 4 bytes: 0F FF xx (PHPBIOSCall) + CF (IRET)
+        // PHPBIOSCall directly invokes PHP BIOS handlers WITHOUT IVT lookup.
+        // This prevents infinite loops when custom handlers call original BIOS.
+        //
+        // Layout at F000:FF00-F000:FF5F:
+        //   FF00: PHPBIOSCall 10h + IRET (video)
+        //   FF04: PHPBIOSCall 13h + IRET (disk) - CRITICAL for ISOLINUX
+        //   FF08: PHPBIOSCall 15h + IRET (system)
+        //   FF0C: PHPBIOSCall 16h + IRET (keyboard)
+        //   ...
+        //   FF53: Default IRET-only handler
+
+        $trampolineBase = (0xF000 << 4) + 0xFF00;  // 0xFFF00
+
+        // INT 10h - Video services (F000:FF00)
+        $mem->writeBySize($trampolineBase + 0x00, 0x0F, 8);  // Two-byte opcode prefix
+        $mem->writeBySize($trampolineBase + 0x01, 0xFF, 8);  // PHPBIOSCall
+        $mem->writeBySize($trampolineBase + 0x02, 0x10, 8);  // 10h
+        $mem->writeBySize($trampolineBase + 0x03, 0xCF, 8);  // IRET
+
+        // INT 13h - Disk services (F000:FF04) - CRITICAL for ISOLINUX disk reads
+        $mem->writeBySize($trampolineBase + 0x04, 0x0F, 8);  // Two-byte opcode prefix
+        $mem->writeBySize($trampolineBase + 0x05, 0xFF, 8);  // PHPBIOSCall
+        $mem->writeBySize($trampolineBase + 0x06, 0x13, 8);  // 13h
+        $mem->writeBySize($trampolineBase + 0x07, 0xCF, 8);  // IRET
+
+        // INT 15h - System services (F000:FF08)
+        $mem->writeBySize($trampolineBase + 0x08, 0x0F, 8);  // Two-byte opcode prefix
+        $mem->writeBySize($trampolineBase + 0x09, 0xFF, 8);  // PHPBIOSCall
+        $mem->writeBySize($trampolineBase + 0x0A, 0x15, 8);  // 15h
+        $mem->writeBySize($trampolineBase + 0x0B, 0xCF, 8);  // IRET
+
+        // INT 16h - Keyboard services (F000:FF0C)
+        $mem->writeBySize($trampolineBase + 0x0C, 0x0F, 8);  // Two-byte opcode prefix
+        $mem->writeBySize($trampolineBase + 0x0D, 0xFF, 8);  // PHPBIOSCall
+        $mem->writeBySize($trampolineBase + 0x0E, 0x16, 8);  // 16h
+        $mem->writeBySize($trampolineBase + 0x0F, 0xCF, 8);  // IRET
+
+        // INT 1Ah - Time of day (F000:FF10)
+        $mem->writeBySize($trampolineBase + 0x10, 0x0F, 8);  // Two-byte opcode prefix
+        $mem->writeBySize($trampolineBase + 0x11, 0xFF, 8);  // PHPBIOSCall
+        $mem->writeBySize($trampolineBase + 0x12, 0x1A, 8);  // 1Ah
+        $mem->writeBySize($trampolineBase + 0x13, 0xCF, 8);  // IRET
+
+        // INT 08h - Timer tick (F000:FF14)
+        $mem->writeBySize($trampolineBase + 0x14, 0x0F, 8);  // Two-byte opcode prefix
+        $mem->writeBySize($trampolineBase + 0x15, 0xFF, 8);  // PHPBIOSCall
+        $mem->writeBySize($trampolineBase + 0x16, 0x08, 8);  // 08h
+        $mem->writeBySize($trampolineBase + 0x17, 0xCF, 8);  // IRET
+
+        // INT 12h - Memory size (F000:FF18)
+        $mem->writeBySize($trampolineBase + 0x18, 0x0F, 8);  // Two-byte opcode prefix
+        $mem->writeBySize($trampolineBase + 0x19, 0xFF, 8);  // PHPBIOSCall
+        $mem->writeBySize($trampolineBase + 0x1A, 0x12, 8);  // 12h
+        $mem->writeBySize($trampolineBase + 0x1B, 0xCF, 8);  // IRET
+
+        // Default IRET-only handler at F000:FF53 (physical 0xFFF53)
+        // This is for interrupts that don't need special handling
         $iretAddress = (0xF000 << 4) + 0xFF53;  // 0xFFF53
         $mem->writeBySize($iretAddress, 0xCF, 8);
 
+        // ========================================
+        // Update IVT to point to trampolines instead of IRET-only handler
+        // ========================================
+        // INT 10h -> F000:FF00
+        $mem->writeBySize(0x10 * 4, 0xFF00, 16);      // offset
+        $mem->writeBySize(0x10 * 4 + 2, 0xF000, 16);  // segment
+
+        // INT 13h -> F000:FF04 (CRITICAL for ISOLINUX)
+        $mem->writeBySize(0x13 * 4, 0xFF04, 16);      // offset
+        $mem->writeBySize(0x13 * 4 + 2, 0xF000, 16);  // segment
+
+        // INT 15h -> F000:FF08
+        $mem->writeBySize(0x15 * 4, 0xFF08, 16);      // offset
+        $mem->writeBySize(0x15 * 4 + 2, 0xF000, 16);  // segment
+
+        // INT 16h -> F000:FF0C
+        $mem->writeBySize(0x16 * 4, 0xFF0C, 16);      // offset
+        $mem->writeBySize(0x16 * 4 + 2, 0xF000, 16);  // segment
+
+        // INT 1Ah -> F000:FF10
+        $mem->writeBySize(0x1A * 4, 0xFF10, 16);      // offset
+        $mem->writeBySize(0x1A * 4 + 2, 0xF000, 16);  // segment
+
+        // INT 08h -> F000:FF14
+        $mem->writeBySize(0x08 * 4, 0xFF14, 16);      // offset
+        $mem->writeBySize(0x08 * 4 + 2, 0xF000, 16);  // segment
+
+        // INT 12h -> F000:FF18
+        $mem->writeBySize(0x12 * 4, 0xFF18, 16);      // offset
+        $mem->writeBySize(0x12 * 4 + 2, 0xF000, 16);  // segment
+
+        // ========================================
+        // BIOS Identification
+        // ========================================
         // BIOS identification string at F000:E000 (physical address 0xFE000)
         $biosId = "PHPMachineEmulator BIOS";
         $biosIdAddress = (0xF000 << 4) + 0xE000;  // 0xFE000
@@ -671,7 +771,8 @@ class BIOS
         $mem->writeBySize(0xFFFFE, 0xFC, 8);
 
         $this->machine->option()->logger()->debug(
-            sprintf('BIOS: Initialized ROM area with IRET at 0x%05X, ID at 0x%05X', $iretAddress, $biosIdAddress)
+            sprintf('BIOS: Initialized ROM with trampolines at 0x%05X, INT13h at F000:FF03, ID at 0x%05X',
+                $trampolineBase, $biosIdAddress)
         );
     }
 
