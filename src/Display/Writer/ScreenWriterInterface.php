@@ -14,6 +14,7 @@ interface ScreenWriterInterface
     public function setCursorPosition(int $row, int $col): void;
     public function getCursorPosition(): array;
     public function writeCharAtCursor(string $char, int $count = 1, ?int $attribute = null): void;
+    public function writeCharAt(int $row, int $col, string $char, ?int $attribute = null): void;
     public function clear(): void;
     public function fillArea(int $row, int $col, int $width, int $height, int $attribute): void;
     public function flushIfNeeded(): void;

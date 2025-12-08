@@ -79,6 +79,24 @@ class TerminalScreenWriter implements ScreenWriterInterface
         }
     }
 
+    public function writeCharAt(int $row, int $col, string $char, ?int $attribute = null): void
+    {
+        // Move cursor to position and write character
+        $this->write(sprintf("\033[%d;%dH", $row + 1, $col + 1));
+        if ($attribute !== null) {
+            $fg = $attribute & 0x0F;
+            $bg = ($attribute >> 4) & 0x0F;
+            $this->write($this->vgaToAnsi($fg, $bg));
+        }
+        $this->write($char);
+        if ($attribute !== null) {
+            $this->write("\033[0m");
+        }
+        // Update internal cursor position
+        $this->cursorRow = $row;
+        $this->cursorCol = $col + 1;
+    }
+
     public function clear(): void
     {
         // ANSI escape sequence to clear screen and move cursor to top-left

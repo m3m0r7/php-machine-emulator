@@ -17,4 +17,17 @@ interface RuntimeScreenContextInterface
     public function stop(): void;
 
     public function flushIfNeeded(): void;
+
+    public function setCursorPosition(int $row, int $col): void;
+
+    /**
+     * @return array{row: int, col: int}
+     */
+    public function getCursorPosition(): array;
+
+    public function clear(): void;
+
+    public function setCurrentAttribute(int $attribute): void;
+
+    public function getCurrentAttribute(): int;
 }

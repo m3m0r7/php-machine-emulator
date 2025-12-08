@@ -295,6 +295,19 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->markDirty();
     }
 
+    public function writeCharAt(int $row, int $col, string $char, ?int $attribute = null): void
+    {
+        // Write character at specific position (for video memory writes)
+        $attr = $attribute ?? $this->currentAttribute;
+
+        if (!isset($this->textBuffer[$row])) {
+            $this->textBuffer[$row] = [];
+        }
+        $this->textBuffer[$row][$col] = ['char' => $char, 'attr' => $attr];
+
+        $this->markDirty();
+    }
+
     public function clear(): void
     {
         $this->textBuffer = [];

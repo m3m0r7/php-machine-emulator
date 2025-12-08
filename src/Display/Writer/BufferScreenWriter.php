@@ -53,6 +53,12 @@ class BufferScreenWriter implements ScreenWriterInterface
         $this->write(str_repeat($char, $count));
     }
 
+    public function writeCharAt(int $row, int $col, string $char, ?int $attribute = null): void
+    {
+        // Buffer mode: just write the character (no positioning)
+        $this->write($char);
+    }
+
     public function clear(): void
     {
         $this->cursorRow = 0;

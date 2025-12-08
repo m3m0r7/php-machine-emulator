@@ -220,17 +220,6 @@ trait AddressingTrait
         // Perform addition with 32-bit wraparound
         $offset = ($baseVal32 + $scaledIndex + $disp) & $mask;
 
-        // Debug: log 32-bit SIB addressing when base is EDI
-        if ($rm === 0b100 && isset($sib) && $sib->base() === 0b111) {
-            $runtime->option()->logger()->debug(sprintf(
-                'effectiveAddress32 SIB [EDI+index]: base=0x%08X index=0x%08X scale=%d offset=0x%08X',
-                $baseVal32,
-                $indexVal32,
-                $scale,
-                $offset
-            ));
-        }
-
         return [$offset, $defaultSegment];
     }
 

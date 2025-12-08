@@ -50,20 +50,36 @@ class AnsiParser implements AnsiParserInterface
         // CSI state handling
         if ($this->state === self::STATE_CSI) {
             // Collecting CSI parameters
-            // Parameters are digits 0-9, semicolons, and terminated by a letter
-            if (($char >= 0x30 && $char <= 0x3F) || $char === 0x3B) {
-                // 0-9, :, ;, <, =, >, ? - parameter bytes
+            // Parameters are digits 0-9, semicolons, and terminated by a letter (0x40-0x7E)
+            // 0x30-0x39 = '0'-'9', 0x3B = ';', 0x3A = ':', 0x3C-0x3F = '<', '=', '>', '?'
+            if ($char >= 0x30 && $char <= 0x3F) {
+                // Parameter bytes (0-9, :, ;, <, =, >, ?)
+                $this->buffer .= chr($char);
+                return true;
+            }
+            // Intermediate bytes (0x20-0x2F: space, !, ", #, $, %, &, ', (, ), *, +, ,, -, ., /)
+            if ($char >= 0x20 && $char <= 0x2F) {
                 $this->buffer .= chr($char);
                 return true;
             }
             if ($char >= 0x40 && $char <= 0x7E) {
                 // Final byte (command)
+                $runtime->option()->logger()->debug(sprintf(
+                    'ANSI CSI: \\e[%s%c',
+                    $this->buffer,
+                    $char
+                ));
                 $this->executeCommand($runtime, chr($char), $this->buffer, $videoContext);
                 $this->state = self::STATE_NORMAL;
                 $this->buffer = '';
                 return true;
             }
             // Invalid sequence, reset
+            $runtime->option()->logger()->debug(sprintf(
+                'ANSI CSI invalid: buffer=%s, char=0x%02X',
+                $this->buffer,
+                $char
+            ));
             $this->state = self::STATE_NORMAL;
             $this->buffer = '';
             return false;

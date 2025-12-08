@@ -84,9 +84,30 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
         if ($address >= $textModeBase && $address < 0xC0000) {
             $offset = $address - $textModeBase;
             // Only process character bytes (even offsets), skip attribute bytes (odd offsets)
-            if (($offset % 2) === 0 && $nextValue !== null && $nextValue >= 0x20 && $nextValue < 0x7F) {
-                // This is a printable character - output it via IO
-                $runtime->option()->IO()->output()->write(chr($nextValue));
+            if (($offset % 2) === 0 && $nextValue !== null) {
+                // Calculate row/col from offset
+                // Each row is 160 bytes (80 chars * 2 bytes per char)
+                $charOffset = $offset / 2;
+                $cols = 80; // Standard text mode width
+                $row = (int) ($charOffset / $cols);
+                $col = $charOffset % $cols;
+
+                // Use ANSI parser for VRAM writes - SYSLINUX writes escape sequences to VRAM
+                $videoContext = $runtime->context()->devices()->video();
+                $ansiParser = $videoContext->ansiParser();
+
+                // Process character through ANSI parser
+                if ($ansiParser->processChar($nextValue, $runtime, $videoContext)) {
+                    // Character was consumed by ANSI parser (part of escape sequence)
+                    return;
+                }
+
+                // Write character to screen at calculated position
+                if ($nextValue >= 0x20 && $nextValue < 0x7F) {
+                    // Printable character - write to screen buffer
+                    $char = chr($nextValue);
+                    $runtime->context()->screen()->writeCharAt($row, $col, $char);
+                }
             }
             // Attribute byte or non-printable - ignore
             return;

@@ -71,6 +71,11 @@ class RuntimeScreenContext implements RuntimeScreenContextInterface
         $this->screenWriter->writeCharAtCursor($char, $count, $attribute);
     }
 
+    public function writeCharAt(int $row, int $col, string $char, ?int $attribute = null): void
+    {
+        $this->screenWriter->writeCharAt($row, $col, $char, $attribute);
+    }
+
     public function clear(): void
     {
         if (method_exists($this->screenWriter, 'clear')) {
@@ -86,5 +91,15 @@ class RuntimeScreenContext implements RuntimeScreenContextInterface
     public function flushIfNeeded(): void
     {
         $this->screenWriter->flushIfNeeded();
+    }
+
+    public function setCurrentAttribute(int $attribute): void
+    {
+        $this->screenWriter->setCurrentAttribute($attribute);
+    }
+
+    public function getCurrentAttribute(): int
+    {
+        return $this->screenWriter->getCurrentAttribute();
     }
 }

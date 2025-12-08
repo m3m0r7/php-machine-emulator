@@ -100,6 +100,15 @@ class Video implements InterruptInterface
         $char = $fetchResult->asLowBit();
         $videoContext = $this->videoContext();
 
+        // Debug: log characters that might be part of escape sequences
+        $charStr = ($char >= 0x20 && $char < 0x7F) ? chr($char) : '?';
+        if ($charStr === 'd' || $charStr === ';' || $charStr === 'H' || $charStr === '1' || $char === 0x1B) {
+            $runtime->option()->logger()->debug(sprintf(
+                'TTY output: char=%s (0x%02X) ansiState=%d',
+                $charStr, $char, $videoContext->ansiParser()->getState()
+            ));
+        }
+
         // Use ANSI parser from VideoContext
         if ($videoContext->ansiParser()->processChar($char, $runtime, $videoContext)) {
             // Character was consumed by ANSI parser
@@ -236,14 +245,23 @@ class Video implements InterruptInterface
         // BH = page number
         // BL = attribute (text mode) or color (graphics mode)
         // CX = number of times to write character
-        $char = chr($fetchResult->asLowBit());
+        $charCode = $fetchResult->asLowBit();
         $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize(16);
         $attribute = $bx & 0xFF; // BL = attribute
         $count = $runtime->memoryAccessor()->fetch(RegisterType::ECX)->asBytesBySize(16);
 
-        $runtime->option()->logger()->debug(sprintf('WRITE_CHAR_ATTR: char=0x%02X attr=0x%02X count=%d', ord($char), $attribute, $count));
+        $runtime->option()->logger()->debug(sprintf('WRITE_CHAR_ATTR: char=0x%02X attr=0x%02X count=%d', $charCode, $attribute, $count));
+
+        // SYSLINUX uses AH=09h to output ANSI escape sequences
+        // Process through ANSI parser first
+        $videoContext = $this->videoContext();
+        if ($videoContext->ansiParser()->processChar($charCode, $runtime, $videoContext)) {
+            // Character was consumed by ANSI parser (part of escape sequence)
+            return;
+        }
 
         // Write character at current cursor position with attribute (doesn't advance cursor)
+        $char = chr($charCode);
         $runtime->context()->screen()->writeCharAtCursor($char, $count, $attribute);
     }
 
@@ -253,10 +271,18 @@ class Video implements InterruptInterface
         // AL = character to write
         // BH = page number
         // CX = number of times to write character
-        $char = chr($fetchResult->asLowBit());
+        $charCode = $fetchResult->asLowBit();
         $count = $runtime->memoryAccessor()->fetch(RegisterType::ECX)->asBytesBySize(16);
 
+        // Process through ANSI parser first
+        $videoContext = $this->videoContext();
+        if ($videoContext->ansiParser()->processChar($charCode, $runtime, $videoContext)) {
+            // Character was consumed by ANSI parser (part of escape sequence)
+            return;
+        }
+
         // Write character at current cursor position (doesn't advance cursor)
+        $char = chr($charCode);
         $runtime->context()->screen()->writeCharAtCursor($char, $count);
     }
 
