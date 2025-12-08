@@ -116,7 +116,7 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->canvas->clear(Color::asBlack());
 
         $charWidth = 8;
-        $charHeight = 16;
+        $charHeight = 8;
 
         // Group by color for batch rendering
         $bgRectsByColor = [];
