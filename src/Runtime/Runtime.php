@@ -165,7 +165,6 @@ class Runtime implements RuntimeInterface
         $iterationContext = $cpu->iteration();
 
         while (!$this->memory->isEOF()) {
-            $s = microtime(true);
             $this->instructionCount++;
             $this->tickTimers();
 
@@ -197,8 +196,6 @@ class Runtime implements RuntimeInterface
                 $this->processShutdownCallbacks();
                 throw new HaltException('The executor halted');
             }
-
-            var_dump(microtime(true) - $s);
         }
 
         $this->processShutdownCallbacks();

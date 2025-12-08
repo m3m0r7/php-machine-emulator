@@ -20,8 +20,8 @@ namespace PHPMachineEmulator\Stream;
  */
 class MemoryStream implements MemoryStreamInterface
 {
-    /** @var int Expansion chunk size (8MB) */
-    public const EXPANSION_CHUNK_SIZE = 0x100000 * 8;
+    /** @var int Expansion chunk size (1GB) */
+    public const EXPANSION_CHUNK_SIZE = 0x40000000;
 
     /** @var array<int, int> Lookup table for ord() optimization (char -> int) */
     private static array $ordMap = [];
