@@ -57,6 +57,11 @@ class StreamProxy implements StreamProxyInterface
         return $this->stream->dword();
     }
 
+    public function read(int $length): string
+    {
+        return $this->stream->read($length);
+    }
+
     // ========================================
     // StreamWriterInterface implementation
     // ========================================

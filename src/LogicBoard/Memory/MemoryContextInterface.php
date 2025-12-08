@@ -20,9 +20,4 @@ interface MemoryContextInterface
      * Get the swap size in bytes.
      */
     public function swapSize(): int;
-
-    /**
-     * Get the PHP memory limit string (e.g., '1G', '512M').
-     */
-    public function phpMemoryLimit(): string;
 }

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+ini_set('memory_limit', "-1");
+
 $directory = new RecursiveDirectoryIterator(__DIR__ . '/Case');
 $iterator = new RecursiveIteratorIterator($directory);
 $filtered = new RegexIterator($iterator, '/.*?\\/.*\\.asm$/', RegexIterator::GET_MATCH);

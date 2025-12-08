@@ -10,7 +10,7 @@ class ISO9660
 {
     public const SECTOR_SIZE = 2048;
     public const SYSTEM_AREA_SECTORS = 16;
-    private const BUFFER_SIZE = 1048576; // 1MB buffer
+    private const BUFFER_SIZE = 8388608; // 8MB buffer
 
     // Volume Descriptor Types
     public const VD_TYPE_BOOT_RECORD = 0;

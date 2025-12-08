@@ -63,4 +63,14 @@ class EmulatedKeyboardStream implements StreamReaderInterface
     {
         return $this->byte() | ($this->byte() << 8) | ($this->byte() << 16) | ($this->byte() << 24);
     }
+
+    public function read(int $length): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+        $result = substr($this->input, $this->pos, $length);
+        $this->pos += strlen($result);
+        return $result;
+    }
 }

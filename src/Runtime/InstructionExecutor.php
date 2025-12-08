@@ -73,7 +73,7 @@ class InstructionExecutor implements InstructionExecutorInterface
         }
 
         // Debug trace
-        $this->logExecution($this->lastInstructionPointer, $opcodes);
+        // $this->logExecution($this->lastInstructionPointer, $opcodes);
 
         // Execute the instruction
         return $this->executeOpcodes($opcodes);

@@ -76,4 +76,14 @@ trait GenericStream
     {
         return $this->offset() === $this->fileSize || feof($this->resource);
     }
+
+    public function read(int $length): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+
+        $data = fread($this->resource, $length);
+        return $data === false ? '' : $data;
+    }
 }

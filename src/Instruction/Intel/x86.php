@@ -186,6 +186,12 @@ class x86 implements InstructionListInterface
 
     protected int $maxOpcodeLength = 1;
 
+    /** @var array<int, array> Cache for findInstruction results */
+    protected array $findInstructionCache = [];
+
+    /** @var array<int, bool> Cache for isMultiByteOpcode results */
+    protected array $isMultiByteOpcodeCache = [];
+
     public function register(): RegisterInterface
     {
         return $this->register ??= new Register();
@@ -193,9 +199,15 @@ class x86 implements InstructionListInterface
 
     public function findInstruction(int|array $opcodes): array
     {
+        $opcodeArray = is_array($opcodes) ? $opcodes : [$opcodes];
+        $cacheKey = $this->bytesToKey($opcodeArray);
+
+        if (isset($this->findInstructionCache[$cacheKey])) {
+            return $this->findInstructionCache[$cacheKey];
+        }
+
         $this->instructionList(); // ensure initialized
 
-        $opcodeArray = is_array($opcodes) ? $opcodes : [$opcodes];
         $length = count($opcodeArray);
 
         // Try multi-byte match first (longest to shortest)
@@ -203,6 +215,7 @@ class x86 implements InstructionListInterface
             for ($len = min($length, $this->maxOpcodeLength); $len >= 2; $len--) {
                 $key = $this->bytesToKey(array_slice($opcodeArray, 0, $len));
                 if (isset($this->multiByteOpcodes[$key])) {
+                    $this->findInstructionCache[$cacheKey] = $this->multiByteOpcodes[$key];
                     return $this->multiByteOpcodes[$key];
                 }
             }
@@ -212,25 +225,36 @@ class x86 implements InstructionListInterface
         $opcode = $opcodeArray[0];
         $instruction = $this->instructionList[$opcode] ?? throw new InvalidOpcodeException($opcode);
 
-        return [$instruction, $opcode];
+        $result = [$instruction, $opcode];
+        $this->findInstructionCache[$cacheKey] = $result;
+        return $result;
     }
 
     public function isMultiByteOpcode(array $bytes): bool
     {
+        $cacheKey = $this->bytesToKey($bytes);
+
+        if (isset($this->isMultiByteOpcodeCache[$cacheKey])) {
+            return $this->isMultiByteOpcodeCache[$cacheKey];
+        }
+
         $this->instructionList(); // ensure initialized
 
         $length = count($bytes);
         if ($length < 2) {
+            $this->isMultiByteOpcodeCache[$cacheKey] = false;
             return false;
         }
 
         for ($len = min($length, $this->maxOpcodeLength); $len >= 2; $len--) {
             $key = $this->bytesToKey(array_slice($bytes, 0, $len));
             if (isset($this->multiByteOpcodes[$key])) {
+                $this->isMultiByteOpcodeCache[$cacheKey] = true;
                 return true;
             }
         }
 
+        $this->isMultiByteOpcodeCache[$cacheKey] = false;
         return false;
     }
 

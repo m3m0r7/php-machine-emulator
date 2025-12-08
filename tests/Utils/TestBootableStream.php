@@ -85,4 +85,14 @@ class TestBootableStream implements BootableStreamInterface
     {
         return $this->offset >= strlen($this->data);
     }
+
+    public function read(int $length): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+        $result = substr($this->data, $this->offset, $length);
+        $this->offset += strlen($result);
+        return $result;
+    }
 }

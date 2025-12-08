@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Stream;
 
 /**
- * Unified memory stream backed by php://temp.
+ * Unified memory stream with hybrid storage.
  *
- * Uses php://temp/maxmemory:xxx to allow large memory with automatic
- * swap to temporary file when exceeding the threshold.
+ * Uses a segmented approach with php://memory for fast access
+ * and php://temp for overflow storage when exceeding physical memory.
+ *
+ * Storage structure: [[min_range, max_range, resource], ...]
+ * - Memory segments use php://memory for fast access
+ * - Swap segments use php://temp for disk-backed storage
  *
  * Implements both read and write operations on a single memory space.
  * Boot data is copied here at startup, and all subsequent operations
@@ -16,25 +20,115 @@ namespace PHPMachineEmulator\Stream;
  */
 class MemoryStream implements MemoryStreamInterface
 {
-    /** @var resource */
-    private $memory;
+    /** @var int Expansion chunk size (8MB) */
+    public const EXPANSION_CHUNK_SIZE = 0x100000 * 8;
+
+    /** @var array<int, int> Lookup table for ord() optimization (char -> int) */
+    private static array $ordMap = [];
+
+    /** @var array<int, string> Lookup table for chr() optimization (int -> char) */
+    private static array $chrMap = [];
+
+    /** @var array<int, array{min: int, max: int, resource: resource, type: string}> Storage segments */
+    private array $segments = [];
 
     private int $offset = 0;
+
+    /** @var int|null Cached current segment index */
+    private ?int $currentSegmentIndex = null;
 
     /**
      * @param int $size Initial memory size (default 1MB)
      * @param int $physicalMaxMemorySize Maximum physical memory size (default 16MB)
      * @param int $swapSize Swap size for overflow to temp file (default 256MB)
      */
-    public function __construct(private int $size = 0x100000, private int $physicalMaxMemorySize = 0x1000000, private int $swapSize = 0x10000000)
-    {
-        // Use php://temp with maxmemory option
-        // Data is kept in memory up to physicalMaxMemorySize bytes, then swaps to temp file
-        $this->memory = fopen("php://temp/maxmemory:{$physicalMaxMemorySize}", 'r+b');
+    public function __construct(
+        private int $size = self::EXPANSION_CHUNK_SIZE,
+        private int $physicalMaxMemorySize = 0x1000000,
+        private int $swapSize = 0x10000000
+    ) {
+        // Initialize lookup tables if not already done
+        if (empty(self::$ordMap)) {
+            for ($i = 0; $i < 256; $i++) {
+                self::$ordMap[chr($i)] = $i;
+                self::$chrMap[$i] = chr($i);
+            }
+        }
 
-        // Pre-allocate memory with zeros
-        fwrite($this->memory, str_repeat("\x00", $size));
-        rewind($this->memory);
+        // Create initial memory segments in chunks
+        $offset = 0;
+        while ($offset < $size) {
+            $chunkEnd = min($offset + self::EXPANSION_CHUNK_SIZE, $size);
+            // Use memory segments until we exceed physical max, then use temp (swap)
+            $type = $chunkEnd <= $this->physicalMaxMemorySize ? 'memory' : 'temp';
+            $this->createSegment($offset, $chunkEnd, $type);
+            $offset = $chunkEnd;
+        }
+    }
+
+    /** @var int Maximum chunk size for pre-allocation (use half of typical memory limit to be safe) */
+    private const PREALLOC_CHUNK_SIZE = 0x4000000; // 64MB
+
+    /**
+     * Create a new storage segment.
+     *
+     * @param int $min Start offset (inclusive)
+     * @param int $max End offset (exclusive)
+     * @param string $type 'memory' for php://memory, 'temp' for php://temp
+     */
+    private function createSegment(int $min, int $max, string $type): void
+    {
+        $resource = $type === 'memory'
+            ? fopen('php://memory', 'r+b')
+            : fopen('php://temp', 'r+b');
+
+        if ($resource === false) {
+            throw new \RuntimeException("Failed to create {$type} segment");
+        }
+
+        // Pre-allocate with zeros in chunks to avoid memory exhaustion
+        $segmentSize = $max - $min;
+        $remaining = $segmentSize;
+        while ($remaining > 0) {
+            $chunkSize = min($remaining, self::PREALLOC_CHUNK_SIZE);
+            fwrite($resource, str_repeat("\x00", $chunkSize));
+            $remaining -= $chunkSize;
+        }
+        rewind($resource);
+
+        $this->segments[] = [
+            'min' => $min,
+            'max' => $max,
+            'resource' => $resource,
+            'type' => $type,
+        ];
+    }
+
+    /**
+     * Find the segment containing the given offset.
+     *
+     * @return array{min: int, max: int, resource: resource, type: string}|null
+     */
+    private function findSegment(int $offset): ?array
+    {
+        // Check cached segment first
+        if ($this->currentSegmentIndex !== null) {
+            $segment = $this->segments[$this->currentSegmentIndex];
+            if ($offset >= $segment['min'] && $offset < $segment['max']) {
+                return $segment;
+            }
+        }
+
+        // Search all segments
+        foreach ($this->segments as $index => $segment) {
+            if ($offset >= $segment['min'] && $offset < $segment['max']) {
+                $this->currentSegmentIndex = $index;
+                return $segment;
+            }
+        }
+
+        $this->currentSegmentIndex = null;
+        return null;
     }
 
     /**
@@ -50,19 +144,61 @@ class MemoryStream implements MemoryStreamInterface
             return false;
         }
 
-        // Expand in 1MB chunks
+        // Calculate new size in chunk increments
         $newSize = min(
             $this->logicalMaxMemorySize(),
-            (int) ceil(($requiredOffset + 1) / 0x100000) * 0x100000
+            (int) ceil(($requiredOffset + 1) / self::EXPANSION_CHUNK_SIZE) * self::EXPANSION_CHUNK_SIZE
         );
 
-        $currentPos = ftell($this->memory);
-        fseek($this->memory, $this->size, SEEK_SET);
-        fwrite($this->memory, str_repeat("\x00", $newSize - $this->size));
-        fseek($this->memory, $currentPos, SEEK_SET);
+        // Create new segments for the expanded range
+        while ($this->size < $newSize) {
+            $segmentStart = $this->size;
+            $segmentEnd = min($this->size + self::EXPANSION_CHUNK_SIZE, $newSize);
 
-        $this->size = $newSize;
+            // Use memory segments until we exceed physical max, then use temp (swap)
+            $type = $segmentEnd <= $this->physicalMaxMemorySize ? 'memory' : 'temp';
+
+            $this->createSegment($segmentStart, $segmentEnd, $type);
+            $this->size = $segmentEnd;
+        }
+
         return true;
+    }
+
+    /**
+     * Read a single byte from storage at the given offset.
+     */
+    private function readByteAt(int $offset): int
+    {
+        $segment = $this->findSegment($offset);
+        if ($segment === null) {
+            return 0;
+        }
+
+        $localOffset = $offset - $segment['min'];
+        fseek($segment['resource'], $localOffset, SEEK_SET);
+        $char = fread($segment['resource'], 1);
+
+        if ($char === false || $char === '') {
+            return 0;
+        }
+
+        return self::$ordMap[$char] ?? ord($char);
+    }
+
+    /**
+     * Write a single byte to storage at the given offset.
+     */
+    private function writeByteAt(int $offset, int $value): void
+    {
+        $segment = $this->findSegment($offset);
+        if ($segment === null) {
+            return;
+        }
+
+        $localOffset = $offset - $segment['min'];
+        fseek($segment['resource'], $localOffset, SEEK_SET);
+        fwrite($segment['resource'], self::$chrMap[$value & 0xFF] ?? chr($value & 0xFF));
     }
 
     // ========================================
@@ -81,8 +217,15 @@ class MemoryStream implements MemoryStreamInterface
             $this->ensureCapacity($this->offset);
         }
 
-        fseek($this->memory, $this->offset, SEEK_SET);
-        $char = fread($this->memory, 1);
+        $segment = $this->findSegment($this->offset);
+        if ($segment === null) {
+            $this->offset++;
+            return "\x00";
+        }
+
+        $localOffset = $this->offset - $segment['min'];
+        fseek($segment['resource'], $localOffset, SEEK_SET);
+        $char = fread($segment['resource'], 1);
         $this->offset++;
 
         return $char === false || $char === '' ? "\x00" : $char;
@@ -90,7 +233,33 @@ class MemoryStream implements MemoryStreamInterface
 
     public function byte(): int
     {
-        return ord($this->char());
+        // Safety check: don't allow access beyond logical max (swap inclusive)
+        if ($this->offset >= $this->logicalMaxMemorySize()) {
+            throw new \RuntimeException(sprintf('Memory read out of bounds: offset=0x%X logicalMaxMemorySize=0x%X', $this->offset, $this->logicalMaxMemorySize()));
+        }
+
+        // Auto-expand if reading beyond current size
+        if ($this->offset >= $this->size) {
+            $this->ensureCapacity($this->offset);
+        }
+
+        $segment = $this->findSegment($this->offset);
+        if ($segment === null) {
+            $this->offset++;
+            return 0;
+        }
+
+        $localOffset = $this->offset - $segment['min'];
+        fseek($segment['resource'], $localOffset, SEEK_SET);
+        $char = fread($segment['resource'], 1);
+        $this->offset++;
+
+        if ($char === false || $char === '') {
+            return 0;
+        }
+
+        // Use lookup table instead of ord()
+        return self::$ordMap[$char] ?? ord($char);
     }
 
     public function signedByte(): int
@@ -113,6 +282,51 @@ class MemoryStream implements MemoryStreamInterface
         $b2 = $this->byte();
         $b3 = $this->byte();
         return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+    }
+
+    public function read(int $length): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+
+        // Ensure capacity
+        $endOffset = $this->offset + $length;
+        if ($endOffset > $this->size) {
+            $this->ensureCapacity($endOffset);
+        }
+
+        // Read across segments
+        $result = '';
+        $remaining = $length;
+
+        while ($remaining > 0) {
+            $segment = $this->findSegment($this->offset);
+            if ($segment === null) {
+                $this->offset += $remaining;
+                $result .= str_repeat("\x00", $remaining);
+                break;
+            }
+
+            // Calculate how much we can read from this segment
+            $segmentRemaining = $segment['max'] - $this->offset;
+            $chunkSize = min($remaining, $segmentRemaining);
+
+            // Read directly from segment
+            $localOffset = $this->offset - $segment['min'];
+            fseek($segment['resource'], $localOffset, SEEK_SET);
+            $chunk = fread($segment['resource'], $chunkSize);
+
+            if ($chunk === false) {
+                $chunk = str_repeat("\x00", $chunkSize);
+            }
+
+            $result .= $chunk;
+            $this->offset += $chunkSize;
+            $remaining -= $chunkSize;
+        }
+
+        return $result;
     }
 
     public function offset(): int
@@ -146,14 +360,17 @@ class MemoryStream implements MemoryStreamInterface
 
     public function write(string $value): self
     {
-        $endOffset = $this->offset + strlen($value);
+        $len = strlen($value);
+        $endOffset = $this->offset + $len;
         if ($endOffset >= $this->size) {
             $this->ensureCapacity($endOffset);
         }
 
-        fseek($this->memory, $this->offset, SEEK_SET);
-        fwrite($this->memory, $value);
-        $this->offset += strlen($value);
+        // Write across potentially multiple segments
+        for ($i = 0; $i < $len; $i++) {
+            $this->writeByteAt($this->offset + $i, self::$ordMap[$value[$i]] ?? ord($value[$i]));
+        }
+        $this->offset += $len;
         return $this;
     }
 
@@ -168,8 +385,7 @@ class MemoryStream implements MemoryStreamInterface
             $this->ensureCapacity($this->offset);
         }
 
-        fseek($this->memory, $this->offset, SEEK_SET);
-        fwrite($this->memory, chr($value & 0xFF));
+        $this->writeByteAt($this->offset, $value);
         $this->offset++;
     }
 
@@ -196,13 +412,37 @@ class MemoryStream implements MemoryStreamInterface
         // Set source position
         $source->setOffset($sourceOffset);
 
-        // Set destination position
-        fseek($this->memory, $destOffset, SEEK_SET);
+        // Ensure destination has capacity
+        if ($destOffset + $size >= $this->size) {
+            $this->ensureCapacity($destOffset + $size);
+        }
 
-        // Copy byte by byte
-        for ($i = 0; $i < $size; $i++) {
-            $byte = $source->byte();
-            fwrite($this->memory, chr($byte));
+        // Read all data from source at once
+        $data = $source->read($size);
+
+        // Write in chunks, handling segment boundaries
+        $remaining = strlen($data);
+        $currentDestOffset = $destOffset;
+        $dataOffset = 0;
+
+        while ($remaining > 0) {
+            $segment = $this->findSegment($currentDestOffset);
+            if ($segment === null) {
+                break;
+            }
+
+            // Calculate how much we can write to this segment
+            $segmentRemaining = $segment['max'] - $currentDestOffset;
+            $chunkSize = min($remaining, $segmentRemaining);
+
+            // Write directly to segment
+            $localOffset = $currentDestOffset - $segment['min'];
+            fseek($segment['resource'], $localOffset, SEEK_SET);
+            fwrite($segment['resource'], substr($data, $dataOffset, $chunkSize));
+
+            $currentDestOffset += $chunkSize;
+            $dataOffset += $chunkSize;
+            $remaining -= $chunkSize;
         }
 
         // Restore positions
@@ -250,4 +490,39 @@ class MemoryStream implements MemoryStreamInterface
         return $this->swapSize;
     }
 
+    /**
+     * Get the number of storage segments.
+     */
+    public function segmentCount(): int
+    {
+        return count($this->segments);
+    }
+
+    /**
+     * Get segment info for debugging.
+     *
+     * @return array<int, array{min: int, max: int, type: string}>
+     */
+    public function getSegmentInfo(): array
+    {
+        $info = [];
+        foreach ($this->segments as $segment) {
+            $info[] = [
+                'min' => $segment['min'],
+                'max' => $segment['max'],
+                'type' => $segment['type'],
+            ];
+        }
+        return $info;
+    }
+
+    public function __destruct()
+    {
+        // Close all segment resources
+        foreach ($this->segments as $segment) {
+            if (is_resource($segment['resource'])) {
+                fclose($segment['resource']);
+            }
+        }
+    }
 }

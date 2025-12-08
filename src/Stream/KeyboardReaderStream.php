@@ -100,4 +100,14 @@ class KeyboardReaderStream implements StreamReaderInterface
             ),
         );
     }
+
+    public function read(int $length): string
+    {
+        throw new KeyboardException(
+            sprintf(
+                'The keyboard reader is not supported %s',
+                __FUNCTION__,
+            ),
+        );
+    }
 }

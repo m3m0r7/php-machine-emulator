@@ -38,6 +38,11 @@ class FileBootStream implements BootableStreamInterface
         return $this->fileStream->dword();
     }
 
+    public function read(int $length): string
+    {
+        return $this->fileStream->read($length);
+    }
+
     public function offset(): int
     {
         return $this->fileStream->offset();

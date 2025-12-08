@@ -7,10 +7,9 @@ namespace PHPMachineEmulator\LogicBoard\Memory;
 class MemoryContext implements MemoryContextInterface
 {
     public function __construct(
-        protected int $maxMemory = 0x1000000,      // 16MB default
-        protected int $initialMemory = 0x200000,   // 2MB default
-        protected int $swapSize = 0x10000000,      // 256MB default
-        protected string $phpMemoryLimit = '1G',
+        protected int $maxMemory = 0x80000000,     // 2GB default
+        protected int $initialMemory = 0x10000000, // 256MB default
+        protected int $swapSize = 0x100000000,     // 4GB default
     ) {
     }
 
@@ -27,10 +26,5 @@ class MemoryContext implements MemoryContextInterface
     public function swapSize(): int
     {
         return $this->swapSize;
-    }
-
-    public function phpMemoryLimit(): string
-    {
-        return $this->phpMemoryLimit;
     }
 }

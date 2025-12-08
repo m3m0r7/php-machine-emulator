@@ -16,5 +16,6 @@ interface StreamReaderInterface
     public function signedByte(): int;
     public function short(): int;
     public function dword(): int;
+    public function read(int $length): string;
 }
 

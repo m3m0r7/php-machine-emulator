@@ -51,10 +51,6 @@ class Runtime implements RuntimeInterface
         protected RuntimeOptionInterface $runtimeOption,
         protected ArchitectureProviderInterface $architectureProvider,
     ) {
-        // Apply PHP memory limit from LogicBoard
-        $phpMemoryLimit = $this->logicBoard()->memory()->phpMemoryLimit();
-        ini_set('memory_limit', $phpMemoryLimit);
-
         $this->register = $this
             ->architectureProvider
             ->instructionList()
@@ -168,9 +164,8 @@ class Runtime implements RuntimeInterface
         $cpu = $this->context->cpu();
         $iterationContext = $cpu->iteration();
 
-
-
         while (!$this->memory->isEOF()) {
+            $s = microtime(true);
             $this->instructionCount++;
             $this->tickTimers();
 
@@ -202,6 +197,7 @@ class Runtime implements RuntimeInterface
                 $this->processShutdownCallbacks();
                 throw new HaltException('The executor halted');
             }
+            var_dump(microtime(true) - $s);
         }
 
         $this->processShutdownCallbacks();

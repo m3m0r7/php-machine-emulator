@@ -43,6 +43,9 @@ class x86_64 implements InstructionListInterface
     protected x86 $x86;
     protected array $instructionList64 = [];
 
+    /** @var array<int, array> Cache for findInstruction results in 64-bit mode */
+    protected array $findInstructionCache64 = [];
+
     public function __construct()
     {
         $this->x86 = new x86();
@@ -81,10 +84,18 @@ class x86_64 implements InstructionListInterface
 
         // Only use 64-bit specific instructions when actually in 64-bit mode
         if ($isIn64BitMode) {
-            $list64 = $this->instructionList64();
             $opcode = $opcodeArray[0];
+
+            // Check cache first
+            if (isset($this->findInstructionCache64[$opcode])) {
+                return $this->findInstructionCache64[$opcode];
+            }
+
+            $list64 = $this->instructionList64();
             if (isset($list64[$opcode])) {
-                return [$list64[$opcode], $opcode];
+                $result = [$list64[$opcode], $opcode];
+                $this->findInstructionCache64[$opcode] = $result;
+                return $result;
             }
         }
 

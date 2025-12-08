@@ -104,6 +104,17 @@ class ISOBootImageStream implements BootableStreamInterface
         return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
     }
 
+    public function read(int $length): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+
+        $result = substr($this->bootData, $this->offset, $length);
+        $this->offset += strlen($result);
+        return $result;
+    }
+
     public function offset(): int
     {
         return $this->offset;

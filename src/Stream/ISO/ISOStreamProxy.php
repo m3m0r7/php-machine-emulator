@@ -11,7 +11,7 @@ class ISOStreamProxy implements StreamReaderProxyInterface
 {
     private int $offset = 0;
 
-    public function __construct(private ISOStream $stream)
+    public function __construct(private ISOBootImageStream $stream)
     {
     }
 
@@ -74,6 +74,11 @@ class ISOStreamProxy implements StreamReaderProxyInterface
         return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
     }
 
+    public function read(int $length): string
+    {
+        return $this->readBytes($length);
+    }
+
     public function readBytes(int $length): string
     {
         // Save the original stream offset
@@ -81,7 +86,7 @@ class ISOStreamProxy implements StreamReaderProxyInterface
 
         // Read at proxy's offset
         $this->stream->setOffset($this->offset);
-        $data = $this->stream->readBytes($length);
+        $data = $this->stream->read($length);
         $this->offset = $this->stream->offset();
 
         // Restore the original stream offset
@@ -90,7 +95,7 @@ class ISOStreamProxy implements StreamReaderProxyInterface
         return $data;
     }
 
-    public function isoStream(): ISOStream
+    public function isoStream(): ISOBootImageStream
     {
         return $this->stream;
     }

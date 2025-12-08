@@ -45,4 +45,29 @@ class TestScreenContext implements RuntimeScreenContextInterface
     {
         // No-op for tests
     }
+
+    public function setCursorPosition(int $row, int $col): void
+    {
+        // No-op for tests
+    }
+
+    public function getCursorPosition(): array
+    {
+        return ['row' => 0, 'col' => 0];
+    }
+
+    public function clear(): void
+    {
+        $this->output = '';
+    }
+
+    public function setCurrentAttribute(int $attribute): void
+    {
+        // No-op for tests
+    }
+
+    public function getCurrentAttribute(): int
+    {
+        return 0x07;
+    }
 }
