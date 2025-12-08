@@ -33,6 +33,13 @@ interface DeviceManagerInterface
     public function keyboards(): array;
 
     /**
+     * Get the primary video context.
+     *
+     * @throws \RuntimeException if no video context is registered
+     */
+    public function video(): VideoContextInterface;
+
+    /**
      * Get all registered devices.
      *
      * @return iterable<DeviceContextInterface>

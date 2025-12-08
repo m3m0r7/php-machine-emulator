@@ -21,6 +21,7 @@ use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Runtime\Device\DeviceManager;
 use PHPMachineEmulator\Runtime\Device\KeyboardContext;
+use PHPMachineEmulator\Runtime\Device\VideoContext;
 use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandler;
 use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandlerInterface;
 use PHPMachineEmulator\Runtime\Ticker\ApicTicker;
@@ -67,9 +68,10 @@ class Runtime implements RuntimeInterface
                 ->observers(),
         );
 
-        // Initialize DeviceManager with keyboard context
+        // Initialize DeviceManager with keyboard and video contexts
         $deviceManager = new DeviceManager();
         $deviceManager->register(new KeyboardContext());
+        $deviceManager->register(new VideoContext());
 
         // Initialize RuntimeContext with CPU, Screen, and Device contexts
         $screenContext = new RuntimeScreenContext(

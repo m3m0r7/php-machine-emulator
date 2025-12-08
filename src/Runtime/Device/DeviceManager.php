@@ -40,6 +40,15 @@ class DeviceManager implements DeviceManagerInterface
         return $keyboards;
     }
 
+    public function video(): VideoContextInterface
+    {
+        $device = $this->get(VideoContext::NAME);
+        if (!$device instanceof VideoContextInterface) {
+            throw new \RuntimeException('No video context registered');
+        }
+        return $device;
+    }
+
     public function all(): iterable
     {
         return $this->devices;

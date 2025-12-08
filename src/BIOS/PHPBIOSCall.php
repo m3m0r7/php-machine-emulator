@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
+namespace PHPMachineEmulator\BIOS;
 
 use PHPMachineEmulator\Exception\NotImplementedException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;

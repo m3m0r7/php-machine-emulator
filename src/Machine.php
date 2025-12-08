@@ -21,15 +21,16 @@ class Machine implements MachineInterface
         protected LogicBoardInterface $logicBoardContext,
         protected OptionInterface $option = new Option(),
     ) {
+        // Use Extended variants which include PHPBIOSCall custom instruction
         $this->runtimes[ArchitectureType::Intel_x86->value] = [
-            Intel\x86::class,
+            Intel\x86Extended::class,
             Intel\VideoInterrupt::class,
             Intel\MemoryAccessorObserverCollection::class,
             Intel\ServiceCollection::class,
         ];
 
         $this->runtimes[ArchitectureType::Intel_x86_64->value] = [
-            Intel\x86_64::class,
+            Intel\x86_64Extended::class,
             Intel\VideoInterrupt::class,
             Intel\MemoryAccessorObserverCollection::class,
             Intel\ServiceCollection::class,

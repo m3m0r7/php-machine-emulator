@@ -3,32 +3,30 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
-use PHPMachineEmulator\Exception\VideoInterruptException;
 use PHPMachineEmulator\Instruction\Intel\ServiceFunction\VideoServiceFunction;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Runtime\Device\VideoContextInterface;
 use PHPMachineEmulator\Runtime\MemoryAccessorFetchResultInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
-use PHPMachineEmulator\Video\VideoTypeInfo;
-use PHPMachineEmulator\Exception\FaultException;
 
 class Video implements InterruptInterface
 {
-    private int $currentMode = 0x03;
-    private int $cursorRow = 0;
-    private int $cursorCol = 0;
     private static bool $vbeInitialized = false;
     private static int $vbeModeInfoAddr = 0x2200;
     private static int $vbeModeListAddr = 0x2000;
 
-    // ANSI escape sequence parser state (static to persist across instances)
-    private const ANSI_STATE_NORMAL = 0;
-    private const ANSI_STATE_ESC = 1;      // Got ESC (0x1B)
-    private const ANSI_STATE_CSI = 2;      // Got ESC [
-    private static int $ansiState = self::ANSI_STATE_NORMAL;
-    private static string $ansiBuffer = '';
-
     public function __construct(protected RuntimeInterface $runtime)
     {
+    }
+
+    /**
+     * Get the video context from DeviceManager.
+     *
+     * @throws \RuntimeException if video context is not registered
+     */
+    protected function videoContext(): VideoContextInterface
+    {
+        return $this->runtime->context()->devices()->video();
     }
 
     public function process(RuntimeInterface $runtime): void
@@ -77,7 +75,7 @@ class Video implements InterruptInterface
             // unsupported: gracefully ignore to let boot continue
             return;
         }
-        $this->currentMode = $videoType;
+        $this->videoContext()->setCurrentMode($videoType);
 
         $runtime
             ->memoryAccessor()
@@ -100,65 +98,32 @@ class Video implements InterruptInterface
     protected function teletypeOutput(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
     {
         $char = $fetchResult->asLowBit();
+        $videoContext = $this->videoContext();
 
-        // ANSI escape sequence state machine
-        if (self::$ansiState === self::ANSI_STATE_ESC) {
-            if ($char === 0x5B) { // '['
-                // ESC [ - CSI sequence start
-                self::$ansiState = self::ANSI_STATE_CSI;
-                self::$ansiBuffer = '';
-                return;
-            }
-            // Not a CSI sequence, reset and output ESC as-is (or ignore)
-            self::$ansiState = self::ANSI_STATE_NORMAL;
-            // Fall through to handle the current character
-        }
-
-        if (self::$ansiState === self::ANSI_STATE_CSI) {
-            // Collecting CSI parameters
-            // Parameters are digits 0-9, semicolons, and terminated by a letter
-            if (($char >= 0x30 && $char <= 0x3F) || $char === 0x3B) {
-                // 0-9, :, ;, <, =, >, ? - parameter bytes
-                self::$ansiBuffer .= chr($char);
-                return;
-            }
-            if ($char >= 0x40 && $char <= 0x7E) {
-                // Final byte (command)
-                $this->executeAnsiCommand($runtime, chr($char), self::$ansiBuffer);
-                self::$ansiState = self::ANSI_STATE_NORMAL;
-                self::$ansiBuffer = '';
-                return;
-            }
-            // Invalid sequence, reset
-            self::$ansiState = self::ANSI_STATE_NORMAL;
-            self::$ansiBuffer = '';
-            // Fall through to handle the current character
-        }
-
-        // Check for ESC character
-        if ($char === 0x1B) {
-            self::$ansiState = self::ANSI_STATE_ESC;
+        // Use ANSI parser from VideoContext
+        if ($videoContext->ansiParser()->processChar($char, $runtime, $videoContext)) {
+            // Character was consumed by ANSI parser
             return;
         }
 
         // Handle control characters
         if ($char === 0x0D) {
             // CR - Carriage Return: move to beginning of line
-            $this->cursorCol = 0;
-            $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+            $videoContext->setCursorPosition($videoContext->getCursorRow(), 0);
+            $runtime->context()->screen()->setCursorPosition($videoContext->getCursorRow(), $videoContext->getCursorCol());
             return;
         }
         if ($char === 0x0A) {
             // LF - Line Feed: move to next line
-            $this->cursorRow++;
-            $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+            $videoContext->setCursorPosition($videoContext->getCursorRow() + 1, $videoContext->getCursorCol());
+            $runtime->context()->screen()->setCursorPosition($videoContext->getCursorRow(), $videoContext->getCursorCol());
             return;
         }
         if ($char === 0x08) {
             // BS - Backspace: move cursor left
-            if ($this->cursorCol > 0) {
-                $this->cursorCol--;
-                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+            if ($videoContext->getCursorCol() > 0) {
+                $videoContext->setCursorPosition($videoContext->getCursorRow(), $videoContext->getCursorCol() - 1);
+                $runtime->context()->screen()->setCursorPosition($videoContext->getCursorRow(), $videoContext->getCursorCol());
             }
             return;
         }
@@ -168,136 +133,17 @@ class Video implements InterruptInterface
         }
 
         // Regular character: write and advance cursor
-        $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
+        $runtime->context()->screen()->setCursorPosition($videoContext->getCursorRow(), $videoContext->getCursorCol());
         $runtime->context()->screen()->write(chr($char));
-        $this->cursorCol++;
+        $newCol = $videoContext->getCursorCol() + 1;
 
         // Handle line wrap based on current video mode width
-        $videoMode = $runtime->video()->supportedVideoModes()[$this->currentMode] ?? null;
+        $videoMode = $runtime->video()->supportedVideoModes()[$videoContext->getCurrentMode()] ?? null;
         $cols = $videoMode?->width ?? 80;
-        if ($this->cursorCol >= $cols) {
-            $this->cursorCol = 0;
-            $this->cursorRow++;
-        }
-    }
-
-    /**
-     * Execute an ANSI CSI command.
-     */
-    protected function executeAnsiCommand(RuntimeInterface $runtime, string $command, string $params): void
-    {
-        // Parse parameters (semicolon-separated numbers)
-        $args = array_map('intval', explode(';', $params));
-        if (empty($args) || ($args[0] === 0 && $params === '')) {
-            $args = [1]; // Default parameter
-        }
-
-        switch ($command) {
-            case 'H': // CUP - Cursor Position (row;col)
-            case 'f': // HVP - Horizontal and Vertical Position
-                $row = ($args[0] ?? 1) - 1; // 1-based to 0-based
-                $col = ($args[1] ?? 1) - 1;
-                $this->cursorRow = max(0, $row);
-                $this->cursorCol = max(0, $col);
-                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
-                break;
-
-            case 'A': // CUU - Cursor Up
-                $n = $args[0] ?? 1;
-                $this->cursorRow = max(0, $this->cursorRow - $n);
-                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
-                break;
-
-            case 'B': // CUD - Cursor Down
-                $n = $args[0] ?? 1;
-                $this->cursorRow += $n;
-                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
-                break;
-
-            case 'C': // CUF - Cursor Forward
-                $n = $args[0] ?? 1;
-                $this->cursorCol += $n;
-                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
-                break;
-
-            case 'D': // CUB - Cursor Back
-                $n = $args[0] ?? 1;
-                $this->cursorCol = max(0, $this->cursorCol - $n);
-                $runtime->context()->screen()->setCursorPosition($this->cursorRow, $this->cursorCol);
-                break;
-
-            case 'J': // ED - Erase in Display
-                $n = $args[0] ?? 0;
-                if ($n === 2) {
-                    // Clear entire screen
-                    $runtime->context()->screen()->clear();
-                    $this->cursorRow = 0;
-                    $this->cursorCol = 0;
-                }
-                // 0 = clear from cursor to end, 1 = clear from start to cursor (not implemented)
-                break;
-
-            case 'K': // EL - Erase in Line
-                // 0 = clear from cursor to end of line
-                // 1 = clear from start of line to cursor
-                // 2 = clear entire line
-                // Stub for now
-                break;
-
-            case 'm': // SGR - Select Graphic Rendition (colors, attributes)
-                $this->handleSgr($runtime, $args);
-                break;
-
-            case 's': // SCP - Save Cursor Position
-                // Stub
-                break;
-
-            case 'u': // RCP - Restore Cursor Position
-                // Stub
-                break;
-
-            default:
-                // Unknown command, ignore
-                break;
-        }
-    }
-
-    /**
-     * Handle SGR (Select Graphic Rendition) - text attributes and colors.
-     */
-    protected function handleSgr(RuntimeInterface $runtime, array $args): void
-    {
-        foreach ($args as $code) {
-            switch ($code) {
-                case 0: // Reset
-                    $runtime->context()->screen()->setCurrentAttribute(0x07); // Default white on black
-                    break;
-                case 1: // Bold/bright
-                    $attr = $runtime->context()->screen()->getCurrentAttribute();
-                    $runtime->context()->screen()->setCurrentAttribute($attr | 0x08); // Set bright bit
-                    break;
-                case 7: // Reverse video
-                    $attr = $runtime->context()->screen()->getCurrentAttribute();
-                    $fg = $attr & 0x0F;
-                    $bg = ($attr >> 4) & 0x0F;
-                    $runtime->context()->screen()->setCurrentAttribute(($fg << 4) | $bg);
-                    break;
-                case 30: case 31: case 32: case 33: case 34: case 35: case 36: case 37:
-                    // Foreground color (30-37 -> 0-7)
-                    $attr = $runtime->context()->screen()->getCurrentAttribute();
-                    $fg = $code - 30;
-                    $runtime->context()->screen()->setCurrentAttribute(($attr & 0xF8) | $fg);
-                    break;
-                case 40: case 41: case 42: case 43: case 44: case 45: case 46: case 47:
-                    // Background color (40-47 -> 0-7)
-                    $attr = $runtime->context()->screen()->getCurrentAttribute();
-                    $bg = $code - 40;
-                    $runtime->context()->screen()->setCurrentAttribute(($attr & 0x0F) | ($bg << 4));
-                    break;
-                default:
-                    // Ignore unknown SGR codes
-                    break;
-            }
+        if ($newCol >= $cols) {
+            $videoContext->setCursorPosition($videoContext->getCursorRow() + 1, 0);
+        } else {
+            $videoContext->setCursorPosition($videoContext->getCursorRow(), $newCol);
         }
     }
 
@@ -306,8 +152,7 @@ class Video implements InterruptInterface
         // DH = row, DL = column
         $row = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asHighBit();
         $col = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
-        $this->cursorRow = $row;
-        $this->cursorCol = $col;
+        $this->videoContext()->setCursorPosition($row, $col);
         $runtime->option()->logger()->debug(sprintf('SET_CURSOR_POSITION: row=%d, col=%d', $row, $col));
         // Update the screen writer's cursor position
         $runtime->context()->screen()->setCursorPosition($row, $col);
@@ -315,7 +160,8 @@ class Video implements InterruptInterface
 
     protected function getCursorPosition(RuntimeInterface $runtime): void
     {
-        $edx = ($this->cursorRow << 8) | ($this->cursorCol & 0xFF);
+        $videoContext = $this->videoContext();
+        $edx = ($videoContext->getCursorRow() << 8) | ($videoContext->getCursorCol() & 0xFF);
         $runtime->memoryAccessor()->write16Bit(RegisterType::EDX, $edx);
         // BH = page number (0), BL = attribute. Set BX to 0 for page 0
         $runtime->memoryAccessor()->write16Bit(RegisterType::EBX, 0);
@@ -328,10 +174,11 @@ class Video implements InterruptInterface
         //   AL = current video mode
         //   AH = number of screen columns
         //   BH = active display page
-        $videoMode = $runtime->video()->supportedVideoModes()[$this->currentMode] ?? null;
+        $currentMode = $this->videoContext()->getCurrentMode();
+        $videoMode = $runtime->video()->supportedVideoModes()[$currentMode] ?? null;
         $cols = $videoMode?->width ?? 80;
 
-        $axValue = ($cols << 8) | ($this->currentMode & 0xFF);
+        $axValue = ($cols << 8) | ($currentMode & 0xFF);
         $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $axValue);
         // BH = current page (0)
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::EBX, 0);
@@ -539,7 +386,7 @@ class Video implements InterruptInterface
         $ma = $runtime->memoryAccessor();
         $mode = $ma->fetch(RegisterType::EBX)->asBytesBySize(16) & 0x1FF;
         if ($mode === 0x141) {
-            $this->currentMode = $mode;
+            $this->videoContext()->setCurrentMode($mode);
             $ma->write16Bit(RegisterType::AX, 0x004F);
             return;
         }
@@ -549,8 +396,76 @@ class Video implements InterruptInterface
     private function vbeGetCurrentMode(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor();
-        $ma->write16Bit(RegisterType::BX, $this->currentMode & 0x1FF);
+        $ma->write16Bit(RegisterType::BX, $this->videoContext()->getCurrentMode() & 0x1FF);
         $ma->write16Bit(RegisterType::AX, 0x004F);
+    }
+
+    /**
+     * Calculate segment:offset to linear address.
+     */
+    protected function segmentOffsetAddress(RuntimeInterface $runtime, int $segment, int $offset): int
+    {
+        if ($runtime->context()->cpu()->isProtectedMode()) {
+            // In protected mode, segment is a selector - for simplicity use offset directly
+            // Real implementation would look up GDT/LDT for base address
+            return $offset;
+        }
+        // Real mode: segment * 16 + offset
+        $segBase = $runtime->memoryAccessor()->fetch($segment)->asBytesBySize(16);
+        return ($segBase << 4) + $offset;
+    }
+
+    /**
+     * Read 8-bit value from memory.
+     */
+    protected function readMemory8(RuntimeInterface $runtime, int $address): int
+    {
+        try {
+            $value = $runtime->memoryAccessor()->readRawByte($address);
+            if ($value !== null) {
+                return $value;
+            }
+            $memory = $runtime->memory();
+            $currentOffset = $memory->offset();
+            $memory->setOffset($address);
+            $byte = $memory->byte();
+            $memory->setOffset($currentOffset);
+            return $byte;
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    /**
+     * Write 8-bit value to memory.
+     */
+    protected function writeMemory8(RuntimeInterface $runtime, int $address, int $value): void
+    {
+        try {
+            $runtime->memoryAccessor()->writeRawByte($address, $value & 0xFF);
+        } catch (\Throwable) {
+            // Ignore write errors
+        }
+    }
+
+    /**
+     * Write 16-bit value to memory (little-endian).
+     */
+    protected function writeMemory16(RuntimeInterface $runtime, int $address, int $value): void
+    {
+        $this->writeMemory8($runtime, $address, $value & 0xFF);
+        $this->writeMemory8($runtime, $address + 1, ($value >> 8) & 0xFF);
+    }
+
+    /**
+     * Write 32-bit value to memory (little-endian).
+     */
+    protected function writeMemory32(RuntimeInterface $runtime, int $address, int $value): void
+    {
+        $this->writeMemory8($runtime, $address, $value & 0xFF);
+        $this->writeMemory8($runtime, $address + 1, ($value >> 8) & 0xFF);
+        $this->writeMemory8($runtime, $address + 2, ($value >> 16) & 0xFF);
+        $this->writeMemory8($runtime, $address + 3, ($value >> 24) & 0xFF);
     }
 
     /**
