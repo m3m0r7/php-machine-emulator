@@ -47,7 +47,7 @@ class MemoryStream implements MemoryStreamInterface
     private int $bufferEnd = -1;
 
     /** @var int Read-ahead buffer size */
-    private const READ_BUFFER_SIZE = 4096;
+    private const READ_BUFFER_SIZE = 8192;
 
     /**
      * @param int $size Initial memory size (default 1MB)
