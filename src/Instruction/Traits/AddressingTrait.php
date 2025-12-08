@@ -51,21 +51,6 @@ trait AddressingTrait
         $offset = $this->effectiveAddress16($runtime, $reader, $modRegRM);
         $seg = $this->defaultSegmentFor16($modRegRM);
 
-        // Debug: log 16-bit addressing
-        $rm = $modRegRM->registerOrMemoryAddress();
-        if ($rm === 0b100) {
-            $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();
-            $mode = ModType::from($modRegRM->mode());
-            $runtime->option()->logger()->debug(sprintf(
-                'effectiveAddress16 [SI]: ESI=0x%08X si_byte=0x%04X offset=0x%04X addrSize=%d mode=%s',
-                $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize(32),
-                $si,
-                $offset,
-                $addrSize,
-                $mode->name
-            ));
-        }
-
         return [$offset, $seg];
     }
 
@@ -79,16 +64,6 @@ trait AddressingTrait
         $segment = $segmentOverride ?? $cpuOverride ?? $defaultSegment;
 
         $linear = $this->segmentOffsetAddress($runtime, $segment, $offset);
-
-        // Debug: log when accessing high memory in real mode
-        if (!$runtime->context()->cpu()->isProtectedMode() && $offset >= 0x100000) {
-            $segVal = $runtime->memoryAccessor()->fetch($segment)->asByte();
-            $runtime->option()->logger()->debug(sprintf(
-                'rmLinearAddress HIGH: offset=0x%08X segment=%s(0x%04X) linear=0x%08X A20=%d',
-                $offset, $segment->name, $segVal, $linear,
-                $runtime->context()->cpu()->isA20Enabled() ? 1 : 0
-            ));
-        }
 
         return $linear;
     }
@@ -124,18 +99,6 @@ trait AddressingTrait
                 : $val($runtime, RegisterType::EBP),
             0b111 => $val($runtime, RegisterType::EBX),
         };
-
-        // Debug: log [DI] addressing when DI has upper bits set
-        if ($rm === 0b101) {
-            $fullEdi = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize(32);
-            $di16 = $val($runtime, RegisterType::EDI);
-            if (($fullEdi & 0xFFFF0000) !== 0) {
-                $runtime->option()->logger()->debug(sprintf(
-                    'effectiveAddress16 [DI]: fullEDI=0x%08X di16=0x%04X address=0x%04X disp=%d result=0x%04X',
-                    $fullEdi, $di16, $address, $disp, ($address + $disp) & 0xFFFF
-                ));
-            }
-        }
 
         return ($address + $disp) & 0xFFFF;
     }

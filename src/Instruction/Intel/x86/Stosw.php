@@ -27,15 +27,6 @@ class Stosw implements InstructionInterface
 
         $address = $this->translateLinear($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
 
-        // Debug: trace STOSD writes to detect stack corruption
-        if ($address >= 0x7B00 && $address <= 0x7C00) {
-            $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
-            $runtime->option()->logger()->debug(sprintf(
-                'STOSD: writing to stack area! address=0x%08X ES=0x%04X EDI=0x%08X value=0x%08X opSize=%d',
-                $address, $es, $di, $value, $opSize
-            ));
-        }
-
         $runtime->memoryAccessor()->allocate($address, safe: false);
         $runtime->memoryAccessor()->writeBySize($address, $value, $opSize);
 

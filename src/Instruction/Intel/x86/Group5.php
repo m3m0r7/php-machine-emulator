@@ -122,29 +122,8 @@ class Group5 implements InstructionInterface
     {
         $size = $runtime->context()->cpu()->operandSize();
 
-        // Debug: log CALL r/m before reading target
-        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $eax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(32);
-        $edi = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize(32);
-        $runtime->option()->logger()->debug(sprintf(
-            'CALL r/m (pre): mode=%d rm=%d isReg=%d EAX=0x%08X EDI=0x%08X size=%d',
-            $modRegRM->mode(),
-            $modRegRM->registerOrMemoryAddress(),
-            $isRegister ? 1 : 0,
-            $eax,
-            $edi,
-            $size
-        ));
-
         $target = $this->readRm($runtime, $reader, $modRegRM, $size);
         $pos = $runtime->memory()->offset();
-
-        // Debug: log CALL r/m target
-        $runtime->option()->logger()->debug(sprintf(
-            'CALL r/m (post): target=0x%08X returnAddr=0x%08X',
-            $target,
-            $pos
-        ));
 
         // Check for NULL pointer call
         if ($target === 0) {

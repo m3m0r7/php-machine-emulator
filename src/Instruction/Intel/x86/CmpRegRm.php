@@ -64,24 +64,6 @@ class CmpRegRm implements InstructionInterface
             $maskedResult = $calc & $mask;
             $cf = $calc < 0;
 
-            // Debug: Log CMP for LZMA direct bits decoding area
-            $ip = $runtime->memory()->offset();
-            if ($ip >= 0x8CD0 && $ip <= 0x8CE0) {
-                $runtime->option()->logger()->debug(sprintf(
-                'CMP direct bits: IP=0x%04X dest=0x%08X src=0x%08X CF=%d',
-                $ip, $destU, $srcU, $cf ? 1 : 0
-            ));
-            }
-            if ($ip >= 0x7DD5 && $ip <= 0x7DDA) {
-                $runtime->option()->logger()->debug(sprintf(
-                    'CMP boot checksum: IP=0x%04X dest=0x%08X src=0x%08X result=0x%08X',
-                    $ip,
-                    $destU,
-                    $srcU,
-                    $maskedResult
-                ));
-            }
-
             // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
             $signA = ($destU >> $signBit) & 1;
             $signB = ($srcU >> $signBit) & 1;

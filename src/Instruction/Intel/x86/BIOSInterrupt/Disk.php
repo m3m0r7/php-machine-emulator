@@ -324,38 +324,6 @@ class Disk implements InterruptInterface
                 $runtime->memoryAccessor()->writeRawByte($address, ord($data[$i]));
             }
 
-            // Debug: dump first 32 bytes of loaded data
-            $debugBytes = [];
-            for ($i = 0; $i < min(32, $dataLen); $i++) {
-                $debugBytes[] = sprintf('%02X', ord($data[$i]));
-            }
-            $runtime->option()->logger()->debug(sprintf(
-                'INT 13h READ LBA: first 32 bytes loaded at 0x%05X: %s',
-                $bufferAddress,
-                implode(' ', $debugBytes)
-            ));
-
-            // Debug: compare checksum with Boot Info Table when loading the boot image body.
-            $bootImage = $bootStream->bootImage();
-            $firstSector = $bootImage->data();
-            $biLength = strlen($firstSector) >= 20 ? unpack('V', substr($firstSector, 16, 4))[1] : 0;
-            $biChecksum = strlen($firstSector) >= 24 ? unpack('V', substr($firstSector, 20, 4))[1] : 0;
-            if ($lba === $bootImage->loadRBA() + 1 && $biLength > 0) {
-                $fullData = $firstSector . substr($data, 0, max(0, $biLength - strlen($firstSector)));
-                $sum = 0;
-                for ($i = 64; $i < strlen($fullData); $i += 4) {
-                    $chunk = substr($fullData, $i, 4);
-                    $val = unpack('V', str_pad($chunk, 4, "\0"))[1];
-                    $sum = ($sum + $val) & 0xFFFFFFFF;
-                }
-                $runtime->option()->logger()->debug(sprintf(
-                    'INT 13h READ LBA: computed boot image checksum=0x%08X (expected=0x%08X, length=%d)',
-                    $sum,
-                    $biChecksum,
-                    $biLength
-                ));
-            }
-
             $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorCount);
             $runtime->memoryAccessor()->setCarryFlag(false);

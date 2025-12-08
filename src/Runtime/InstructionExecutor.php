@@ -72,9 +72,6 @@ class InstructionExecutor implements InstructionExecutorInterface
             $this->zeroOpcodeCount = 0;
         }
 
-        // Debug trace
-        // $this->logExecution($this->lastInstructionPointer, $opcodes);
-
         // Execute the instruction
         return $this->executeOpcodes($opcodes);
     }

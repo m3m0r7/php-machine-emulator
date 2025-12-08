@@ -30,14 +30,6 @@ class Xchg implements InstructionInterface
             $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
             $rv = $runtime->memoryAccessor()->fetch($target)->asBytesBySize($opSize);
 
-            // Debug: log XCHG when SI is involved
-            if ($target === RegisterType::ESI) {
-                $runtime->option()->logger()->debug(sprintf(
-                    'XCHG AX, SI: AX=0x%04X SI=0x%04X (opcode=0x%02X)',
-                    $ax, $rv, $opcode
-                ));
-            }
-
             $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $rv, $opSize);
             $runtime->memoryAccessor()->writeBySize($target, $ax, $opSize);
             return ExecutionStatus::SUCCESS;
@@ -83,18 +75,6 @@ class Xchg implements InstructionInterface
             $rm = $opSize === 32 ? $this->readMemory32($runtime, $linearAddress) : $this->readMemory16($runtime, $linearAddress);
         }
         $reg = $runtime->memoryAccessor()->fetch($modRegRM->registerOrOPCode())->asBytesBySize($opSize);
-
-        // Debug log for XCHG r/m32, r32
-        $runtime->option()->logger()->debug(sprintf(
-            'XCHG r/m%d, r%d: addr=0x%08X rm=0x%08X reg=0x%08X mode=%d regCode=%d rmCode=%d',
-            $opSize, $opSize,
-            $linearAddress ?? 0,
-            $rm,
-            $reg,
-            $modRegRM->mode(),
-            $modRegRM->registerOrOPCode(),
-            $modRegRM->registerOrMemoryAddress()
-        ));
 
         // Write swapped values
         if ($isRegister) {

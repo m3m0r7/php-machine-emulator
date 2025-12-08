@@ -37,14 +37,6 @@ class Pusha implements InstructionInterface
             $ma->push(RegisterType::ESP, $val, $size);
         }
 
-        $espAfter = $ma->fetch(RegisterType::ESP)->asBytesBySize(32);
-
-        // Debug: log PUSHA with ESP
-        $runtime->option()->logger()->debug(sprintf(
-            'PUSHA: ESP before=0x%08X after=0x%08X AX=0x%04X BX=0x%04X CX=0x%04X DX=0x%04X SI=0x%04X DI=0x%04X size=%d',
-            $espBefore, $espAfter, $ax, $bx, $cx, $dx, $si, $di, $size
-        ));
-
         return ExecutionStatus::SUCCESS;
     }
 }

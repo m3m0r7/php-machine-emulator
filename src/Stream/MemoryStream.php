@@ -37,6 +37,18 @@ class MemoryStream implements MemoryStreamInterface
     /** @var int|null Cached current segment index */
     private ?int $currentSegmentIndex = null;
 
+    /** @var string Read-ahead buffer */
+    private string $readBuffer = '';
+
+    /** @var int Start offset of read buffer */
+    private int $bufferStart = -1;
+
+    /** @var int End offset of read buffer (exclusive) */
+    private int $bufferEnd = -1;
+
+    /** @var int Read-ahead buffer size */
+    private const READ_BUFFER_SIZE = 4096;
+
     /**
      * @param int $size Initial memory size (default 1MB)
      * @param int $physicalMaxMemorySize Maximum physical memory size (default 16MB)
@@ -102,6 +114,38 @@ class MemoryStream implements MemoryStreamInterface
             'resource' => $resource,
             'type' => $type,
         ];
+    }
+
+    /**
+     * Fill the read-ahead buffer starting at the given offset.
+     */
+    private function fillReadBuffer(int $offset): void
+    {
+        $segment = $this->findSegment($offset);
+        if ($segment === null) {
+            $this->readBuffer = '';
+            $this->bufferStart = -1;
+            $this->bufferEnd = -1;
+            return;
+        }
+
+        // Calculate how much we can read from this segment
+        $localOffset = $offset - $segment['min'];
+        $segmentRemaining = $segment['max'] - $offset;
+        $readSize = min(self::READ_BUFFER_SIZE, $segmentRemaining);
+
+        fseek($segment['resource'], $localOffset, SEEK_SET);
+        $this->readBuffer = fread($segment['resource'], $readSize);
+
+        if ($this->readBuffer === false) {
+            $this->readBuffer = '';
+            $this->bufferStart = -1;
+            $this->bufferEnd = -1;
+            return;
+        }
+
+        $this->bufferStart = $offset;
+        $this->bufferEnd = $offset + strlen($this->readBuffer);
     }
 
     /**
@@ -191,6 +235,12 @@ class MemoryStream implements MemoryStreamInterface
      */
     private function writeByteAt(int $offset, int $value): void
     {
+        // Invalidate read buffer if writing within its range
+        if ($offset >= $this->bufferStart && $offset < $this->bufferEnd) {
+            $this->bufferStart = -1;
+            $this->bufferEnd = -1;
+        }
+
         $segment = $this->findSegment($offset);
         if ($segment === null) {
             return;
@@ -207,6 +257,13 @@ class MemoryStream implements MemoryStreamInterface
 
     public function char(): string
     {
+        // Fast path: check read-ahead buffer first
+        if ($this->offset >= $this->bufferStart && $this->offset < $this->bufferEnd) {
+            $char = $this->readBuffer[$this->offset - $this->bufferStart];
+            $this->offset++;
+            return $char;
+        }
+
         // Safety check: don't allow access beyond logical max (swap inclusive)
         if ($this->offset >= $this->logicalMaxMemorySize()) {
             throw new \RuntimeException(sprintf('Memory read out of bounds: offset=0x%X logicalMaxMemorySize=0x%X', $this->offset, $this->logicalMaxMemorySize()));
@@ -217,22 +274,30 @@ class MemoryStream implements MemoryStreamInterface
             $this->ensureCapacity($this->offset);
         }
 
-        $segment = $this->findSegment($this->offset);
-        if ($segment === null) {
+        // Fill read-ahead buffer
+        $this->fillReadBuffer($this->offset);
+
+        // Read from buffer
+        if ($this->offset >= $this->bufferStart && $this->offset < $this->bufferEnd) {
+            $char = $this->readBuffer[$this->offset - $this->bufferStart];
             $this->offset++;
-            return "\x00";
+            return $char;
         }
 
-        $localOffset = $this->offset - $segment['min'];
-        fseek($segment['resource'], $localOffset, SEEK_SET);
-        $char = fread($segment['resource'], 1);
+        // Fallback (should not happen normally)
         $this->offset++;
-
-        return $char === false || $char === '' ? "\x00" : $char;
+        return "\x00";
     }
 
     public function byte(): int
     {
+        // Fast path: check read-ahead buffer first
+        if ($this->offset >= $this->bufferStart && $this->offset < $this->bufferEnd) {
+            $char = $this->readBuffer[$this->offset - $this->bufferStart];
+            $this->offset++;
+            return self::$ordMap[$char] ?? ord($char);
+        }
+
         // Safety check: don't allow access beyond logical max (swap inclusive)
         if ($this->offset >= $this->logicalMaxMemorySize()) {
             throw new \RuntimeException(sprintf('Memory read out of bounds: offset=0x%X logicalMaxMemorySize=0x%X', $this->offset, $this->logicalMaxMemorySize()));
@@ -243,23 +308,19 @@ class MemoryStream implements MemoryStreamInterface
             $this->ensureCapacity($this->offset);
         }
 
-        $segment = $this->findSegment($this->offset);
-        if ($segment === null) {
+        // Fill read-ahead buffer
+        $this->fillReadBuffer($this->offset);
+
+        // Read from buffer
+        if ($this->offset >= $this->bufferStart && $this->offset < $this->bufferEnd) {
+            $char = $this->readBuffer[$this->offset - $this->bufferStart];
             $this->offset++;
-            return 0;
+            return self::$ordMap[$char] ?? ord($char);
         }
 
-        $localOffset = $this->offset - $segment['min'];
-        fseek($segment['resource'], $localOffset, SEEK_SET);
-        $char = fread($segment['resource'], 1);
+        // Fallback (should not happen normally)
         $this->offset++;
-
-        if ($char === false || $char === '') {
-            return 0;
-        }
-
-        // Use lookup table instead of ord()
-        return self::$ordMap[$char] ?? ord($char);
+        return 0;
     }
 
     public function signedByte(): int

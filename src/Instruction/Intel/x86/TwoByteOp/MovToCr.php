@@ -52,46 +52,6 @@ class MovToCr implements InstructionInterface
         $runtime->memoryAccessor()->writeControlRegister($cr, $val);
 
         if ($cr === 0) {
-            // Debug: dump memory at 0xB1B0 before entering protected mode
-            if (($val & 0x1) && !$runtime->context()->cpu()->isProtectedMode()) {
-                $dumpAddr = 0xB1B0;
-                $dumpData = [];
-                for ($i = 0; $i < 32; $i++) {
-                    $dumpData[] = sprintf('%02X', $runtime->memoryAccessor()->readRawByte($dumpAddr + $i) ?? 0);
-                }
-                $runtime->option()->logger()->debug(sprintf(
-                    'Source RAW at 0x%05X BEFORE PM entry: %s',
-                    $dumpAddr,
-                    implode(' ', $dumpData)
-                ));
-            }
-
-            // Debug: dump source and dest after bcopyxx when exiting PM
-            if (!($val & 0x1) && $runtime->context()->cpu()->isProtectedMode()) {
-                // Dump source (0xB1B0) - read raw memory
-                $srcAddr = 0xB1B0;
-                $srcData = [];
-                for ($i = 0; $i < 32; $i++) {
-                    $srcData[] = sprintf('%02X', $runtime->memoryAccessor()->readRawByte($srcAddr + $i) ?? 0);
-                }
-                $runtime->option()->logger()->debug(sprintf(
-                    'Source RAW at 0x%05X: %s',
-                    $srcAddr,
-                    implode(' ', $srcData)
-                ));
-
-                // Dump dest (0x100000) - read raw memory
-                $dstAddr = 0x100000;
-                $dstData = [];
-                for ($i = 0; $i < 32; $i++) {
-                    $dstData[] = sprintf('%02X', $runtime->memoryAccessor()->readRawByte($dstAddr + $i) ?? 0);
-                }
-                $runtime->option()->logger()->debug(sprintf(
-                    'Dest RAW at 0x%06X: %s',
-                    $dstAddr,
-                    implode(' ', $dstData)
-                ));
-            }
             $runtime->context()->cpu()->setProtectedMode((bool) ($val & 0x1));
             $runtime->context()->cpu()->setPagingEnabled((bool) ($val & 0x80000000));
         }

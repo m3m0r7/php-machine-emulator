@@ -30,16 +30,6 @@ class MovFrom8BitReg implements InstructionInterface
 
         $value = $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
 
-        // Debug: log mov [rm8], r8 operations
-        $runtime->option()->logger()->debug(sprintf(
-            'MOV [rm8], r8: mode=%d reg=%d rm=%d value=0x%02X (char=%s)',
-            $modRegRM->mode(),
-            $modRegRM->registerOrOPCode(),
-            $modRegRM->registerOrMemoryAddress(),
-            $value,
-            $value >= 0x20 && $value < 0x7F ? chr($value) : '.'
-        ));
-
         $this->writeRm8(
             $runtime,
             $enhancedStreamReader,

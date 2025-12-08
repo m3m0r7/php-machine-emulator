@@ -45,22 +45,6 @@ class Group1 implements InstructionInterface
                 ? $enhancedStreamReader->streamReader()->byte()
                 : ($size === 32 ? $enhancedStreamReader->dword() : $enhancedStreamReader->short()));
 
-        // Debug: log Group1 operations around IP=0x93B7
-        if ($ip >= 0x93B0 && $ip <= 0x93C0) {
-            $opNames = ['ADD', 'OR', 'ADC', 'SBB', 'AND', 'SUB', 'XOR', 'CMP'];
-            $opName = $opNames[$modRegRM->digit()] ?? 'UNK';
-            $memValue = 0;
-            if (!$isReg) {
-                $memValue = $size === 32
-                    ? $this->readMemory32($runtime, $linearAddr)
-                    : $this->readMemory16($runtime, $linearAddr);
-            }
-            $runtime->option()->logger()->debug(sprintf(
-                'Group1 at IP=0x%04X: op=%s digit=%d size=%d isReg=%d linearAddr=0x%08X memValue=0x%08X imm=0x%08X',
-                $ip, $opName, $modRegRM->digit(), $size, $isReg ? 1 : 0, $linearAddr, $memValue, $operand & 0xFFFFFFFF
-            ));
-        }
-
         match ($modRegRM->digit()) {
             0x0 => $this->add($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
             0x1 => $this->or($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),

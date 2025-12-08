@@ -21,15 +21,6 @@ class SegmentOverridePrefix implements InstructionInterface
     {
         $segment = $this->map()[$opcode];
         $runtime->context()->cpu()->setSegmentOverride($segment);
-
-        // Debug: log segment override prefix
-        $runtime->option()->logger()->debug(sprintf(
-            'SegmentOverridePrefix: op=0x%02X segment=%s IP=0x%04X',
-            $opcode,
-            $segment->name,
-            $runtime->memory()->offset()
-        ));
-
         return ExecutionStatus::CONTINUE;
     }
 

@@ -46,15 +46,6 @@ class MovImmToRm implements InstructionInterface
                 $linearAddress = $this->rmLinearAddress($runtime, $enhancedStreamReader, $modRegRM);
                 // Then read the immediate value
                 $value = $enhancedStreamReader->streamReader()->byte();
-                // Debug: log mov byte [rm], imm8 operations
-                $runtime->option()->logger()->debug(sprintf(
-                    'MOV byte [rm], imm8: mode=%d rm=%d linearAddr=0x%05X value=0x%02X (char=%s)',
-                    $mode,
-                    $modRegRM->registerOrMemoryAddress(),
-                    $linearAddress,
-                    $value,
-                    $value >= 0x20 && $value < 0x7F ? chr($value) : '.'
-                ));
                 // Write the value to the calculated address
                 $this->writeMemory8($runtime, $linearAddress, $value);
             }

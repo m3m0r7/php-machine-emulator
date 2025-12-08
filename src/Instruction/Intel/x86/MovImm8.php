@@ -30,15 +30,6 @@ class MovImm8 implements InstructionInterface
                 ? $enhancedStreamReader->dword()
                 : $enhancedStreamReader->short();
 
-            // Debug: log MOV to SI register
-            if ($register === RegisterType::ESI) {
-                $runtime->option()->logger()->debug(sprintf(
-                    'MOV SI, imm16: value=0x%04X (opcode=0x%02X)',
-                    $value,
-                    $opcode
-                ));
-            }
-
             $runtime
                 ->memoryAccessor()
                 ->writeBySize($register, $value, $opSize);
@@ -49,12 +40,6 @@ class MovImm8 implements InstructionInterface
         if ($opcode >= 0xB4) {
             // NOTE: move instruction for high-bit registers (AH/CH/DH/BH)
             $value = $enhancedStreamReader->streamReader()->byte();
-            $runtime->option()->logger()->debug(sprintf(
-                'MOV xH, 0x%02X: opcode=0x%02X register=%s',
-                $value,
-                $opcode,
-                $register->name
-            ));
             $runtime
                 ->memoryAccessor()
                 ->writeToHighBit(

@@ -28,9 +28,6 @@ class Group2 implements InstructionInterface
             ->byteAsModRegRM();
         $opSize = $this->isByteOp($opcode) ? 8 : $runtime->context()->cpu()->operandSize();
 
-        // Debug: trace Group2 operations in problem region
-        $ip = $runtime->memory()->offset();
-
         return match ($modRegRM->digit()) {
             0x0 => $this->rotateLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
             0x1 => $this->rotateRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
@@ -364,15 +361,6 @@ class Group2 implements InstructionInterface
             : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address));
         $result = ($value << $operand) & $mask;
 
-        // Debug: trace SHL to code/range (0x7FFD4/0x7FFD8)
-        $cfBitMem = $operand > 0 ? (($value >> ($size - $operand)) & 0x1) !== 0 : false;
-        if ($address !== null && $address >= 0x7FFD0 && $address <= 0x7FFE0) {
-            $runtime->option()->logger()->debug(sprintf(
-                'SHL dword [0x%X], %d: before=0x%08X after=0x%08X CF=%d (bit%d of value=0x%X)',
-                $address, $operand, $value, $result, $cfBitMem ? 1 : 0, $size - $operand, ($value >> ($size - $operand)) & 0x1
-            ));
-        }
-
         if ($isRegister) {
             $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
         } else {
@@ -385,15 +373,6 @@ class Group2 implements InstructionInterface
         // CF is set to the last bit shifted out (bit at position size-1 after shifting by operand-1)
         // For SHL by 1, CF = original bit 31 (for 32-bit) or bit 15 (for 16-bit)
         $cfBit = $operand > 0 ? (($value >> ($size - $operand)) & 0x1) !== 0 : false;
-
-        // Debug: trace SHL EDX (register 2) in LZMA direct bits loop
-        $ip = $runtime->memory()->offset();
-        if ($isRegister && $modRegRM->registerOrMemoryAddress() === 2 && $ip >= 0x8CC0 && $ip <= 0x8D10) {
-            $runtime->option()->logger()->debug(sprintf(
-                'SHL EDX, %d: before=0x%08X after=0x%08X CF=%d (bit%d=%d) IP=0x%X',
-                $operand, $value, $result, $cfBit ? 1 : 0, $size - $operand, ($value >> ($size - $operand)) & 0x1, $ip
-            ));
-        }
 
         $runtime->memoryAccessor()->setCarryFlag($cfBit);
         $runtime->memoryAccessor()->updateFlags($result, $size);
@@ -438,15 +417,6 @@ class Group2 implements InstructionInterface
             : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address));
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value >> $operand) & $mask;
-
-        // Debug: trace SHR to code/range (0x7FFD4/0x7FFD8)
-        if ($address !== null && $address >= 0x7FFD0 && $address <= 0x7FFE0) {
-            $runtime->option()->logger()->debug(sprintf(
-                'SHR dword [0x%X], %d: before=0x%08X after=0x%08X CF=%d',
-                $address, $operand, $value, $result,
-                $operand > 0 ? (($value >> ($operand - 1)) & 0x1) : 0
-            ));
-        }
 
         if ($isRegister) {
             $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);

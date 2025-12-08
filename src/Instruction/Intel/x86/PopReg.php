@@ -28,15 +28,6 @@ class PopReg implements InstructionInterface
 
         $targetReg = $this->registersAndOPCodes()[$opcode];
 
-        // Debug: log POP SI
-        if ($targetReg === RegisterType::ESI) {
-            $runtime->option()->logger()->debug(sprintf(
-                'POP SI: value=0x%04X (opcode=0x%02X)',
-                $stackedValue,
-                $opcode
-            ));
-        }
-
         $runtime
             ->memoryAccessor()
             ->writeBySize(

@@ -56,46 +56,6 @@ class MemoryAccessor implements MemoryAccessorInterface
      */
     private function writeToMemory(int $address, int $value): void
     {
-        // Debug: trace writes to critical data area (0x3D04-0x3D0A)
-        if ($address >= 0x3D04 && $address <= 0x3D0A) {
-            $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
-            $caller = isset($bt[2]) ? ($bt[2]['class'] ?? '') . '::' . ($bt[2]['function'] ?? '') : 'unknown';
-            $ip = $this->runtime->memory()->offset();
-            $this->runtime->option()->logger()->debug(sprintf(
-                'WRITE to 0x3D0x area: IP=0x%04X address=0x%08X byte=0x%02X caller=%s',
-                $ip, $address, $value & 0xFF, $caller
-            ));
-        }
-
-        // Debug: trace writes to 0xB1B0-0xB1D0 area (bcopyxx source buffer)
-        if ($address >= 0xB1B0 && $address <= 0xB1D0) {
-            $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
-            $caller = isset($bt[2]) ? ($bt[2]['class'] ?? '') . '::' . ($bt[2]['function'] ?? '') : 'unknown';
-            $ip = $this->runtime->memory()->offset();
-            $this->runtime->option()->logger()->debug(sprintf(
-                'WRITE to bcopyxx source (0xB1Bx): IP=0x%04X address=0x%08X byte=0x%02X caller=%s',
-                $ip, $address, $value & 0xFF, $caller
-            ));
-        }
-
-        // Debug: trace writes to stack pointer save area (0x38B8-0x38BC)
-        if ($address >= 0x38B8 && $address <= 0x38BC) {
-            $this->runtime->option()->logger()->debug(sprintf(
-                'WRITE to RM stack save area: address=0x%08X byte=0x%02X',
-                $address, $value & 0xFF
-            ));
-        }
-
-        // Debug: trace writes to stack area where return address should be
-        if ($address >= 0x7B74 && $address <= 0x7B7F) {
-            $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
-            $caller = isset($bt[1]) ? ($bt[1]['class'] ?? '') . '::' . ($bt[1]['function'] ?? '') : 'unknown';
-            $this->runtime->option()->logger()->debug(sprintf(
-                'WRITE to stack return area: address=0x%08X byte=0x%02X caller=%s',
-                $address, $value & 0xFF, $caller
-            ));
-        }
-
         $memory = $this->runtime->memory();
         $savedOffset = $memory->offset();
         $memory->setOffset($address);
@@ -222,14 +182,6 @@ class MemoryAccessor implements MemoryAccessorInterface
         // Read current value, update high byte (bits 8-15), preserve the rest
         $current = $this->fetch($registerType)->asBytesBySize($isGpr ? 32 : 16);
         $newValue = ($current & ~0xFF00) | (($value & 0xFF) << 8);
-
-        $this->runtime->option()->logger()->debug(sprintf(
-            'writeToHighBit: register=%s current=0x%08X value=0x%02X newValue=0x%08X',
-            $registerType instanceof RegisterType ? $registerType->name : $registerType,
-            $current,
-            $value,
-            $newValue
-        ));
 
         // Store directly without byte swapping
         [$address, $previousValue] = $this->processRegisterWrite(
@@ -488,25 +440,7 @@ class MemoryAccessor implements MemoryAccessorInterface
             $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
             $newSp = ($sp + $bytes) & $mask;
 
-            // Debug: log stack pop when ESP is high (protected mode stack)
-            if ($sp > 0x10000) {
-                $this->runtime->option()->logger()->debug(sprintf(
-                    'POP: ESP=0x%08X linearAddr=0x%08X value=0x%08X size=%d',
-                    $sp, $address, $value & $mask, $size
-                ));
-            }
-
             $this->writeBySize(RegisterType::ESP, $newSp, $size);
-
-            $espFullAfter = $this->fetch(RegisterType::ESP)->asBytesBySize(32);
-            // Debug: detect unexpected ESP changes
-            if (($espFullBefore & 0xFFFF0000) !== ($espFullAfter & 0xFFFF0000) && $size === 16) {
-                $this->runtime->option()->logger()->debug(sprintf(
-                    'POP: ESP upper bits changed! before=0x%08X after=0x%08X sp=%04X newSp=%04X size=%d',
-                    $espFullBefore, $espFullAfter, $sp, $newSp, $size
-                ));
-            }
-
             // Value is already in correct little-endian format from memory read
             // Pass alreadyDecoded=true to skip byte swap in asBytesBySize()
             return new MemoryAccessorFetchResult($value, $size, alreadyDecoded: true);
@@ -538,14 +472,6 @@ class MemoryAccessor implements MemoryAccessorInterface
             $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
             $newSp = ($sp - $bytes) & $mask;
             $address = $this->stackLinearAddress($newSp, $size, true);
-
-            // Debug: log stack push when ESP is high (protected mode stack)
-            if ($sp > 0x10000) {
-                $this->runtime->option()->logger()->debug(sprintf(
-                    'PUSH: ESP=0x%08X newSP=0x%08X linearAddr=0x%08X value=0x%08X size=%d',
-                    $sp, $newSp, $address, $value & $mask, $size
-                ));
-            }
 
             $this->writeBySize(RegisterType::ESP, $newSp, $size);
             $this->allocate($address, $bytes, safe: false);

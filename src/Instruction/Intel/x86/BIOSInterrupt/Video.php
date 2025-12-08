@@ -100,15 +100,6 @@ class Video implements InterruptInterface
         $char = $fetchResult->asLowBit();
         $videoContext = $this->videoContext();
 
-        // Debug: log characters that might be part of escape sequences
-        $charStr = ($char >= 0x20 && $char < 0x7F) ? chr($char) : '?';
-        if ($charStr === 'd' || $charStr === ';' || $charStr === 'H' || $charStr === '1' || $char === 0x1B) {
-            $runtime->option()->logger()->debug(sprintf(
-                'TTY output: char=%s (0x%02X) ansiState=%d',
-                $charStr, $char, $videoContext->ansiParser()->getState()
-            ));
-        }
-
         // Use ANSI parser from VideoContext
         if ($videoContext->ansiParser()->processChar($char, $runtime, $videoContext)) {
             // Character was consumed by ANSI parser

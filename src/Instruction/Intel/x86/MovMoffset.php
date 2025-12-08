@@ -36,21 +36,9 @@ class MovMoffset implements InstructionInterface
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $value);
             break;
         case 0xA1: // AX <- moffs16
-            $phys = $this->translateLinear($runtime, $linearOffset);
             $value = $opSize === 32
                 ? $this->readMemory32($runtime, $linearOffset)
                 : $this->readMemory16($runtime, $linearOffset);
-            // Debug: track cluster number reading
-            if ($offset === 0x1F8) {
-                $rawByte0 = $runtime->memoryAccessor()->readRawByte($linearOffset);
-                $rawByte1 = $runtime->memoryAccessor()->readRawByte($linearOffset + 1);
-                $runtime->option()->logger()->debug(sprintf(
-                    'MOV AX, [0x1F8]: read value 0x%04X (raw bytes: %s, %s)',
-                    $value,
-                    $rawByte0 !== null ? sprintf('0x%02X', $rawByte0) : 'null',
-                    $rawByte1 !== null ? sprintf('0x%02X', $rawByte1) : 'null'
-                ));
-            }
             $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $value, $opSize);
             break;
         case 0xA2: // moffs8 <- AL
@@ -64,20 +52,6 @@ class MovMoffset implements InstructionInterface
             break;
         case 0xA3: // moffs16 <- AX
             $valueToWrite = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
-            // Debug: track cluster number storage
-            if ($offset === 0x1F8) {
-                $runtime->option()->logger()->debug(sprintf(
-                    'MOV [0x1F8], AX: writing cluster 0x%04X (linear=0x%05X)',
-                    $valueToWrite, $linearOffset
-                ));
-            }
-            // Debug: track writes to stack area
-            if ($linearOffset >= 0x7B00 && $linearOffset <= 0x7C00) {
-                $runtime->option()->logger()->debug(sprintf(
-                    'MOV moffs, EAX: writing to stack area! offset=0x%04X linearOffset=0x%05X value=0x%08X opSize=%d',
-                    $offset, $linearOffset, $valueToWrite, $opSize
-                ));
-            }
             // Write using appropriate size
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearOffset, $valueToWrite);

@@ -25,18 +25,6 @@ class Lodsb implements InstructionInterface
         $linearAddr = $this->segmentOffsetAddress($runtime, $segment, $si);
         $value = $this->readMemory8($runtime, $linearAddr);
 
-        // Debug: log lodsb operations
-        $segValue = $runtime->memoryAccessor()->fetch($segment)->asByte();
-        $runtime->option()->logger()->debug(sprintf(
-            'LODSB: %s:SI=0x%04X:0x%04X linear=0x%05X value=0x%02X (char=%s)',
-            $segment->name,
-            $segValue,
-            $si,
-            $linearAddr,
-            $value,
-            $value >= 0x20 && $value < 0x7F ? chr($value) : '.'
-        ));
-
         $runtime->memoryAccessor()
             ->writeToLowBit(
                 RegisterType::EAX,
