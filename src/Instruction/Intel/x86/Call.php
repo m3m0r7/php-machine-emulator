@@ -42,18 +42,6 @@ class Call implements InstructionInterface
 
         // Push return address onto stack.
         $espBefore = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize($opSize);
-
-        $runtime->option()->logger()->debug(sprintf(
-            'CALL near: nextLinear=0x%05X return=0x%05X offset=0x%04X targetOffset=0x%05X targetLinear=0x%05X (CS=0x%04X ESP before=0x%08X)',
-            $nextLinear,
-            $returnToPush,
-            $offset & $mask,
-            $targetOffset,
-            $targetLinear,
-            $cs,
-            $espBefore
-        ));
-
         $runtime
             ->memoryAccessor()
             ->push(RegisterType::ESP, $returnToPush, $opSize);

@@ -28,6 +28,7 @@ class InstructionExecutor implements InstructionExecutorInterface
 
     public function execute(): ExecutionStatus
     {
+        $ip = $this->runtime->memory()->offset();
         $maxOpcodeLength = $this->instructionList->getMaxOpcodeLength();
         $memory = $this->runtime->memory();
         $memoryAccessor = $this->runtime->memoryAccessor();
@@ -71,6 +72,8 @@ class InstructionExecutor implements InstructionExecutorInterface
         } else {
             $this->zeroOpcodeCount = 0;
         }
+
+        $this->logExecution($ip, $opcodes);
 
         // Execute the instruction
         return $this->executeOpcodes($opcodes);

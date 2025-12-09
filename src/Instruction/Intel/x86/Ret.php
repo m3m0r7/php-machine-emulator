@@ -66,7 +66,6 @@ class Ret implements InstructionInterface
             // This properly handles protected mode by resolving segment base from descriptor
             $cs = ($opcode === 0xCB || $opcode === 0xCA) ? $targetCs : $ma->fetch(RegisterType::CS)->asByte();
             $linear = $this->linearCodeAddress($runtime, $cs, $returnIp, $size);
-            $runtime->option()->logger()->debug(sprintf('RET: popped returnIp=0x%05X ESP before=0x%08X, setOffset to 0x%05X (CS=0x%04X)', $returnIp, $espBefore, $linear, $cs));
             $runtime->memory()->setOffset($linear);
         }
 

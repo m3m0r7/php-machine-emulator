@@ -711,6 +711,195 @@ class RepPrefixTest extends InstructionTestCase
     }
 
     // ========================================
+    // Page Boundary Tests (4KB = 0x1000)
+    // ========================================
+
+    /**
+     * Test REP MOVSB crossing page boundary.
+     * When source or destination crosses a 4KB page boundary,
+     * bulk optimization should fall back to per-iteration execution.
+     */
+    public function testRepMovsb_CrossingPageBoundary(): void
+    {
+        $this->setRealMode16();
+        // Start near page boundary (0x1000) and cross it
+        $this->setRegister(RegisterType::ECX, 16);  // Copy 16 bytes
+        $this->setRegister(RegisterType::ESI, 0x0FF8);  // 8 bytes before page boundary
+        $this->setRegister(RegisterType::EDI, 0x2000);  // Destination in different page
+        $this->setDirectionFlag(false);
+
+        // Source data spanning page boundary (0x0FF8 - 0x1007)
+        for ($i = 0; $i < 16; $i++) {
+            $this->writeMemory(0x0FF8 + $i, 0x10 + $i, 8);
+        }
+
+        // Execute REP MOVSB (F3 A4)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xA4));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        // Verify all 16 bytes were copied correctly across page boundary
+        for ($i = 0; $i < 16; $i++) {
+            $this->assertSame(0x10 + $i, $this->readMemory(0x2000 + $i, 8), "Byte at offset $i should be copied correctly");
+        }
+        $this->assertSame(0x1008, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x2010, $this->getRegister(RegisterType::EDI));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX));
+    }
+
+    /**
+     * Test REP STOSB crossing page boundary.
+     */
+    public function testRepStosb_CrossingPageBoundary(): void
+    {
+        $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 32);  // Fill 32 bytes
+        $this->setRegister(RegisterType::EAX, 0xAA);
+        $this->setRegister(RegisterType::EDI, 0x0FF0);  // 16 bytes before page boundary
+        $this->setDirectionFlag(false);
+
+        // Execute REP STOSB (F3 AA)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xAA));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        // Verify all 32 bytes were filled correctly across page boundary
+        for ($i = 0; $i < 32; $i++) {
+            $this->assertSame(0xAA, $this->readMemory(0x0FF0 + $i, 8), "Byte at 0x" . dechex(0x0FF0 + $i) . " should be 0xAA");
+        }
+        $this->assertSame(0x1010, $this->getRegister(RegisterType::EDI));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX));
+    }
+
+    /**
+     * Test REP MOVSW crossing page boundary (word copy).
+     */
+    public function testRepMovsw_CrossingPageBoundary(): void
+    {
+        $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 8);  // Copy 8 words = 16 bytes
+        $this->setRegister(RegisterType::ESI, 0x0FF8);  // 8 bytes before boundary
+        $this->setRegister(RegisterType::EDI, 0x3000);
+        $this->setDirectionFlag(false);
+
+        // Source data
+        for ($i = 0; $i < 8; $i++) {
+            $this->writeMemory(0x0FF8 + ($i * 2), 0x1000 + $i, 16);
+        }
+
+        // Execute REP MOVSW (F3 A5)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xA5));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        for ($i = 0; $i < 8; $i++) {
+            $this->assertSame(0x1000 + $i, $this->readMemory(0x3000 + ($i * 2), 16), "Word $i should be copied correctly");
+        }
+        $this->assertSame(0x1008, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x3010, $this->getRegister(RegisterType::EDI));
+    }
+
+    /**
+     * Test REP MOVSB entirely within single page (no crossing).
+     * This should use bulk optimization.
+     */
+    public function testRepMovsb_WithinSinglePage(): void
+    {
+        $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 100);  // Copy 100 bytes
+        $this->setRegister(RegisterType::ESI, 0x1100);  // Well within page 0x1000-0x1FFF
+        $this->setRegister(RegisterType::EDI, 0x1500);  // Same page, no overlap
+        $this->setDirectionFlag(false);
+
+        // Source data
+        for ($i = 0; $i < 100; $i++) {
+            $this->writeMemory(0x1100 + $i, $i & 0xFF, 8);
+        }
+
+        // Execute REP MOVSB (F3 A4)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xA4));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        for ($i = 0; $i < 100; $i++) {
+            $this->assertSame($i & 0xFF, $this->readMemory(0x1500 + $i, 8), "Byte $i should be copied correctly");
+        }
+        $this->assertSame(0x1164, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x1564, $this->getRegister(RegisterType::EDI));
+    }
+
+    /**
+     * Test REP STOSB exactly at page boundary end.
+     */
+    public function testRepStosb_ExactlyAtPageEnd(): void
+    {
+        $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 256);  // Fill exactly 256 bytes
+        $this->setRegister(RegisterType::EAX, 0xBB);
+        $this->setRegister(RegisterType::EDI, 0x0F00);  // Ends exactly at 0x1000
+        $this->setDirectionFlag(false);
+
+        // Execute REP STOSB (F3 AA)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xAA));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        // Verify first and last bytes
+        $this->assertSame(0xBB, $this->readMemory(0x0F00, 8));
+        $this->assertSame(0xBB, $this->readMemory(0x0FFF, 8));
+        $this->assertSame(0x1000, $this->getRegister(RegisterType::EDI));
+    }
+
+    /**
+     * Test large REP MOVSB that crosses multiple page boundaries.
+     */
+    public function testRepMovsb_CrossingMultiplePages(): void
+    {
+        $this->setRealMode16();
+        $count = 8192;  // 8KB = crosses 2 page boundaries
+        $this->setRegister(RegisterType::ECX, $count);
+        $this->setRegister(RegisterType::ESI, 0x0800);  // Start in middle of page
+        $this->setRegister(RegisterType::EDI, 0x4000);
+        $this->setDirectionFlag(false);
+
+        // Source data pattern
+        for ($i = 0; $i < $count; $i++) {
+            $this->writeMemory(0x0800 + $i, ($i * 7) & 0xFF, 8);
+        }
+
+        // Execute REP MOVSB (F3 A4)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xA4));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        // Verify some samples across page boundaries
+        $this->assertSame((0 * 7) & 0xFF, $this->readMemory(0x4000, 8), 'First byte');
+        $this->assertSame((2048 * 7) & 0xFF, $this->readMemory(0x4800, 8), 'Middle byte (page 1->2)');
+        $this->assertSame((4096 * 7) & 0xFF, $this->readMemory(0x5000, 8), 'At second page boundary');
+        $this->assertSame(($count - 1) * 7 & 0xFF, $this->readMemory(0x4000 + $count - 1, 8), 'Last byte');
+        $this->assertSame(0x0800 + $count, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x4000 + $count, $this->getRegister(RegisterType::EDI));
+    }
+
+    // ========================================
     // Segment Override Prefix Tests
     // ========================================
 

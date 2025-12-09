@@ -27,12 +27,6 @@ class MovRmToSeg implements InstructionInterface
         $seg = $this->segmentFromDigit($modRegRM->registerOrOPCode());
         $value = $this->readRm16($runtime, $reader, $modRegRM);
 
-        $runtime->option()->logger()->debug(sprintf(
-            'MOV %s, rm16: value=0x%04X',
-            $seg->name,
-            $value
-        ));
-
         // In protected mode, cache the segment descriptor for Big Real Mode support
         if ($runtime->context()->cpu()->isProtectedMode() && $value !== 0) {
             $descriptor = $this->readSegmentDescriptor($runtime, $value);
