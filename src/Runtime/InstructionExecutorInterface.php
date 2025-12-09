@@ -24,7 +24,7 @@ interface InstructionExecutorInterface
     /**
      * Get the last executed opcode.
      */
-    public function lastOpcode(): ?int;
+    public function lastOpcodes(): ?array;
 
     /**
      * Get the instruction pointer before the last execution.

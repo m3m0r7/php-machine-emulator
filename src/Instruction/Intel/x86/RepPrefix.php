@@ -135,7 +135,7 @@ class RepPrefix implements InstructionInterface
                     $this->writeIndex($runtime, RegisterType::ECX, $counter);
 
                     // Execute without going through the full executor (which logs)
-                    $result = $lastInstruction->process($runtime, [$executor->lastOpcode()]);
+                    $result = $lastInstruction->process($runtime, $executor->lastOpcodes());
                     $lastResult = $result;
 
                     if ($result !== ExecutionStatus::SUCCESS) {

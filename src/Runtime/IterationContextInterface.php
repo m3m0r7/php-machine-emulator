@@ -13,7 +13,7 @@ interface IterationContextInterface
      *
      * The handler receives an InstructionExecutorInterface and is responsible
      * for looping as needed (e.g., REP prefix). It calls executor->execute()
-     * and can inspect executor->lastInstruction(), executor->lastOpcode(), etc.
+     * and can inspect executor->lastInstruction(), executor->lastOpcodes(), etc.
      *
      * @param callable(InstructionExecutorInterface): ExecutionStatus $handler
      */

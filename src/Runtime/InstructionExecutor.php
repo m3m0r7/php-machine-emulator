@@ -140,9 +140,9 @@ class InstructionExecutor implements InstructionExecutorInterface
         return $this->lastInstruction;
     }
 
-    public function lastOpcode(): ?int
+    public function lastOpcodes(): ?array
     {
-        return $this->lastOpcode;
+        return $this->lastOpcodes;
     }
 
     public function lastInstructionPointer(): int
