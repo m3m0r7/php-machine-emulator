@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -10,11 +12,12 @@ class Sti extends Nop
 {
     public function opcodes(): array
     {
-        return [0xFB];
+        return $this->applyPrefixes([0xFB]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         if ($runtime->context()->cpu()->isProtectedMode()) {
             $cpl = $runtime->context()->cpu()->cpl();
             $iopl = $runtime->context()->cpu()->iopl();

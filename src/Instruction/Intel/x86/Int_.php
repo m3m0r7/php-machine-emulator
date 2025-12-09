@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\StreamReaderException;
@@ -31,7 +33,7 @@ class Int_ implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xCD];
+        return $this->applyPrefixes([0xCD]);
     }
 
     /**
@@ -54,8 +56,9 @@ class Int_ implements InstructionInterface
         $this->vectorInterrupt($runtime, $vector, $returnVal);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $vector = $runtime
             ->memory()
             ->byte();

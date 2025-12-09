@@ -195,7 +195,7 @@ class XchgTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x93));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->xchg->process($this->runtime, 0x93);
+        $this->xchg->process($this->runtime, [0x93]);
 
         $this->assertSame(0x11111111, $this->getRegister(RegisterType::EAX));
         $this->assertSame(0x22222222, $this->getRegister(RegisterType::EBX));
@@ -277,7 +277,7 @@ class XchgTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x91));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->xchg->process($this->runtime, 0x91);
+        $this->xchg->process($this->runtime, [0x91]);
         $this->assertSame(0x33333333, $this->getRegister(RegisterType::EAX));
         $this->assertSame(0x22222222, $this->getRegister(RegisterType::ECX));
 
@@ -286,7 +286,7 @@ class XchgTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x93));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->xchg->process($this->runtime, 0x93);
+        $this->xchg->process($this->runtime, [0x93]);
 
         // Final state: EAX=11, EBX=33, ECX=22
         $this->assertSame(0x11111111, $this->getRegister(RegisterType::EAX));

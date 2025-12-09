@@ -212,7 +212,7 @@ class BsfBsrTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xBC;
-        $this->bsf->process($this->runtime, $opcodeKey);
+        $this->bsf->process($this->runtime, [$opcodeKey]);
     }
 
     private function executeBsr(array $operandBytes): void
@@ -223,6 +223,6 @@ class BsfBsrTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xBD;
-        $this->bsr->process($this->runtime, $opcodeKey);
+        $this->bsr->process($this->runtime, [$opcodeKey]);
     }
 }

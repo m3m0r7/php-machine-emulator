@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -17,20 +19,22 @@ class Int3 implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xCC];
+        return $this->applyPrefixes([0xCC]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         // INT3 triggers interrupt vector 3 (breakpoint)
         $runtime->option()->logger()->debug('INT3 breakpoint triggered');
 
         // Raise interrupt vector 3 (breakpoint exception)
         $returnIp = $runtime->memory()->offset();
-        $intHandler = $this->instructionList->instructionList()[Int_::class] ?? null;
-        if ($intHandler instanceof Int_) {
-            $intHandler->raise($runtime, 3, $returnIp, null);
-        }
+        // TODO: Here implementation is invalid, because always true. you need to read memory directly.
+//        $intHandler = $this->instructionList->instructionList()[Int_::class] ?? null;
+//        if ($intHandler instanceof Int_) {
+//            $intHandler->raise($runtime, 3, $returnIp, null);
+//        }
 
         return ExecutionStatus::SUCCESS;
     }

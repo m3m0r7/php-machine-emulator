@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
@@ -14,11 +16,13 @@ class SbbRegRm implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0x18, 0x19, 0x1A, 0x1B];
+        return $this->applyPrefixes([0x18, 0x19, 0x1A, 0x1B]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         $reader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $reader->byteAsModRegRM();
 

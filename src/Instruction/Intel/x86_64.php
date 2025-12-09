@@ -6,12 +6,12 @@ namespace PHPMachineEmulator\Instruction\Intel;
 
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
-use PHPMachineEmulator\Instruction\Intel\x86_64\RexPrefix;
-use PHPMachineEmulator\Instruction\Intel\x86_64\Movsxd;
-use PHPMachineEmulator\Instruction\Intel\x86_64\Push64;
-use PHPMachineEmulator\Instruction\Intel\x86_64\Pop64;
-use PHPMachineEmulator\Instruction\Intel\x86_64\Mov64;
 use PHPMachineEmulator\Instruction\Intel\x86_64\Arithmetic64;
+use PHPMachineEmulator\Instruction\Intel\x86_64\Mov64;
+use PHPMachineEmulator\Instruction\Intel\x86_64\Movsxd;
+use PHPMachineEmulator\Instruction\Intel\x86_64\Pop64;
+use PHPMachineEmulator\Instruction\Intel\x86_64\Push64;
+use PHPMachineEmulator\Instruction\Intel\x86_64\RexPrefix;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\Traits\RuntimeAwareTrait;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -39,11 +39,12 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 class x86_64 implements InstructionListInterface
 {
     use RuntimeAwareTrait;
+    use InstructionSupport;
 
     protected x86 $x86;
     protected array $instructionList64 = [];
 
-    /** @var array<int, array> Cache for findInstruction results in 64-bit mode */
+    /** @var array<InstructionInterface> Cache for findInstruction results in 64-bit mode */
     protected array $findInstructionCache64 = [];
 
     public function __construct()
@@ -73,9 +74,9 @@ class x86_64 implements InstructionListInterface
         $this->x86->setRuntime($runtime);
     }
 
-    public function findInstruction(int|array $opcodes): array
+    public function findInstruction(int|array $opcodes): InstructionInterface
     {
-        $opcodeArray = is_array($opcodes) ? $opcodes : [$opcodes];
+        $key = $this->makeKeyByOpCodes($opcodes);
 
         // Check if we're in 64-bit mode (Long Mode and not Compatibility Mode)
         $isIn64BitMode = $this->runtime !== null
@@ -84,40 +85,20 @@ class x86_64 implements InstructionListInterface
 
         // Only use 64-bit specific instructions when actually in 64-bit mode
         if ($isIn64BitMode) {
-            $opcode = $opcodeArray[0];
 
             // Check cache first
-            if (isset($this->findInstructionCache64[$opcode])) {
-                return $this->findInstructionCache64[$opcode];
+            if (isset($this->findInstructionCache64[$key])) {
+                return $this->findInstructionCache64[$key];
             }
 
             $list64 = $this->instructionList64();
-            if (isset($list64[$opcode])) {
-                $result = [$list64[$opcode], $opcode];
-                $this->findInstructionCache64[$opcode] = $result;
-                return $result;
+            if (isset($list64[$key])) {
+                return $this->findInstructionCache64[$key] = $list64[$key];
             }
         }
 
         // Delegate to x86 for non-64-bit mode or non-64-bit-specific opcodes
         return $this->x86->findInstruction($opcodes);
-    }
-
-    /**
-     * Get the standard x86 instruction list (for 16/32-bit modes).
-     */
-    public function instructionList(): array
-    {
-        return $this->x86->instructionList();
-    }
-
-    /**
-     * Check if a byte sequence matches a multi-byte opcode.
-     * Delegates to the underlying x86 implementation.
-     */
-    public function isMultiByteOpcode(array $bytes): bool
-    {
-        return $this->x86->isMultiByteOpcode($bytes);
     }
 
     /**
@@ -134,7 +115,7 @@ class x86_64 implements InstructionListInterface
      *
      * These instructions override or replace 32-bit instructions when in 64-bit mode.
      */
-    public function instructionList64(): array
+    protected function instructionList64(): array
     {
         if (!empty($this->instructionList64)) {
             return $this->instructionList64;
@@ -158,8 +139,8 @@ class x86_64 implements InstructionListInterface
             $instance = new $className($this);
             assert($instance instanceof InstructionInterface);
 
-            foreach ($instance->opcodes() as $opcode) {
-                $this->instructionList64[$opcode] = $instance;
+            foreach ($instance->opcodes() as $opcodes) {
+                $this->instructionList64[$this->makeKeyByOpCodes($opcodes)] = $instance;
             }
         }
 

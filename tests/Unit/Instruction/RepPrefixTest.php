@@ -110,7 +110,7 @@ class RepPrefixTest extends InstructionTestCase
         $iterationContext = $this->cpuContext->iteration();
 
         // Step 1: Execute REP prefix (sets up iteration handler, returns CONTINUE)
-        $result = $this->repPrefix->process($this->runtime, $repOpcode);
+        $result = $this->repPrefix->process($this->runtime, [$repOpcode]);
 
         if ($result !== ExecutionStatus::CONTINUE) {
             return $result;
@@ -1554,7 +1554,7 @@ class TestInstructionExecutor implements InstructionExecutorInterface
         $this->lastInstruction = $instruction;
         $this->lastOpcode = $opcode;
 
-        $result = $instruction->process($this->runtime, $opcode);
+        $result = $instruction->process($this->runtime, [$opcode]);
 
         // Reset stream for next iteration
         $this->memoryStream->setOffset(0);

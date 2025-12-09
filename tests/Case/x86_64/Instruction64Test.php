@@ -126,43 +126,46 @@ class Instruction64Test extends TestCase
 
         // REX prefix opcodes should be registered
         for ($opcode = 0x40; $opcode <= 0x4F; $opcode++) {
-            $this->assertArrayHasKey($opcode, $list, "REX prefix 0x" . dechex($opcode) . " should be registered");
-            $this->assertInstanceOf(RexPrefix::class, $list[$opcode]);
+            $key = '0x' . strtoupper(dechex($opcode));
+            $this->assertArrayHasKey($key, $list, "REX prefix {$key} should be registered");
+            $this->assertInstanceOf(RexPrefix::class, $list[$key]);
         }
 
         // MOVSXD should be registered
-        $this->assertArrayHasKey(0x63, $list);
-        $this->assertInstanceOf(Movsxd::class, $list[0x63]);
+        $this->assertArrayHasKey('0x63', $list);
+        $this->assertInstanceOf(Movsxd::class, $list['0x63']);
 
         // Push64 should be registered
         for ($opcode = 0x50; $opcode <= 0x57; $opcode++) {
-            $this->assertArrayHasKey($opcode, $list, "PUSH 0x" . dechex($opcode) . " should be registered");
-            $this->assertInstanceOf(Push64::class, $list[$opcode]);
+            $key = '0x' . strtoupper(dechex($opcode));
+            $this->assertArrayHasKey($key, $list, "PUSH {$key} should be registered");
+            $this->assertInstanceOf(Push64::class, $list[$key]);
         }
 
         // Pop64 should be registered
         for ($opcode = 0x58; $opcode <= 0x5F; $opcode++) {
-            $this->assertArrayHasKey($opcode, $list, "POP 0x" . dechex($opcode) . " should be registered");
-            $this->assertInstanceOf(Pop64::class, $list[$opcode]);
+            $key = '0x' . strtoupper(dechex($opcode));
+            $this->assertArrayHasKey($key, $list, "POP {$key} should be registered");
+            $this->assertInstanceOf(Pop64::class, $list[$key]);
         }
     }
 
     public function testFindInstruction64BitMode(): void
     {
         // REX prefix should return RexPrefix in 64-bit mode
-        [$instruction, ] = $this->instructionList->findInstruction(0x48);
+        $instruction = $this->instructionList->findInstruction(0x48);
         $this->assertInstanceOf(RexPrefix::class, $instruction);
 
         // MOVSXD
-        [$instruction, ] = $this->instructionList->findInstruction(0x63);
+        $instruction = $this->instructionList->findInstruction(0x63);
         $this->assertInstanceOf(Movsxd::class, $instruction);
 
         // PUSH r64
-        [$instruction, ] = $this->instructionList->findInstruction(0x50);
+        $instruction = $this->instructionList->findInstruction(0x50);
         $this->assertInstanceOf(Push64::class, $instruction);
 
         // POP r64
-        [$instruction, ] = $this->instructionList->findInstruction(0x58);
+        $instruction = $this->instructionList->findInstruction(0x58);
         $this->assertInstanceOf(Pop64::class, $instruction);
     }
 
@@ -183,15 +186,15 @@ class Instruction64Test extends TestCase
     {
         // Non-64-bit specific opcodes should delegate to x86
         // NOP (0x90)
-        [$instruction, ] = $this->instructionList->findInstruction(0x90);
+        $instruction = $this->instructionList->findInstruction(0x90);
         $this->assertNotNull($instruction);
 
         // INT (0xCD)
-        [$instruction, ] = $this->instructionList->findInstruction(0xCD);
+        $instruction = $this->instructionList->findInstruction(0xCD);
         $this->assertNotNull($instruction);
 
         // RET (0xC3)
-        [$instruction, ] = $this->instructionList->findInstruction(0xC3);
+        $instruction = $this->instructionList->findInstruction(0xC3);
         $this->assertNotNull($instruction);
     }
 

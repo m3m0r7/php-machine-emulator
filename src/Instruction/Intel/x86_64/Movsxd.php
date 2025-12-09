@@ -32,7 +32,7 @@ class Movsxd implements InstructionInterface
         return [0x63];
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $reader = $this->enhanceReader($runtime);
         $modRegRM = $reader->byteAsModRegRM();

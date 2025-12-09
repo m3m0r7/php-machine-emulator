@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
@@ -23,11 +25,13 @@ class FpuStub implements InstructionInterface
         // WAIT/FWAIT, and ESC opcodes for FPU instructions
         // 0x9B: FWAIT
         // 0xD8-0xDF: FPU escape opcodes (x87 coprocessor)
-        return [0x9B, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF];
+        return $this->applyPrefixes([0x9B, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         $this->assertFpuAvailable($runtime);
         $reader = new EnhanceStreamReader($runtime->memory());
 

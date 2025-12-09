@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -14,15 +16,17 @@ class PopSeg implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [
+        return $this->applyPrefixes([
             0x07,
             0x17,
             0x1F,
-        ];
+        ], [PrefixClass::Operand]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         $seg = match ($opcode) {
             0x07 => RegisterType::ES,
             0x17 => RegisterType::SS,

@@ -50,7 +50,7 @@ class PHPBIOSCall implements InstructionInterface
     /**
      * Process the PHPBIOS instruction (0F FF xx).
      */
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $vector = $runtime->memory()->byte();
         return $this->handleInterrupt($runtime, $vector);

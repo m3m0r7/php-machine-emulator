@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -18,11 +20,13 @@ class TestImmAl implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xA8, 0xA9];
+        return $this->applyPrefixes([0xA8, 0xA9]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         if ($opcode === 0xA8) {
             // TEST AL, imm8
             $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();

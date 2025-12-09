@@ -44,7 +44,7 @@ class Syscall implements InstructionInterface
         return [];
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $cpu = $runtime->context()->cpu();
 

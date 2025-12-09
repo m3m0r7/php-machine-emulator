@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -35,11 +37,12 @@ class Aas implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0x3F];
+        return $this->applyPrefixes([0x3F]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $ma = $runtime->memoryAccessor();
         $al = $ma->fetch(RegisterType::EAX)->asLowBit();
         $ah = $ma->fetch(RegisterType::EAX)->asHighBit();

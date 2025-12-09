@@ -288,10 +288,10 @@ class Runtime implements RuntimeInterface
     {
         try {
             $instructionList = $this->architectureProvider->instructionList();
-            [$instruction, $opcodeKey] = $instructionList->findInstruction($opcodes);
+            $instruction = $instructionList->findInstruction($opcodes);
 
             try {
-                return $instruction->process($this, $opcodeKey);
+                return $instruction->process($this, is_array($opcodes) ? $opcodes : [$opcodes]);
             } catch (FaultException $e) {
                 $this->machine->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
                 if ($this->interruptDeliveryHandler->raiseFault($this, $e->vector(), $this->memory->offset(), $e->errorCode())) {

@@ -26,14 +26,15 @@ class Push64 implements InstructionInterface
         return range(0x50, 0x57);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcode = $opcodes[0];
         $cpu = $runtime->context()->cpu();
 
         // In non-64-bit mode, delegate to standard x86 push
         if (!$cpu->isLongMode() || $cpu->isCompatibilityMode()) {
-            [$instruction, ] = $this->instructionList->x86()->findInstruction($opcode);
-            return $instruction->process($runtime, $opcode);
+            [$instruction, ] = $this->instructionList->x86()->findInstruction($opcodes);
+            return $instruction->process($runtime, $opcodes);
         }
 
         // Get register code from opcode (0-7)

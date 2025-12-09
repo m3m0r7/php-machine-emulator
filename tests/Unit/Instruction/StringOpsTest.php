@@ -141,7 +141,7 @@ class StringOpsTest extends InstructionTestCase
             $this->memoryStream->write(chr(0xA4));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->movsb->process($this->runtime, 0xA4);
+            $this->movsb->process($this->runtime, [0xA4]);
         }
 
         $this->assertSame(0x48, $this->readMemory(0x2000, 8));
@@ -248,7 +248,7 @@ class StringOpsTest extends InstructionTestCase
             $this->memoryStream->write(chr(0xAA));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->stosb->process($this->runtime, 0xAA);
+            $this->stosb->process($this->runtime, [0xAA]);
         }
 
         $this->assertSame(0x00, $this->readMemory(0x2000, 8));
@@ -357,7 +357,7 @@ class StringOpsTest extends InstructionTestCase
             $this->memoryStream->write(chr(0xAC));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->lodsb->process($this->runtime, 0xAC);
+            $this->lodsb->process($this->runtime, [0xAC]);
             $result .= chr($this->getRegister(RegisterType::EAX) & 0xFF);
         }
 
@@ -460,7 +460,7 @@ class StringOpsTest extends InstructionTestCase
             $this->memoryStream->write(chr(0xAE));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->scasb->process($this->runtime, 0xAE);
+            $this->scasb->process($this->runtime, [0xAE]);
             $count++;
         } while (!$this->getZeroFlag() && $count < 10);
 
@@ -585,7 +585,7 @@ class StringOpsTest extends InstructionTestCase
             $this->memoryStream->write(chr(0xA6));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->cmpsb->process($this->runtime, 0xA6);
+            $this->cmpsb->process($this->runtime, [0xA6]);
             if (!$this->getZeroFlag()) {
                 $allEqual = false;
                 break;
@@ -675,7 +675,7 @@ class StringOpsTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xA4));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->movsb->process($this->runtime, 0xA4);
+        $this->movsb->process($this->runtime, [0xA4]);
 
         $this->assertSame(0x100F, $this->getRegister(RegisterType::ESI));
         $this->assertSame(0x200F, $this->getRegister(RegisterType::EDI));

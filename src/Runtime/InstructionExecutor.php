@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Runtime;
 
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Exception\FaultException;
+use PHPMachineEmulator\Exception\NotFoundInstructionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
@@ -15,7 +16,7 @@ use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandlerInterface;
 class InstructionExecutor implements InstructionExecutorInterface
 {
     private ?InstructionInterface $lastInstruction = null;
-    private ?int $lastOpcode = null;
+    private ?array $lastOpcodes = null;
     private int $lastInstructionPointer = 0;
     private int $zeroOpcodeCount = 0;
 
@@ -36,32 +37,37 @@ class InstructionExecutor implements InstructionExecutorInterface
         $this->lastInstructionPointer = $memory->offset();
         $memoryAccessor->setInstructionFetch(true);
 
-        // Read first byte
-        $firstByte = $memory->byte();
-        $opcodes = [$firstByte];
-
-        // Try to match multi-byte opcodes
-        if ($maxOpcodeLength > 1 && !$memory->isEOF()) {
-            $startPos = $memory->offset();
-            $peekBytes = [$firstByte];
-
-            for ($i = 1; $i < $maxOpcodeLength && !$memory->isEOF(); $i++) {
-                $peekBytes[] = $memory->byte();
-                if ($this->instructionList->isMultiByteOpcode($peekBytes)) {
-                    $opcodes = $peekBytes;
-                    break;
-                }
-            }
-
-            if (count($opcodes) === 1) {
-                $memory->setOffset($startPos);
+        // Read up to maxOpcodeLength bytes for instruction matching
+        $startPos = $memory->offset();
+        $peekBytes = [];
+        $instruction = null;
+        $lastException = null;
+        for ($i = 0; $i < $maxOpcodeLength && !$memory->isEOF(); $i++) {
+            $byte = $memory->byte();
+            try {
+                $instruction = $this->instructionList->findInstruction([...$peekBytes, $byte]);
+                $peekBytes[] = $byte;
+            } catch (NotFoundInstructionException $e) {
+                $lastException = $e;
+                break;
             }
         }
 
+        if ($instruction === null && $lastException !== null) {
+            throw $lastException;
+        }
+
+        // Find instruction - uses longest-first matching
+        // Returns InstructionInterface directly
+        $this->lastOpcodes = $peekBytes;
+
         $memoryAccessor->setInstructionFetch(false);
 
+        // Rewind to just after consumed bytes
+        $memory->setOffset($startPos + count($peekBytes));
+
         // Detect infinite loop
-        if (count($opcodes) === 1 && $opcodes[0] === 0x00) {
+        if (count($this->lastOpcodes) === 1 && $this->lastOpcodes[0] === 0x00) {
             $this->zeroOpcodeCount++;
             if ($this->zeroOpcodeCount >= 255) {
                 throw new ExecutionException(sprintf(
@@ -73,38 +79,26 @@ class InstructionExecutor implements InstructionExecutorInterface
             $this->zeroOpcodeCount = 0;
         }
 
-        $this->logExecution($ip, $opcodes);
+        $this->logExecution($ip, $this->lastOpcodes);
 
         // Execute the instruction
-        return $this->executeOpcodes($opcodes);
-    }
+        $this->lastInstruction = $instruction;
 
-    private function executeOpcodes(array $opcodes): ExecutionStatus
-    {
         try {
-            [$instruction, $opcodeKey] = $this->instructionList->findInstruction($opcodes);
-            $this->lastInstruction = $instruction;
-            $this->lastOpcode = $opcodeKey;
-
-            try {
-                return $instruction->process($this->runtime, $opcodeKey);
-            } catch (FaultException $e) {
-                $this->runtime->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
-                if ($this->interruptDeliveryHandler->raiseFault(
-                    $this->runtime,
-                    $e->vector(),
-                    $this->runtime->memory()->offset(),
-                    $e->errorCode()
-                )) {
-                    return ExecutionStatus::SUCCESS;
-                }
-                throw $e;
-            } catch (ExecutionException $e) {
-                $this->runtime->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
-                throw $e;
+            return $instruction->process($this->runtime, $this->lastOpcodes);
+        } catch (FaultException $e) {
+            $this->runtime->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
+            if ($this->interruptDeliveryHandler->raiseFault(
+                $this->runtime,
+                $e->vector(),
+                $this->runtime->memory()->offset(),
+                $e->errorCode()
+            )) {
+                return ExecutionStatus::SUCCESS;
             }
-        } catch (\Throwable $e) {
-            $this->runtime->option()->logger()->error(sprintf('Threw error: %s', $e));
+            throw $e;
+        } catch (ExecutionException $e) {
+            $this->runtime->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
             throw $e;
         }
     }

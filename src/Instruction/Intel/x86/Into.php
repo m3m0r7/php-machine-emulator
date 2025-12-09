@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86;
@@ -25,11 +27,12 @@ class Into implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xCE];
+        return $this->applyPrefixes([0xCE]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         // Check if we're in 64-bit mode (INTO is invalid in 64-bit mode)
         $cpu = $runtime->context()->cpu();
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
@@ -44,11 +47,12 @@ class Into implements InstructionInterface
             $runtime->option()->logger()->debug('INTO: Overflow detected, triggering INT 4');
 
             // Get the Int_ instruction handler and raise INT 4
-            $intInstruction = $this->instructionList->instructionList()[Int_::class] ?? null;
-            if ($intInstruction instanceof Int_) {
-                $returnIp = $runtime->memory()->offset();
-                $intInstruction->raise($runtime, 4, $returnIp);
-            }
+            // TODO: Here implementation is invalid, because always true. you need to read memory directly.
+//            $intInstruction = $this->instructionList->instructionList()[Int_::class] ?? null;
+//            if ($intInstruction instanceof Int_) {
+//                $returnIp = $runtime->memory()->offset();
+//                $intInstruction->raise($runtime, 4, $returnIp);
+//            }
         }
 
         return ExecutionStatus::SUCCESS;

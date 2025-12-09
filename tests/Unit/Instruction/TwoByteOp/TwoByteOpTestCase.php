@@ -63,7 +63,7 @@ abstract class TwoByteOpTestCase extends TestCase
 
         $instruction = $this->createInstruction();
         $opcodeKey = (0x0F << 8) | $secondByte;
-        $instruction->process($this->runtime, $opcodeKey);
+        $instruction->process($this->runtime, [$opcodeKey]);
     }
 
     // ========================================

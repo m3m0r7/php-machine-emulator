@@ -88,7 +88,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte(); // consume opcode
 
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         // ESP should be decremented by 4 (32-bit mode)
         $this->assertSame(0x7FFC, $this->getStackPointer());
@@ -112,7 +112,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x100);
         $this->memoryStream->byte(); // consume opcode
 
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         $this->assertSame(0x7FFC, $this->getStackPointer());
         $this->assertSame(0x105, $this->readMemory(0x7FFC, 32));
@@ -130,7 +130,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
 
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         $this->assertSame(0x7FFC, $this->getStackPointer());
         $this->assertSame(5, $this->readMemory(0x7FFC, 32)); // return address
@@ -153,7 +153,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
 
-        $this->ret->process($this->runtime, 0xC3);
+        $this->ret->process($this->runtime, [0xC3]);
 
         $this->assertSame(0x8000, $this->getStackPointer());
         $this->assertSame(0x1234, $this->memoryStream->offset());
@@ -172,7 +172,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
 
-        $this->ret->process($this->runtime, 0xC2);
+        $this->ret->process($this->runtime, [0xC2]);
 
         // ESP = 0x7FFC + 4 (pop) + 8 (imm) = 0x8008
         $this->assertSame(0x8008, $this->getStackPointer());
@@ -194,7 +194,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x100);
         $this->memoryStream->byte();
 
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         // Verify CALL worked
         $returnAddress = 0x105; // 0x100 + 5 (opcode + dword)
@@ -209,7 +209,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset($targetAddress);
         $this->memoryStream->byte();
 
-        $this->ret->process($this->runtime, 0xC3);
+        $this->ret->process($this->runtime, [0xC3]);
 
         // Should be back at return address
         $this->assertSame(0x8000, $this->getStackPointer());
@@ -227,7 +227,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xE8) . chr(0xFB) . chr(0x00) . chr(0x00) . chr(0x00));
         $this->memoryStream->setOffset(0x100);
         $this->memoryStream->byte();
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         $this->assertSame(0x7FFC, $this->getStackPointer());
         $this->assertSame(0x105, $this->readMemory(0x7FFC, 32));
@@ -239,7 +239,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xE8) . chr(0xFB) . chr(0x00) . chr(0x00) . chr(0x00));
         $this->memoryStream->setOffset(0x200);
         $this->memoryStream->byte();
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         $this->assertSame(0x7FF8, $this->getStackPointer());
         $this->assertSame(0x205, $this->readMemory(0x7FF8, 32)); // second return address
@@ -251,7 +251,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xC3));
         $this->memoryStream->setOffset(0x300);
         $this->memoryStream->byte();
-        $this->ret->process($this->runtime, 0xC3);
+        $this->ret->process($this->runtime, [0xC3]);
 
         $this->assertSame(0x7FFC, $this->getStackPointer());
         $this->assertSame(0x205, $this->memoryStream->offset());
@@ -261,7 +261,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xC3));
         $this->memoryStream->setOffset(0x205);
         $this->memoryStream->byte();
-        $this->ret->process($this->runtime, 0xC3);
+        $this->ret->process($this->runtime, [0xC3]);
 
         $this->assertSame(0x8000, $this->getStackPointer());
         $this->assertSame(0x105, $this->memoryStream->offset());
@@ -284,7 +284,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xE8) . chr(0x10) . chr(0x00) . chr(0x00) . chr(0x00));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         // Flags should remain unchanged
         $this->assertTrue($this->getCarryFlag());
@@ -305,7 +305,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xC3));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->ret->process($this->runtime, 0xC3);
+        $this->ret->process($this->runtime, [0xC3]);
 
         // Flags should remain unchanged
         $this->assertTrue($this->getCarryFlag());
@@ -324,7 +324,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
 
-        $this->ret->process($this->runtime, 0xC2);
+        $this->ret->process($this->runtime, [0xC2]);
 
         // ESP = 0x7FFC + 4 (pop) + 256 = 0x8100
         $this->assertSame(0x8100, $this->getStackPointer());
@@ -342,7 +342,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
 
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         // Target = 5 + 0x1000 = 0x1005
         $this->assertSame(0x1005, $this->memoryStream->offset());
@@ -362,7 +362,7 @@ class CallRetTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x2000);
         $this->memoryStream->byte();
 
-        $this->call->process($this->runtime, 0xE8);
+        $this->call->process($this->runtime, [0xE8]);
 
         $this->assertSame(0x1005, $this->memoryStream->offset());
         $this->assertSame(0x2005, $this->readMemory(0x7FFC, 32));

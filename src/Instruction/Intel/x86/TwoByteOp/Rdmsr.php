@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
@@ -25,11 +27,12 @@ class Rdmsr implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [[0x0F, 0x32]];
+        return $this->applyPrefixes([[0x0F, 0x32]]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         if ($runtime->context()->cpu()->cpl() !== 0) {
             throw new FaultException(0x0D, 0, 'RDMSR privilege check failed');
         }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
@@ -22,14 +24,16 @@ class Movsx implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [
+        return $this->applyPrefixes([
             [0x0F, 0xBE], // MOVSX r16/32, r/m8
             [0x0F, 0xBF], // MOVSX r32, r/m16
-        ];
+        ], [PrefixClass::Operand, PrefixClass::Address, PrefixClass::Segment]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[array_key_last($opcodes)];
         $reader = new EnhanceStreamReader($runtime->memory());
         $modrm = $reader->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();

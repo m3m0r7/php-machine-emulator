@@ -153,6 +153,6 @@ class BswapTest extends TwoByteOpTestCase
     private function executeBswap(int $opcode): void
     {
         $opcodeKey = (0x0F << 8) | $opcode;
-        $this->bswap->process($this->runtime, $opcodeKey);
+        $this->bswap->process($this->runtime, [$opcodeKey]);
     }
 }

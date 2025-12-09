@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
@@ -19,14 +21,15 @@ class CacheOp implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [
+        return $this->applyPrefixes([
             [0x0F, 0x08], // INVD
             [0x0F, 0x09], // WBINVD
-        ];
+        ], [PrefixClass::Operand]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         // No-op - no cache to invalidate
         return ExecutionStatus::SUCCESS;
     }

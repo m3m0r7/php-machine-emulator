@@ -285,7 +285,7 @@ class SetccCmovccTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | $condition;
-        $this->setcc->process($this->runtime, $opcodeKey);
+        $this->setcc->process($this->runtime, [$opcodeKey]);
     }
 
     private function executeCmovcc(int $condition, array $operandBytes): void
@@ -296,6 +296,6 @@ class SetccCmovccTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | $condition;
-        $this->cmovcc->process($this->runtime, $opcodeKey);
+        $this->cmovcc->process($this->runtime, [$opcodeKey]);
     }
 }

@@ -20,7 +20,7 @@ class HltPorts implements InstructionInterface
         return [0xF4];
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         return ExecutionStatus::HALT;
     }

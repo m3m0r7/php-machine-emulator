@@ -174,7 +174,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xF5));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->cmc->process($this->runtime, 0xF5);
+        $this->cmc->process($this->runtime, [0xF5]);
         $this->assertTrue($this->getCarryFlag());
     }
 
@@ -525,7 +525,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xFA));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->cli->process($this->runtime, 0xFA);
+        $this->cli->process($this->runtime, [0xFA]);
 
         // Block should be cleared
         $blocked = $this->cpuContext->consumeInterruptDeliveryBlock();
@@ -549,7 +549,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xF9));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->stc->process($this->runtime, 0xF9);
+        $this->stc->process($this->runtime, [0xF9]);
         $this->assertTrue($this->getCarryFlag());
 
         // CLC again
@@ -557,7 +557,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xF8));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->clc->process($this->runtime, 0xF8);
+        $this->clc->process($this->runtime, [0xF8]);
         $this->assertFalse($this->getCarryFlag());
     }
 
@@ -574,7 +574,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xFD));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->std->process($this->runtime, 0xFD);
+        $this->std->process($this->runtime, [0xFD]);
         $this->assertTrue($this->getDirectionFlag());
 
         // CLD again
@@ -582,7 +582,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xFC));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->cld->process($this->runtime, 0xFC);
+        $this->cld->process($this->runtime, [0xFC]);
         $this->assertFalse($this->getDirectionFlag());
     }
 
@@ -600,7 +600,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xFB));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->sti->process($this->runtime, 0xFB);
+        $this->sti->process($this->runtime, [0xFB]);
         $this->assertTrue($this->getInterruptFlag());
 
         // CLI again
@@ -608,7 +608,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xFA));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->cli->process($this->runtime, 0xFA);
+        $this->cli->process($this->runtime, [0xFA]);
         $this->assertFalse($this->getInterruptFlag());
     }
 
@@ -622,7 +622,7 @@ class FlagManipulationTest extends InstructionTestCase
             $this->memoryStream->write(chr(0xF5));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->cmc->process($this->runtime, 0xF5);
+            $this->cmc->process($this->runtime, [0xF5]);
         }
 
         $this->assertTrue($this->getCarryFlag());
@@ -638,7 +638,7 @@ class FlagManipulationTest extends InstructionTestCase
             $this->memoryStream->write(chr(0xF5));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->cmc->process($this->runtime, 0xF5);
+            $this->cmc->process($this->runtime, [0xF5]);
         }
 
         $this->assertFalse($this->getCarryFlag());
@@ -667,7 +667,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xFC));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->cld->process($this->runtime, 0xFC);
+        $this->cld->process($this->runtime, [0xFC]);
         $this->assertFalse($this->getCarryFlag());
         $this->assertFalse($this->getDirectionFlag());
         $this->assertTrue($this->getInterruptFlag());
@@ -677,7 +677,7 @@ class FlagManipulationTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xFA));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->cli->process($this->runtime, 0xFA);
+        $this->cli->process($this->runtime, [0xFA]);
         $this->assertFalse($this->getCarryFlag());
         $this->assertFalse($this->getDirectionFlag());
         $this->assertFalse($this->getInterruptFlag());

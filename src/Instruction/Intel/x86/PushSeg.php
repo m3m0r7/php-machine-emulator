@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -14,16 +16,13 @@ class PushSeg implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [
-            0x06,
-            0x0E,
-            0x16,
-            0x1E,
-        ];
+        return $this->applyPrefixes([0x06, 0x0E, 0x16, 0x1E]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         $seg = match ($opcode) {
             0x06 => RegisterType::ES,
             0x0E => RegisterType::CS,

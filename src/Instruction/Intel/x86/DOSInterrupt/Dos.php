@@ -18,7 +18,7 @@ class Dos implements InstructionInterface
         return []; // invoked via INT dispatcher, not by opcode table
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
         $ah = $ax->asHighBit();

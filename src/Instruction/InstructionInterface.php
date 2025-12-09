@@ -24,8 +24,8 @@ interface InstructionInterface
      * Process the instruction.
      *
      * @param RuntimeInterface $runtime
-     * @param int $opcode The first opcode byte (for single-byte) or the combined opcode key
+     * @param array $opcodes The opcode bytes array (including any prefixes)
      * @return ExecutionStatus
      */
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus;
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus;
 }

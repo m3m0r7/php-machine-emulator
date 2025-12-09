@@ -275,6 +275,6 @@ class BitOpTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | $opcode;
-        $this->bitOp->process($this->runtime, $opcodeKey);
+        $this->bitOp->process($this->runtime, [$opcodeKey]);
     }
 }

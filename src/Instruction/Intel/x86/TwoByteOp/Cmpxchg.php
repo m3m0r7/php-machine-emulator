@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
@@ -24,14 +26,16 @@ class Cmpxchg implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [
+        return $this->applyPrefixes([
             [0x0F, 0xB0], // CMPXCHG r/m8, r8
             [0x0F, 0xB1], // CMPXCHG r/m16/32, r16/32
-        ];
+        ], [PrefixClass::Operand, PrefixClass::Address, PrefixClass::Segment, PrefixClass::Lock]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[array_key_last($opcodes)];
         $reader = new EnhanceStreamReader($runtime->memory());
         $modrm = $reader->byteAsModRegRM();
 

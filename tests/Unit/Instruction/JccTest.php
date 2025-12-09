@@ -114,7 +114,7 @@ class JccTest extends InstructionTestCase
 
         $this->setCarryFlag(true);
         $opcode = $this->memoryStream->byte();
-        $this->jc->process($this->runtime, $opcode);
+        $this->jc->process($this->runtime, [$opcode]);
 
         // IP = 0x22 (after reading) + (-16) = 0x12
         $this->assertSame(0x12, $this->getIP());
@@ -455,7 +455,7 @@ class JccTest extends InstructionTestCase
 
         $this->setCarryFlag(true);
         $opcode = $this->memoryStream->byte();
-        $this->jc->process($this->runtime, $opcode);
+        $this->jc->process($this->runtime, [$opcode]);
 
         // IP = 0x102 + (-128) = 0x82
         $this->assertSame(0x82, $this->getIP());

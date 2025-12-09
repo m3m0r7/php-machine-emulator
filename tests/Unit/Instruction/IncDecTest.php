@@ -320,7 +320,7 @@ class IncDecTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x48)); // DEC EAX
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->dec->process($this->runtime, 0x48);
+        $this->dec->process($this->runtime, [0x48]);
 
         $this->assertSame($originalValue, $this->getRegister(RegisterType::EAX));
     }
@@ -338,7 +338,7 @@ class IncDecTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x40)); // INC EAX
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->inc->process($this->runtime, 0x40);
+        $this->inc->process($this->runtime, [0x40]);
 
         $this->assertSame($originalValue, $this->getRegister(RegisterType::EAX));
     }
@@ -352,7 +352,7 @@ class IncDecTest extends InstructionTestCase
             $this->memoryStream->write(chr(0x40));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->inc->process($this->runtime, 0x40);
+            $this->inc->process($this->runtime, [0x40]);
         }
 
         $this->assertSame(10, $this->getRegister(RegisterType::EAX));
@@ -367,7 +367,7 @@ class IncDecTest extends InstructionTestCase
             $this->memoryStream->write(chr(0x48));
             $this->memoryStream->setOffset(0);
             $this->memoryStream->byte();
-            $this->dec->process($this->runtime, 0x48);
+            $this->dec->process($this->runtime, [0x48]);
         }
 
         $this->assertSame(0, $this->getRegister(RegisterType::EAX));

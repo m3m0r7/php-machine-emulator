@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -15,11 +17,13 @@ class Outs implements InstructionInterface
     public function opcodes(): array
     {
         // 0x6E = OUTSB, 0x6F = OUTSW/OUTSD
-        return [0x6E, 0x6F];
+        return $this->applyPrefixes([0x6E, 0x6F]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         $opSize = $runtime->context()->cpu()->operandSize();
         $isByte = $opcode === 0x6E;
         $width = $isByte ? 8 : $opSize;

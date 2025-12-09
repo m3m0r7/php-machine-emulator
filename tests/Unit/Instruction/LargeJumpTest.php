@@ -66,7 +66,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x100);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmpShort->process($this->runtime, $opcode);
+        $result = $this->jmpShort->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // IP should be at 0x102 + 5 = 0x107
@@ -86,7 +86,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x200);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmpShort->process($this->runtime, $opcode);
+        $result = $this->jmpShort->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // Jump backward: 0x202 - 10 = 0x1F8
@@ -109,7 +109,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x100);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmp->process($this->runtime, $opcode);
+        $result = $this->jmp->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // IP should be at 0x103 + 0x1000 = 0x1103
@@ -127,7 +127,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x1000);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmp->process($this->runtime, $opcode);
+        $result = $this->jmp->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // IP should be at 0x1005 + 0x10000 = 0x11005
@@ -145,7 +145,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x1000);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmp->process($this->runtime, $opcode);
+        $result = $this->jmp->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // IP should be at 0x1005 - 0x100 = 0xF05
@@ -167,7 +167,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0xFFF0);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmp->process($this->runtime, $opcode);
+        $result = $this->jmp->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // 0xFFF3 + 0x20 = 0x10013, masked to 16-bit = 0x0013
@@ -190,7 +190,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x0100);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmp->process($this->runtime, $opcode);
+        $result = $this->jmp->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // IP = 0x103 + 0x7FFF = 0x8102
@@ -208,7 +208,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x9000);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmp->process($this->runtime, $opcode);
+        $result = $this->jmp->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // IP = 0x9003 - 0x8000 = 0x1003
@@ -230,7 +230,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x100);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmpShort->process($this->runtime, $opcode);
+        $result = $this->jmpShort->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
         // Should jump to the instruction right after (0x102)
@@ -254,7 +254,7 @@ class LargeJumpTest extends InstructionTestCase
         $this->memoryStream->setOffset(0x10100);
 
         $opcode = $this->memoryStream->byte();
-        $result = $this->jmpShort->process($this->runtime, $opcode);
+        $result = $this->jmpShort->process($this->runtime, [$opcode]);
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
     }

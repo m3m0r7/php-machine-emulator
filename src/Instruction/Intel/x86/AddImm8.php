@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -19,11 +21,13 @@ class AddImm8 implements InstructionInterface
      */
     public function opcodes(): array
     {
-        return array_keys($this->opcodeMap());
+        return $this->applyPrefixes(array_keys($this->opcodeMap()));
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         $map = $this->opcodeMap()[$opcode];
         $isByte = $map['size'] === 8;
         $size = $isByte ? 8 : $runtime->context()->cpu()->operandSize();

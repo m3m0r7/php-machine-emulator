@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
@@ -18,11 +20,13 @@ class Group2 implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3];
+        return $this->applyPrefixes([0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
         $modRegRM = $enhancedStreamReader
             ->byteAsModRegRM();

@@ -20,7 +20,7 @@ class AndImm8 implements InstructionInterface
         return [0x24];
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $operand = $runtime->memory()->byte();
         $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();

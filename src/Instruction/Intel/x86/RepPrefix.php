@@ -44,13 +44,13 @@ class RepPrefix implements InstructionInterface
         return [0xF3, 0xF2];
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $cpu = $runtime->context()->cpu();
         $iterationContext = $cpu->iteration();
 
         // Set up iteration handler: handles ECX decrement and loop control
-        $iterationContext->setIterate(function (InstructionExecutorInterface $executor) use ($runtime, $opcode): ExecutionStatus {
+        $iterationContext->setIterate(function (InstructionExecutorInterface $executor) use ($runtime, $opcodes): ExecutionStatus {
             $lastResult = ExecutionStatus::SUCCESS;
             // This will be set to the string instruction's IP after first execute
             $stringInstructionIp = $executor->instructionPointer();
@@ -120,6 +120,7 @@ class RepPrefix implements InstructionInterface
             }
 
             // Bulk optimization - only when not crossing page boundaries (4KB)
+            $opcode = $opcodes[0];
             if ($counter > 0 && $lastInstruction !== null) {
                 $bulkResult = $this->tryBulkExecute($runtime, $lastInstruction, $counter, $opcode);
                 if ($bulkResult !== null) {
@@ -134,7 +135,7 @@ class RepPrefix implements InstructionInterface
                     $this->writeIndex($runtime, RegisterType::ECX, $counter);
 
                     // Execute without going through the full executor (which logs)
-                    $result = $lastInstruction->process($runtime, $executor->lastOpcode());
+                    $result = $lastInstruction->process($runtime, [$executor->lastOpcode()]);
                     $lastResult = $result;
 
                     if ($result !== ExecutionStatus::SUCCESS) {

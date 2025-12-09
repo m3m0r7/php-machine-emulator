@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
@@ -15,11 +17,12 @@ class Jmp implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xE9];
+        return $this->applyPrefixes([0xE9]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
 
         $relOffset = $runtime->context()->cpu()->operandSize() === 32

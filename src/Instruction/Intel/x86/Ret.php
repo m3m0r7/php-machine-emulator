@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -14,11 +16,13 @@ class Ret implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xC3, 0xC2, 0xCB, 0xCA];
+        return $this->applyPrefixes([0xC3, 0xC2, 0xCB, 0xCA]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[0];
         $popBytes = ($opcode === 0xC2 || $opcode === 0xCA)
             ? $runtime->memory()->short()
             : 0;

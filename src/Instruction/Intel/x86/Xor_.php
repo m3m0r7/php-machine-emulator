@@ -18,7 +18,7 @@ class Xor_ implements InstructionInterface
         return [];
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         throw new ExecutionException('Xor_ handler should not be invoked (delegated to XorRegRm)');
     }

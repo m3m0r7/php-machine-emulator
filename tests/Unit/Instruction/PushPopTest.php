@@ -288,7 +288,7 @@ class PushPopTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x5B)); // POP EBX
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->popReg->process($this->runtime, 0x5B);
+        $this->popReg->process($this->runtime, [0x5B]);
 
         $this->assertSame(0x12345678, $this->getRegister(RegisterType::EBX));
         $this->assertSame(0x8000, $this->getStackPointer());
@@ -308,13 +308,13 @@ class PushPopTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x53)); // PUSH EBX
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->pushReg->process($this->runtime, 0x53);
+        $this->pushReg->process($this->runtime, [0x53]);
 
         $this->memoryStream->setOffset(0);
         $this->memoryStream->write(chr(0x51)); // PUSH ECX
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->pushReg->process($this->runtime, 0x51);
+        $this->pushReg->process($this->runtime, [0x51]);
 
         // ESP should be decremented by 12 (3 * 4 bytes)
         $this->assertSame(0x7FF4, $this->getStackPointer());
@@ -328,19 +328,19 @@ class PushPopTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x5A)); // POP EDX (gets ECX's value)
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->popReg->process($this->runtime, 0x5A);
+        $this->popReg->process($this->runtime, [0x5A]);
 
         $this->memoryStream->setOffset(0);
         $this->memoryStream->write(chr(0x5E)); // POP ESI (gets EBX's value)
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->popReg->process($this->runtime, 0x5E);
+        $this->popReg->process($this->runtime, [0x5E]);
 
         $this->memoryStream->setOffset(0);
         $this->memoryStream->write(chr(0x5F)); // POP EDI (gets EAX's value)
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->popReg->process($this->runtime, 0x5F);
+        $this->popReg->process($this->runtime, [0x5F]);
 
         $this->assertSame(0x33333333, $this->getRegister(RegisterType::EDX)); // ECX's value
         $this->assertSame(0x22222222, $this->getRegister(RegisterType::ESI)); // EBX's value
@@ -494,7 +494,7 @@ class PushPopTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x61)); // POPA
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->popa->process($this->runtime, 0x61);
+        $this->popa->process($this->runtime, [0x61]);
 
         // Verify all registers restored
         $this->assertSame(0x11111111, $this->getRegister(RegisterType::EAX));
@@ -758,7 +758,7 @@ class PushPopTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x9D));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->popf->process($this->runtime, 0x9D);
+        $this->popf->process($this->runtime, [0x9D]);
 
         // Verify original pattern is restored
         $this->assertTrue($this->getCarryFlag(), 'CF should be set');

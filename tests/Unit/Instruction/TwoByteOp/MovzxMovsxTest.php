@@ -220,6 +220,6 @@ class MovzxMovsxTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | $secondByte;
-        $instruction->process($this->runtime, $opcodeKey);
+        $instruction->process($this->runtime, [$opcodeKey]);
     }
 }

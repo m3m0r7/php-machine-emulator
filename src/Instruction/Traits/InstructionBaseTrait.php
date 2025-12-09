@@ -25,6 +25,7 @@ trait InstructionBaseTrait
     use IoPortTrait;
     use TaskSwitchTrait;
     use SignTrait;
+    use InstructionPrefixApplyable;
 
     public function __construct(protected InstructionListInterface $instructionList)
     {

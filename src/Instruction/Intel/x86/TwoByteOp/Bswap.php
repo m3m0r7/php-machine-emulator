@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
@@ -23,11 +25,13 @@ class Bswap implements InstructionInterface
         for ($i = 0xC8; $i <= 0xCF; $i++) {
             $opcodes[] = [0x0F, $i];
         }
-        return $opcodes;
+        return $this->applyPrefixes($opcodes);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcode = $opcodes[array_key_last($opcodes)];
         $reg = ($opcode & 0xFF) & 0x7;
         if ($opcode > 0xFF) {
             $reg = $opcode & 0x7;

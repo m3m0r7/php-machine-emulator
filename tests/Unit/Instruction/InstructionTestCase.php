@@ -191,7 +191,7 @@ abstract class InstructionTestCase extends TestCase
         }
 
         $this->memoryStream->byte(); // consume opcode
-        $instruction->process($this->runtime, $opcode);
+        $instruction->process($this->runtime, [$opcode]);
     }
 
     abstract protected function getInstructionByOpcode(int $opcode): ?object;

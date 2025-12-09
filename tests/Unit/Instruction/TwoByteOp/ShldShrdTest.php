@@ -255,7 +255,7 @@ class ShldShrdTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xA4;
-        $this->shld->process($this->runtime, $opcodeKey);
+        $this->shld->process($this->runtime, [$opcodeKey]);
     }
 
     private function executeShldCl(array $operandBytes): void
@@ -266,7 +266,7 @@ class ShldShrdTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xA5;
-        $this->shld->process($this->runtime, $opcodeKey);
+        $this->shld->process($this->runtime, [$opcodeKey]);
     }
 
     private function executeShrdImm(array $operandBytes): void
@@ -277,7 +277,7 @@ class ShldShrdTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xAC;
-        $this->shrd->process($this->runtime, $opcodeKey);
+        $this->shrd->process($this->runtime, [$opcodeKey]);
     }
 
     private function executeShrdCl(array $operandBytes): void
@@ -288,6 +288,6 @@ class ShldShrdTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xAD;
-        $this->shrd->process($this->runtime, $opcodeKey);
+        $this->shrd->process($this->runtime, [$opcodeKey]);
     }
 }

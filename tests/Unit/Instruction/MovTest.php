@@ -602,14 +602,14 @@ class MovTest extends InstructionTestCase
         $this->memoryStream->write(chr(0x89) . chr(0xC3));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->mov->process($this->runtime, 0x89);
+        $this->mov->process($this->runtime, [0x89]);
 
         // MOV ECX, EBX
         $this->memoryStream->setOffset(0);
         $this->memoryStream->write(chr(0x89) . chr(0xD9)); // 0xD9 = 11 011 001 (reg=EBX, rm=ECX)
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->mov->process($this->runtime, 0x89);
+        $this->mov->process($this->runtime, [0x89]);
 
         $this->assertSame(0x11111111, $this->getRegister(RegisterType::EAX));
         $this->assertSame(0x11111111, $this->getRegister(RegisterType::EBX));
@@ -633,7 +633,7 @@ class MovTest extends InstructionTestCase
         $this->memoryStream->write($code);
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->movRm16->process($this->runtime, 0x8B);
+        $this->movRm16->process($this->runtime, [0x8B]);
 
         $this->assertSame(0xDEADBEEF, $this->getRegister(RegisterType::EAX));
     }

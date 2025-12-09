@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use PHPMachineEmulator\Instruction\PrefixClass;
+
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -14,11 +16,12 @@ class Lodsb implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xAC];
+        return $this->applyPrefixes([0xAC]);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 

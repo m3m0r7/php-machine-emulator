@@ -210,7 +210,7 @@ class CmpxchgXaddTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xB1;
-        $this->cmpxchg->process($this->runtime, $opcodeKey);
+        $this->cmpxchg->process($this->runtime, [$opcodeKey]);
     }
 
     private function executeCmpxchg8(array $operandBytes): void
@@ -221,7 +221,7 @@ class CmpxchgXaddTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xB0;
-        $this->cmpxchg->process($this->runtime, $opcodeKey);
+        $this->cmpxchg->process($this->runtime, [$opcodeKey]);
     }
 
     private function executeXadd32(array $operandBytes): void
@@ -232,7 +232,7 @@ class CmpxchgXaddTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xC1;
-        $this->xadd->process($this->runtime, $opcodeKey);
+        $this->xadd->process($this->runtime, [$opcodeKey]);
     }
 
     private function executeXadd8(array $operandBytes): void
@@ -243,6 +243,6 @@ class CmpxchgXaddTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xC0;
-        $this->xadd->process($this->runtime, $opcodeKey);
+        $this->xadd->process($this->runtime, [$opcodeKey]);
     }
 }

@@ -37,8 +37,10 @@ class RexPrefix implements InstructionInterface
         return range(0x40, 0x4F);
     }
 
-    public function process(RuntimeInterface $runtime, int $opcode): ExecutionStatus
+    public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $opcode = $opcodes[0];
+
         // REX prefix is only valid in 64-bit mode
         if (!$runtime->context()->cpu()->isLongMode() || $runtime->context()->cpu()->isCompatibilityMode()) {
             // In 32-bit/16-bit mode, 0x40-0x4F are INC/DEC instructions

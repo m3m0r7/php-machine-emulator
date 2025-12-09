@@ -301,7 +301,7 @@ class IntIretTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xCD) . chr($vector));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte(); // consume opcode
-        $this->int->process($this->runtime, 0xCD);
+        $this->int->process($this->runtime, [0xCD]);
 
         // Verify stack contains pushed values
         // Stack grows downward, so:
@@ -345,7 +345,7 @@ class IntIretTest extends InstructionTestCase
         $this->memoryStream->write(chr(0xCD) . chr($vector));
         $this->memoryStream->setOffset(0);
         $this->memoryStream->byte();
-        $this->int->process($this->runtime, 0xCD);
+        $this->int->process($this->runtime, [0xCD]);
 
         // IF should be cleared after INT
         $this->assertFalse($this->getInterruptFlag(), 'IF should be cleared after INT');
