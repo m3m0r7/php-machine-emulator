@@ -122,31 +122,26 @@ class Instruction64Test extends TestCase
 
     public function testInstructionList64Registration(): void
     {
-        $list = $this->instructionList->instructionList64();
-
-        // REX prefix opcodes should be registered
+        // REX prefix opcodes should be registered (0x40-0x4F)
         for ($opcode = 0x40; $opcode <= 0x4F; $opcode++) {
-            $key = '0x' . strtoupper(dechex($opcode));
-            $this->assertArrayHasKey($key, $list, "REX prefix {$key} should be registered");
-            $this->assertInstanceOf(RexPrefix::class, $list[$key]);
+            $instruction = $this->instructionList->findInstruction($opcode);
+            $this->assertInstanceOf(RexPrefix::class, $instruction, "REX prefix 0x" . dechex($opcode) . " should be registered");
         }
 
         // MOVSXD should be registered
-        $this->assertArrayHasKey('0x63', $list);
-        $this->assertInstanceOf(Movsxd::class, $list['0x63']);
+        $instruction = $this->instructionList->findInstruction(0x63);
+        $this->assertInstanceOf(Movsxd::class, $instruction);
 
-        // Push64 should be registered
+        // Push64 should be registered (0x50-0x57)
         for ($opcode = 0x50; $opcode <= 0x57; $opcode++) {
-            $key = '0x' . strtoupper(dechex($opcode));
-            $this->assertArrayHasKey($key, $list, "PUSH {$key} should be registered");
-            $this->assertInstanceOf(Push64::class, $list[$key]);
+            $instruction = $this->instructionList->findInstruction($opcode);
+            $this->assertInstanceOf(Push64::class, $instruction, "PUSH 0x" . dechex($opcode) . " should be registered");
         }
 
-        // Pop64 should be registered
+        // Pop64 should be registered (0x58-0x5F)
         for ($opcode = 0x58; $opcode <= 0x5F; $opcode++) {
-            $key = '0x' . strtoupper(dechex($opcode));
-            $this->assertArrayHasKey($key, $list, "POP {$key} should be registered");
-            $this->assertInstanceOf(Pop64::class, $list[$key]);
+            $instruction = $this->instructionList->findInstruction($opcode);
+            $this->assertInstanceOf(Pop64::class, $instruction, "POP 0x" . dechex($opcode) . " should be registered");
         }
     }
 

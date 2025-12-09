@@ -40,22 +40,32 @@ class InstructionExecutor implements InstructionExecutorInterface
         // Read up to maxOpcodeLength bytes for instruction matching
         $startPos = $memory->offset();
         $peekBytes = [];
+        for ($i = 0; $i < $maxOpcodeLength && !$memory->isEOF(); $i++) {
+            $peekBytes[] = $memory->byte();
+        }
+
+        // Try to find instruction from longest to shortest pattern
         $instruction = null;
         $lastException = null;
-        for ($i = 0; $i < $maxOpcodeLength && !$memory->isEOF(); $i++) {
-            $byte = $memory->byte();
+        $matchedLength = 0;
+        for ($len = count($peekBytes); $len >= 1; $len--) {
+            $tryBytes = array_slice($peekBytes, 0, $len);
             try {
-                $instruction = $this->instructionList->findInstruction([...$peekBytes, $byte]);
-                $peekBytes[] = $byte;
+                $instruction = $this->instructionList->findInstruction($tryBytes);
+                $matchedLength = $len;
+                break;
             } catch (NotFoundInstructionException $e) {
                 $lastException = $e;
-                break;
+                continue;
             }
         }
 
         if ($instruction === null && $lastException !== null) {
             throw $lastException;
         }
+
+        // Update peekBytes to only the matched portion
+        $peekBytes = array_slice($peekBytes, 0, $matchedLength);
 
         // Find instruction - uses longest-first matching
         // Returns InstructionInterface directly
