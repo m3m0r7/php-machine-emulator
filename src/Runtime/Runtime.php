@@ -15,7 +15,6 @@ use PHPMachineEmulator\Frame\Frame;
 use PHPMachineEmulator\Frame\FrameInterface;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterInterface;
-use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\LogicBoard\LogicBoardInterface;
 use PHPMachineEmulator\MachineInterface;
 use PHPMachineEmulator\OptionInterface;
@@ -158,9 +157,6 @@ class Runtime implements RuntimeInterface
     {
         $this->initialize();
 
-        $instructionList = $this->architectureProvider->instructionList();
-        $executor = new InstructionExecutor($this, $instructionList, $this->interruptDeliveryHandler);
-
         $cpu = $this->context->cpu();
         $iterationContext = $cpu->iteration();
 
@@ -170,7 +166,12 @@ class Runtime implements RuntimeInterface
 
             // Execute instruction with iteration context
             // The iterate() method will handle REP loops internally if a handler is set
-            $result = $iterationContext->iterate($executor);
+            $result = $iterationContext
+                ->iterate(
+                    $this,
+                    $this->architectureProvider
+                        ->instructionExecutor(),
+                );
 
             // Handle prefix chain (CONTINUE means keep fetching)
             if ($result === ExecutionStatus::CONTINUE) {
@@ -277,6 +278,16 @@ class Runtime implements RuntimeInterface
     {
         return $this->architectureProvider
             ->services();
+    }
+
+    public function architectureProvider(): ArchitectureProviderInterface
+    {
+        return $this->architectureProvider;
+    }
+
+    public function interruptDeliveryHandler(): InterruptDeliveryHandlerInterface
+    {
+        return $this->interruptDeliveryHandler;
     }
 
     /**

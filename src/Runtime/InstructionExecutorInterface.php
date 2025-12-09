@@ -14,7 +14,7 @@ interface InstructionExecutorInterface
      *
      * @return ExecutionStatus The result of instruction execution
      */
-    public function execute(): ExecutionStatus;
+    public function execute(RuntimeInterface $runtime): ExecutionStatus;
 
     /**
      * Get the last executed instruction.
@@ -30,14 +30,4 @@ interface InstructionExecutorInterface
      * Get the instruction pointer before the last execution.
      */
     public function lastInstructionPointer(): int;
-
-    /**
-     * Set the instruction pointer for the next execution.
-     */
-    public function setInstructionPointer(int $ip): void;
-
-    /**
-     * Get the current instruction pointer.
-     */
-    public function instructionPointer(): int;
 }

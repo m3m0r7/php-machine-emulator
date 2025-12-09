@@ -21,6 +21,7 @@ use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Runtime\InstructionExecutorInterface;
+use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
  * Tests for REP/REPE/REPNE prefix instructions
@@ -129,11 +130,11 @@ class RepPrefixTest extends InstructionTestCase
             $this->scasw,
         );
 
-        $result = $iterationContext->iterate($executor);
+        $result = $iterationContext->iterate($this->runtime, $executor);
 
         // Handle prefix chain (CONTINUE means keep fetching)
         while ($result === ExecutionStatus::CONTINUE) {
-            $result = $iterationContext->iterate($executor);
+            $result = $iterationContext->iterate($this->runtime, $executor);
         }
 
         // Clear iteration context
@@ -1500,7 +1501,7 @@ class RepPrefixTest extends InstructionTestCase
 class TestInstructionExecutor implements InstructionExecutorInterface
 {
     private ?InstructionInterface $lastInstruction = null;
-    private ?int $lastOpcode = null;
+    private ?array $lastOpcodes = null;
     private int $lastInstructionPointer = 0;
 
     public function __construct(
@@ -1516,7 +1517,7 @@ class TestInstructionExecutor implements InstructionExecutorInterface
     ) {
     }
 
-    public function execute(): ExecutionStatus
+    public function execute(RuntimeInterface $runtime): ExecutionStatus
     {
         $this->lastInstructionPointer = $this->memoryStream->offset();
 
@@ -1552,7 +1553,7 @@ class TestInstructionExecutor implements InstructionExecutorInterface
         }
 
         $this->lastInstruction = $instruction;
-        $this->lastOpcode = $opcode;
+        $this->lastOpcodes = [$opcode];
 
         $result = $instruction->process($this->runtime, [$opcode]);
 
@@ -1567,23 +1568,13 @@ class TestInstructionExecutor implements InstructionExecutorInterface
         return $this->lastInstruction;
     }
 
-    public function lastOpcode(): ?int
+    public function lastOpcodes(): ?array
     {
-        return $this->lastOpcode;
+        return $this->lastOpcodes;
     }
 
     public function lastInstructionPointer(): int
     {
         return $this->lastInstructionPointer;
-    }
-
-    public function setInstructionPointer(int $ip): void
-    {
-        $this->memoryStream->setOffset($ip);
-    }
-
-    public function instructionPointer(): int
-    {
-        return $this->memoryStream->offset();
     }
 }

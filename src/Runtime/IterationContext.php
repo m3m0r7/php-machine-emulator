@@ -16,13 +16,13 @@ class IterationContext implements IterationContextInterface
         $this->iterateHandler = $handler;
     }
 
-    public function iterate(InstructionExecutorInterface $executor): ExecutionStatus
+    public function iterate(RuntimeInterface $runtime, InstructionExecutorInterface $executor): ExecutionStatus
     {
         if ($this->iterateHandler === null) {
-            return $executor->execute();
+            return $executor->execute($runtime);
         }
 
-        return ($this->iterateHandler)($executor);
+        return ($this->iterateHandler)($runtime, $executor);
     }
 
     public function isActive(): bool

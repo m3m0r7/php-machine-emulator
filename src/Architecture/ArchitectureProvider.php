@@ -7,6 +7,7 @@ namespace PHPMachineEmulator\Architecture;
 use PHPMachineEmulator\Collection\MemoryAccessorObserverCollectionInterface;
 use PHPMachineEmulator\Collection\ServiceCollectionInterface;
 use PHPMachineEmulator\Instruction\InstructionListInterface;
+use PHPMachineEmulator\Runtime\InstructionExecutorInterface;
 use PHPMachineEmulator\Video\VideoInterface;
 
 class ArchitectureProvider implements ArchitectureProviderInterface
@@ -16,6 +17,7 @@ class ArchitectureProvider implements ArchitectureProviderInterface
         protected InstructionListInterface $instructionList,
         protected MemoryAccessorObserverCollectionInterface $memoryAccessorObserverCollection,
         protected ServiceCollectionInterface $serviceCollection,
+        protected InstructionExecutorInterface $instructionExecutor,
     ) {
     }
 
@@ -37,5 +39,10 @@ class ArchitectureProvider implements ArchitectureProviderInterface
     public function services(): ServiceCollectionInterface
     {
         return $this->serviceCollection;
+    }
+
+    public function instructionExecutor(): InstructionExecutorInterface
+    {
+        return $this->instructionExecutor;
     }
 }

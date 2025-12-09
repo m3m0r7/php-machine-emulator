@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace PHPMachineEmulator\Runtime;
+namespace PHPMachineEmulator\Instruction\Intel;
 
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\NotFoundInstructionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandlerInterface;
+use PHPMachineEmulator\Runtime\InstructionExecutorInterface;
+use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class InstructionExecutor implements InstructionExecutorInterface
 {
@@ -20,19 +20,13 @@ class InstructionExecutor implements InstructionExecutorInterface
     private int $lastInstructionPointer = 0;
     private int $zeroOpcodeCount = 0;
 
-    public function __construct(
-        private readonly RuntimeInterface $runtime,
-        private readonly InstructionListInterface $instructionList,
-        private readonly InterruptDeliveryHandlerInterface $interruptDeliveryHandler,
-    ) {
-    }
-
-    public function execute(): ExecutionStatus
+    public function execute(RuntimeInterface $runtime): ExecutionStatus
     {
-        $ip = $this->runtime->memory()->offset();
-        $maxOpcodeLength = $this->instructionList->getMaxOpcodeLength();
-        $memory = $this->runtime->memory();
-        $memoryAccessor = $this->runtime->memoryAccessor();
+        $ip = $runtime->memory()->offset();
+
+        $maxOpcodeLength = $runtime->architectureProvider()->instructionList()->getMaxOpcodeLength();
+        $memory = $runtime->memory();
+        $memoryAccessor = $runtime->memoryAccessor();
 
         $this->lastInstructionPointer = $memory->offset();
         $memoryAccessor->setInstructionFetch(true);
@@ -51,7 +45,7 @@ class InstructionExecutor implements InstructionExecutorInterface
         for ($len = count($peekBytes); $len >= 1; $len--) {
             $tryBytes = array_slice($peekBytes, 0, $len);
             try {
-                $instruction = $this->instructionList->findInstruction($tryBytes);
+                $instruction = $runtime->architectureProvider()->instructionList()->findInstruction($tryBytes);
                 $matchedLength = $len;
                 break;
             } catch (NotFoundInstructionException $e) {
@@ -77,7 +71,7 @@ class InstructionExecutor implements InstructionExecutorInterface
         $memory->setOffset($startPos + count($peekBytes));
 
         // Detect infinite loop
-        if (count($this->lastOpcodes) === 1 && $this->lastOpcodes[0] === 0x00) {
+        if (count($this->lastOpcodes) === 1 && $this->lastOpcodes === [0x00]) {
             $this->zeroOpcodeCount++;
             if ($this->zeroOpcodeCount >= 255) {
                 throw new ExecutionException(sprintf(
@@ -89,33 +83,33 @@ class InstructionExecutor implements InstructionExecutorInterface
             $this->zeroOpcodeCount = 0;
         }
 
-        $this->logExecution($ip, $this->lastOpcodes);
+        $this->logExecution($runtime, $ip, $this->lastOpcodes);
 
         // Execute the instruction
         $this->lastInstruction = $instruction;
 
         try {
-            return $instruction->process($this->runtime, $this->lastOpcodes);
+            return $instruction->process($runtime, $this->lastOpcodes);
         } catch (FaultException $e) {
-            $this->runtime->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
-            if ($this->interruptDeliveryHandler->raiseFault(
-                $this->runtime,
+            $runtime->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
+            if ($runtime->interruptDeliveryHandler()->raiseFault(
+                $runtime,
                 $e->vector(),
-                $this->runtime->memory()->offset(),
+                $runtime->memory()->offset(),
                 $e->errorCode()
             )) {
                 return ExecutionStatus::SUCCESS;
             }
             throw $e;
         } catch (ExecutionException $e) {
-            $this->runtime->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
+            $runtime->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
             throw $e;
         }
     }
 
-    private function logExecution(int $ipBefore, array $opcodes): void
+    private function logExecution(RuntimeInterface $runtime, int $ipBefore, array $opcodes): void
     {
-        $memoryAccessor = $this->runtime->memoryAccessor();
+        $memoryAccessor = $runtime->memoryAccessor();
         $cf = $memoryAccessor->shouldCarryFlag() ? 1 : 0;
         $zf = $memoryAccessor->shouldZeroFlag() ? 1 : 0;
         $sf = $memoryAccessor->shouldSignFlag() ? 1 : 0;
@@ -129,7 +123,7 @@ class InstructionExecutor implements InstructionExecutorInterface
         $ebp = $memoryAccessor->fetch(RegisterType::EBP)->asBytesBySize(32);
         $esp = $memoryAccessor->fetch(RegisterType::ESP)->asBytesBySize(32);
         $opcodeStr = implode(' ', array_map(fn($b) => sprintf('0x%02X', $b), $opcodes));
-        $this->runtime->option()->logger()->debug(sprintf(
+        $runtime->option()->logger()->debug(sprintf(
             'EXEC: IP=0x%05X op=%-12s FL[CF=%d ZF=%d SF=%d OF=%d] EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X',
             $ipBefore, $opcodeStr, $cf, $zf, $sf, $of, $eax, $ebx, $ecx, $edx, $esi, $edi, $ebp, $esp
         ));
@@ -148,15 +142,5 @@ class InstructionExecutor implements InstructionExecutorInterface
     public function lastInstructionPointer(): int
     {
         return $this->lastInstructionPointer;
-    }
-
-    public function setInstructionPointer(int $ip): void
-    {
-        $this->runtime->memory()->setOffset($ip);
-    }
-
-    public function instructionPointer(): int
-    {
-        return $this->runtime->memory()->offset();
     }
 }

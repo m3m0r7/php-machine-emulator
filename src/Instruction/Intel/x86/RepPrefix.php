@@ -50,10 +50,10 @@ class RepPrefix implements InstructionInterface
         $iterationContext = $cpu->iteration();
 
         // Set up iteration handler: handles ECX decrement and loop control
-        $iterationContext->setIterate(function (InstructionExecutorInterface $executor) use ($runtime, $opcodes): ExecutionStatus {
+        $iterationContext->setIterate(function (RuntimeInterface $runtime, InstructionExecutorInterface $executor) use ($opcodes): ExecutionStatus {
             $lastResult = ExecutionStatus::SUCCESS;
             // This will be set to the string instruction's IP after first execute
-            $stringInstructionIp = $executor->instructionPointer();
+            $stringInstructionIp = $runtime->memory()->offset();
             $firstIteration = true;
 
             // Check ECX before starting - if zero, do nothing
@@ -65,13 +65,13 @@ class RepPrefix implements InstructionInterface
             // Execute first iteration to identify the instruction
             $counter--;
             $this->writeIndex($runtime, RegisterType::ECX, $counter);
-            $ipBeforeExecute = $executor->instructionPointer();
+            $ipBeforeExecute = $runtime->memory()->offset();
 
             // Debug: log SI/DI before first iteration
             $siBefore = $this->readIndex($runtime, RegisterType::ESI);
             $diBefore = $this->readIndex($runtime, RegisterType::EDI);
 
-            $result = $executor->execute();
+            $result = $executor->execute($runtime);
             $lastResult = $result;
 
             // Debug: log SI/DI after first iteration
@@ -152,10 +152,10 @@ class RepPrefix implements InstructionInterface
                 $this->writeIndex($runtime, RegisterType::ECX, $counter);
 
                 // Reset IP to string instruction start for next iteration
-                $executor->setInstructionPointer($stringInstructionIp);
+                $runtime->memory()->setOffset($stringInstructionIp);
 
                 // Execute the instruction
-                $result = $executor->execute();
+                $result = $executor->execute($runtime);
                 $lastResult = $result;
 
                 if ($result !== ExecutionStatus::SUCCESS) {

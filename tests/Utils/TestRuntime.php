@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Utils;
 
+use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Collection\MemoryAccessorObserverCollection;
 use PHPMachineEmulator\Collection\ServiceCollectionInterface;
 use PHPMachineEmulator\Frame\FrameInterface;
@@ -14,6 +15,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\LogicBoard\LogicBoardInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Runtime\AddressMapInterface;
+use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandlerInterface;
 use PHPMachineEmulator\Runtime\MemoryAccessor;
 use PHPMachineEmulator\Runtime\MemoryAccessorInterface;
 use PHPMachineEmulator\Runtime\RuntimeContextInterface;
@@ -132,6 +134,16 @@ class TestRuntime implements RuntimeInterface
     public function services(): ServiceCollectionInterface
     {
         return new TestServiceCollection();
+    }
+
+    public function architectureProvider(): ArchitectureProviderInterface
+    {
+        return new TestArchitectureProvider();
+    }
+
+    public function interruptDeliveryHandler(): InterruptDeliveryHandlerInterface
+    {
+        return new TestInterruptDeliveryHandler();
     }
 
     // ========================================

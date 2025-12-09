@@ -27,6 +27,7 @@ class Machine implements MachineInterface
             Intel\VideoInterrupt::class,
             Intel\MemoryAccessorObserverCollection::class,
             Intel\ServiceCollection::class,
+            Intel\InstructionExecutor::class,
         ];
 
         $this->runtimes[ArchitectureType::Intel_x86_64->value] = [
@@ -34,6 +35,7 @@ class Machine implements MachineInterface
             Intel\VideoInterrupt::class,
             Intel\MemoryAccessorObserverCollection::class,
             Intel\ServiceCollection::class,
+            Intel\InstructionExecutor::class,
         ];
     }
 
@@ -52,7 +54,7 @@ class Machine implements MachineInterface
         $architectureType = $this->logicBoardContext->cpu()->architectureType();
         $cacheKey = $architectureType->value;
 
-        foreach ($this->runtimes as $archType => [$runtimeClassName, $runtimeVideoClassName, $runtimeObserverCollection, $runtimeServiceCollection]) {
+        foreach ($this->runtimes as $archType => [$runtimeClassName, $runtimeVideoClassName, $runtimeObserverCollection, $runtimeServiceCollection, $runtimeInstructionExecutor]) {
             if ($archType !== $architectureType->value) {
                 continue;
             }
@@ -64,6 +66,7 @@ class Machine implements MachineInterface
                     new $runtimeClassName(),
                     new $runtimeObserverCollection(),
                     new $runtimeServiceCollection(),
+                    new $runtimeInstructionExecutor(),
                 ),
                 $entrypoint,
             );
