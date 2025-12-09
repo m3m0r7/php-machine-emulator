@@ -116,15 +116,41 @@ trait InstructionPrefixApplyable
     }
 
     /**
-     * Generate all prefix combinations from groups.
-     * Each group can contribute 0 or 1 prefix.
+     * Generate all prefix combinations and permutations from groups.
+     * Each group can contribute 0 or 1 prefix, and all orderings are generated.
      *
      * @param array<int, int[]> $groups
-     * @return array<int[]> All possible prefix combinations
+     * @return array<int[]> All possible prefix combinations with all permutations
      */
     private function generatePrefixCombinations(array $groups): array
     {
-        $result = [[]]; // Start with empty combination (no prefixes)
+        // First, generate all combinations (which prefixes to include)
+        $combinations = $this->generateCombinations($groups);
+
+        // Then, for each combination, generate all permutations (orderings)
+        $result = [];
+        foreach ($combinations as $combo) {
+            if (empty($combo)) {
+                $result[] = [];
+            } else {
+                foreach ($this->generatePermutations($combo) as $perm) {
+                    $result[] = $perm;
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Generate all combinations of prefixes (which prefixes to include).
+     *
+     * @param array<int, int[]> $groups
+     * @return array<int[]>
+     */
+    private function generateCombinations(array $groups): array
+    {
+        $result = [[]];
 
         foreach ($groups as $group) {
             $newResult = [];
@@ -138,6 +164,29 @@ trait InstructionPrefixApplyable
                 }
             }
             $result = $newResult;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Generate all permutations of an array.
+     *
+     * @param array $items
+     * @return array<array>
+     */
+    private function generatePermutations(array $items): array
+    {
+        if (count($items) <= 1) {
+            return [$items];
+        }
+
+        $result = [];
+        foreach ($items as $i => $item) {
+            $remaining = array_values(array_diff_key($items, [$i => true]));
+            foreach ($this->generatePermutations($remaining) as $perm) {
+                $result[] = array_merge([$item], $perm);
+            }
         }
 
         return $result;
