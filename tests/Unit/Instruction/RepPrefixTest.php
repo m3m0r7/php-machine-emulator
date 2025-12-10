@@ -1577,4 +1577,9 @@ class TestInstructionExecutor implements InstructionExecutorInterface
     {
         return $this->lastInstructionPointer;
     }
+
+    public function invalidateCaches(): void
+    {
+        // No caching in test executor
+    }
 }

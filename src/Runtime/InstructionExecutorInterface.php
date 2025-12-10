@@ -30,4 +30,9 @@ interface InstructionExecutorInterface
      * Get the instruction pointer before the last execution.
      */
     public function lastInstructionPointer(): int;
+
+    /**
+     * Invalidate any executor-side caches (decode, translation blocks, etc.).
+     */
+    public function invalidateCaches(): void;
 }

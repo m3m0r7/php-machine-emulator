@@ -516,7 +516,14 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function writeControlRegister(int $index, int $value): void
     {
+        $previous = $this->controlRegisters[$index] ?? null;
         $this->controlRegisters[$index] = $value;
+
+        // Mode changes (e.g., CR0.PE/PG) can alter instruction decoding/execution semantics.
+        // Invalidate decoder/translation caches when CR0 is modified.
+        if ($index === 0 && $previous !== $value) {
+            $this->runtime->architectureProvider()->instructionExecutor()->invalidateCaches();
+        }
     }
 
     public function readEfer(): int

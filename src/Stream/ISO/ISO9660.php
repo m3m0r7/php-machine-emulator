@@ -11,6 +11,7 @@ class ISO9660
     public const SECTOR_SIZE = 2048;
     public const SYSTEM_AREA_SECTORS = 16;
     private const BUFFER_SIZE = 8388608; // 8MB buffer
+    private const MAX_SECTOR_CACHE_ENTRIES = 512;
 
     // Volume Descriptor Types
     public const VD_TYPE_BOOT_RECORD = 0;
@@ -29,6 +30,10 @@ class ISO9660
     // Buffer for read operations
     private string $buffer = '';
     private int $bufferStart = -1;
+    /** @var array<int, string> LBA => sector data */
+    private array $sectorCache = [];
+    /** @var int[] access order for sector cache (LRU-ish) */
+    private array $sectorCacheOrder = [];
 
     public function __construct(private string $path)
     {
@@ -132,6 +137,36 @@ class ISO9660
 
     public function readAt(int $offset, int $length): string|false
     {
+        // Sector-aligned reads can use the sector cache for random access
+        if ($length > 0 && ($offset % self::SECTOR_SIZE) === 0 && ($length % self::SECTOR_SIZE) === 0) {
+            $startLba = intdiv($offset, self::SECTOR_SIZE);
+            $sectors = intdiv($length, self::SECTOR_SIZE);
+            $chunks = [];
+
+            for ($i = 0; $i < $sectors; $i++) {
+                $lba = $startLba + $i;
+                if (isset($this->sectorCache[$lba])) {
+                    $chunks[] = $this->sectorCache[$lba];
+                    $this->touchSectorCache($lba);
+                    continue;
+                }
+
+                $data = $this->readAtRaw($lba * self::SECTOR_SIZE, self::SECTOR_SIZE);
+                if ($data === false) {
+                    return false;
+                }
+                $this->storeSectorCache($lba, $data);
+                $chunks[] = $data;
+            }
+
+            return implode('', $chunks);
+        }
+
+        return $this->readAtRaw($offset, $length);
+    }
+
+    private function readAtRaw(int $offset, int $length): string|false
+    {
         // Check if data is in buffer
         if ($this->bufferStart >= 0 &&
             $offset >= $this->bufferStart &&
@@ -159,6 +194,32 @@ class ISO9660
         $data = fread($this->resource, self::BUFFER_SIZE);
         $this->buffer = $data !== false ? $data : '';
         $this->bufferStart = $fromOffset;
+    }
+
+    private function storeSectorCache(int $lba, string $data): void
+    {
+        $this->sectorCache[$lba] = $data;
+        $this->sectorCacheOrder = array_values(array_filter(
+            $this->sectorCacheOrder,
+            static fn(int $v): bool => $v !== $lba
+        ));
+        $this->sectorCacheOrder[] = $lba;
+
+        while (count($this->sectorCacheOrder) > self::MAX_SECTOR_CACHE_ENTRIES) {
+            $evict = array_shift($this->sectorCacheOrder);
+            if ($evict !== null) {
+                unset($this->sectorCache[$evict]);
+            }
+        }
+    }
+
+    private function touchSectorCache(int $lba): void
+    {
+        $this->sectorCacheOrder = array_values(array_filter(
+            $this->sectorCacheOrder,
+            static fn(int $v): bool => $v !== $lba
+        ));
+        $this->sectorCacheOrder[] = $lba;
     }
 
     public function fileSize(): int

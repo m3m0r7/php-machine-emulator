@@ -58,9 +58,17 @@ class TranslationBlock
     /**
      * Execute all instructions in this block.
      *
+     * @param callable|null $beforeInstruction Callback invoked before each instruction:
+     *                                         fn(int $ip, InstructionInterface $instruction, array $opcodes): void
+     * @param callable|null $instructionRunner Callback used to execute an instruction instead of calling process()
+     *
      * @return array{ExecutionStatus, int} [status, exitIp]
      */
-    public function execute(RuntimeInterface $runtime): array
+    public function execute(
+        RuntimeInterface $runtime,
+        ?callable $beforeInstruction = null,
+        ?callable $instructionRunner = null,
+    ): array
     {
         $memory = $runtime->memory();
         $currentIp = $this->startIp;
@@ -70,7 +78,13 @@ class TranslationBlock
             $expectedNextIp = $currentIp + $length;
             $memory->setOffset($expectedNextIp);
 
-            $status = $instruction->process($runtime, $opcodes);
+            if ($beforeInstruction !== null) {
+                $beforeInstruction($currentIp, $instruction, $opcodes);
+            }
+
+            $status = $instructionRunner !== null
+                ? $instructionRunner($instruction, $opcodes)
+                : $instruction->process($runtime, $opcodes);
 
             // CRITICAL: Clear transient overrides (like operand size prefix) after each instruction
             // Without this, prefixes from one instruction bleed into subsequent instructions in the block

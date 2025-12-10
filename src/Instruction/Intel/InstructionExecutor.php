@@ -39,16 +39,34 @@ class InstructionExecutor implements InstructionExecutorInterface
      */
     private array $translationBlocks = [];
 
-    private const HOTSPOT_THRESHOLD = 100;  // この回数を超えたらホット
+    private const HOTSPOT_THRESHOLD = 1;  // この回数を超えたらホット
 
     public function execute(RuntimeInterface $runtime): ExecutionStatus
     {
         $ip = $runtime->memory()->offset();
         $this->lastInstructionPointer = $ip;
 
-        // Translation Block disabled: mode switches (real/protected) and self-modifying code
-        // invalidate cached instruction decoding. Need proper cache invalidation before enabling.
-        // TODO: Add cache invalidation on CR0 writes, segment register changes, and memory writes
+        // REP/iteration handler active? Fall back to single-step to keep lastInstruction accurate.
+        if ($runtime->context()->cpu()->iteration()->isActive()) {
+            return $this->executeSingleInstruction($runtime, $ip);
+        }
+
+        // Execute existing translation block if present
+        if (isset($this->translationBlocks[$ip])) {
+            return $this->executeBlock($runtime, $this->translationBlocks[$ip]);
+        }
+
+        // Hotspot detection: count hits per IP
+        $hits = ($this->hitCount[$ip] ?? 0) + 1;
+        $this->hitCount[$ip] = $hits;
+
+        if ($hits >= self::HOTSPOT_THRESHOLD) {
+            $block = $this->buildTranslationBlock($runtime, $ip);
+            if ($block !== null) {
+                $this->translationBlocks[$ip] = $block;
+                return $this->executeBlock($runtime, $block);
+            }
+        }
 
         // Normal single-instruction execution (with decode cache)
         return $this->executeSingleInstruction($runtime, $ip);
@@ -62,10 +80,11 @@ class InstructionExecutor implements InstructionExecutorInterface
         $memory = $runtime->memory();
         $memoryAccessor = $runtime->memoryAccessor();
 
-        // Decode cache disabled: same IP can have different instruction meanings
-        // depending on CPU mode (real/protected), operand size prefix context, etc.
-        // TODO: Key cache by (IP, mode, operand_size) or invalidate on mode switch
-        {
+        // Use decode cache when available
+        if (isset($this->decodeCache[$ip])) {
+            [$instruction, $opcodes, $length] = $this->decodeCache[$ip];
+            $memory->setOffset($ip + $length);
+        } else {
             // Full decode path
             $memoryAccessor->setInstructionFetch(true);
 
@@ -130,11 +149,35 @@ class InstructionExecutor implements InstructionExecutorInterface
      */
     private function executeBlock(RuntimeInterface $runtime, TranslationBlock $block): ExecutionStatus
     {
-        $maxChainDepth = 1;
+        $maxChainDepth = 16;
         $chainDepth = 0;
 
+        $beforeInstruction = function (int $ipBefore, InstructionInterface $instruction, array $opcodes) use ($runtime): void {
+            $this->lastInstructionPointer = $ipBefore;
+            $this->lastInstruction = $instruction;
+            $this->lastOpcodes = $opcodes;
+
+            if ($opcodes === [0x00]) {
+                $this->zeroOpcodeCount++;
+                if ($this->zeroOpcodeCount >= 255) {
+                    throw new ExecutionException(sprintf(
+                        'Infinite loop detected: 255 consecutive 0x00 opcodes at IP=0x%05X',
+                        $this->lastInstructionPointer
+                    ));
+                }
+            } else {
+                $this->zeroOpcodeCount = 0;
+            }
+
+            $this->logExecution($runtime, $ipBefore, $opcodes);
+        };
+
+        $instructionRunner = function (InstructionInterface $instruction, array $opcodes) use ($runtime): ExecutionStatus {
+            return $this->executeInstruction($runtime, $instruction, $opcodes);
+        };
+
         while ($block !== null && $chainDepth < $maxChainDepth) {
-            [$status, $exitIp] = $block->execute($runtime);
+            [$status, $exitIp] = $block->execute($runtime, $beforeInstruction, $instructionRunner);
 
             if ($status !== ExecutionStatus::SUCCESS) {
                 return $status;
@@ -142,13 +185,22 @@ class InstructionExecutor implements InstructionExecutorInterface
 
             // Try to chain to next block
             $nextBlock = $block->getChainedBlock($exitIp);
-            if ($nextBlock === null && isset($this->translationBlocks[$exitIp])) {
-                $candidateBlock = $this->translationBlocks[$exitIp];
-                // Only chain if the next block doesn't overlap with current block
-                // (i.e., next block starts at or after current block's end)
-                if ($candidateBlock->startIp >= $block->startIp + $block->totalLength) {
-                    $nextBlock = $candidateBlock;
-                    $block->chainTo($exitIp, $nextBlock);
+            if ($nextBlock === null) {
+                // Build missing block at exit IP on demand
+                if (!isset($this->translationBlocks[$exitIp])) {
+                    $built = $this->buildTranslationBlock($runtime, $exitIp);
+                    if ($built !== null) {
+                        $this->translationBlocks[$exitIp] = $built;
+                    }
+                }
+
+                if (isset($this->translationBlocks[$exitIp])) {
+                    $candidateBlock = $this->translationBlocks[$exitIp];
+                    // Avoid chaining to the same block to prevent tight self-cycles inside chaining loop
+                    if ($candidateBlock !== $block) {
+                        $nextBlock = $candidateBlock;
+                        $block->chainTo($exitIp, $nextBlock);
+                    }
                 }
             }
 
@@ -375,5 +427,15 @@ class InstructionExecutor implements InstructionExecutorInterface
             'total_block_instructions' => $totalBlockInstructions,
             'total_chains' => $totalChains,
         ];
+    }
+
+    /**
+     * Invalidate decode/translation caches (e.g., on CR0 mode switch).
+     */
+    public function invalidateCaches(): void
+    {
+        $this->decodeCache = [];
+        $this->hitCount = [];
+        $this->translationBlocks = [];
     }
 }
