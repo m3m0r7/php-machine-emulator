@@ -2,20 +2,20 @@
 
 declare(strict_types=1);
 
-namespace PHPMachineEmulator\Concurrency;
+namespace PHPMachineEmulator\Asynchronization;
 
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use parallel\Runtime as ParallelRuntime;
 
-class PromiseCollection implements PromiseCollectionInterface
+class AsyncCollection implements AsyncCollectionInterface
 {
     /**
-     * @var PromiseResultInterface[]
+     * @var AsyncResultInterface[]
      */
     private array $promises = [];
 
     /**
-     * @param PromiseInterface[] $promises
+     * @param AsyncInterface[] $promises
      */
     public function __construct(array $promises = [])
     {

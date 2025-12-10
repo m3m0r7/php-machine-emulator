@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace PHPMachineEmulator\Concurrency;
+namespace PHPMachineEmulator\Asynchronization;
 
 use parallel\Future as ParallelFuture;
 
-class PromiseResult implements PromiseResultInterface
+class AsyncResult implements AsyncResultInterface
 {
     public function __construct(private readonly ParallelFuture $parallelFuture) {
     }

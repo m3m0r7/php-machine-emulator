@@ -145,7 +145,7 @@ class InstructionExecutor implements InstructionExecutorInterface
      */
     private function executeBlock(RuntimeInterface $runtime, TranslationBlock $block): ExecutionStatus
     {
-        $maxChainDepth = 16;
+        $maxChainDepth = 1;
         $chainDepth = 0;
 
         while ($block !== null && $chainDepth < $maxChainDepth) {

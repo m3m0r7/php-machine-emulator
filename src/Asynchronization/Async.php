@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace PHPMachineEmulator\Concurrency;
+namespace PHPMachineEmulator\Asynchronization;
 
 use parallel\Events as ParallelEvents;
 use parallel\Events\Event as ParallelEvent;
 use parallel\Runtime as ParallelRuntime;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
-class Promise implements PromiseInterface
+class Async implements AsyncInterface
 {
     private readonly ParallelRuntime $parallelRuntime;
 
@@ -23,8 +23,8 @@ class Promise implements PromiseInterface
         $this->parallelRuntime = new ParallelRuntime();
     }
 
-    public function start(): PromiseResultInterface
+    public function start(): AsyncResultInterface
     {
-        return new PromiseResult($this->parallelRuntime->run(fn ($callback) => $callback(), [$this->callback]));
+        return new AsyncResult($this->parallelRuntime->run(fn ($callback) => $callback(), [$this->callback]));
     }
 }
