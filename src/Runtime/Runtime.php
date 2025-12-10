@@ -42,7 +42,6 @@ class Runtime implements RuntimeInterface
     protected TickerRegistryInterface $tickerRegistry;
     protected InterruptDeliveryHandlerInterface $interruptDeliveryHandler;
     protected array $shutdown = [];
-    protected int $instructionCount = 0;
     protected MemoryStream $memory;
 
     public function __construct(
@@ -161,7 +160,6 @@ class Runtime implements RuntimeInterface
         $iterationContext = $cpu->iteration();
 
         while (!$this->memory->isEOF()) {
-            $this->instructionCount++;
             $this->tickTimers();
 
             // Execute instruction with iteration context
@@ -224,7 +222,7 @@ class Runtime implements RuntimeInterface
     private function tickTimers(): void
     {
         // Execute registered tickers
-        $this->tickerRegistry->tick($this, $this->instructionCount);
+        $this->tickerRegistry->tick($this);
 
         // Deliver pending interrupts
         $this->interruptDeliveryHandler->deliverPendingInterrupts($this);
@@ -288,6 +286,11 @@ class Runtime implements RuntimeInterface
     public function interruptDeliveryHandler(): InterruptDeliveryHandlerInterface
     {
         return $this->interruptDeliveryHandler;
+    }
+
+    public function tickerRegistry(): TickerRegistryInterface
+    {
+        return $this->tickerRegistry;
     }
 
     /**

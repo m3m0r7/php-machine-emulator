@@ -24,5 +24,5 @@ interface TickerRegistryInterface
     /**
      * Execute all registered tickers based on instruction count.
      */
-    public function tick(RuntimeInterface $runtime, int $instructionCount): void;
+    public function tick(RuntimeInterface $runtime): void;
 }

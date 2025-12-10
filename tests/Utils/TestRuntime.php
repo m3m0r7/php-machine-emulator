@@ -21,6 +21,7 @@ use PHPMachineEmulator\Runtime\MemoryAccessorInterface;
 use PHPMachineEmulator\Runtime\RuntimeContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Runtime\RuntimeOptionInterface;
+use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
 use PHPMachineEmulator\Stream\BootableStreamInterface;
 use PHPMachineEmulator\Stream\MemoryStream;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
@@ -144,6 +145,11 @@ class TestRuntime implements RuntimeInterface
     public function interruptDeliveryHandler(): InterruptDeliveryHandlerInterface
     {
         return new TestInterruptDeliveryHandler();
+    }
+
+    public function tickerRegistry(): TickerRegistryInterface
+    {
+        return new TestTickerRegistry();
     }
 
     // ========================================

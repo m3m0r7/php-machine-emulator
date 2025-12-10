@@ -12,6 +12,7 @@ use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\LogicBoard\LogicBoardInterface;
 use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Runtime\Interrupt\InterruptDeliveryHandlerInterface;
+use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Video\VideoInterface;
 
@@ -53,4 +54,6 @@ interface RuntimeInterface
     public function architectureProvider(): ArchitectureProviderInterface;
 
     public function interruptDeliveryHandler(): InterruptDeliveryHandlerInterface;
+
+    public function tickerRegistry(): TickerRegistryInterface;
 }

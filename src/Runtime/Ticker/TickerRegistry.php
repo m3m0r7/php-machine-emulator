@@ -26,15 +26,12 @@ class TickerRegistry implements TickerRegistryInterface
         return $this;
     }
 
-    public function tick(RuntimeInterface $runtime, int $instructionCount): void
+    public function tick(RuntimeInterface $runtime): void
     {
         foreach ($this->tickers as $ticker) {
             if ($ticker->interval() === 0) {
                 $ticker->tick($runtime);
                 continue;
-            }
-            if ($instructionCount % $ticker->interval() === 0) {
-                $ticker->tick($runtime);
             }
         }
     }
