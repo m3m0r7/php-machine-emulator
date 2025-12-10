@@ -30,18 +30,29 @@ trait GenericStream
 
     public function short(): int
     {
-        $low = $this->byte();
-        $high = $this->byte();
-        return $low | ($high << 8);
+        $data = fread($this->resource, 2);
+        if ($data === false || strlen($data) < 2) {
+            throw new StreamReaderException('Cannot read from stream or reached EOF');
+        }
+        return unpack('v', $data)[1]; // Little-endian unsigned short
     }
 
     public function dword(): int
     {
-        $b0 = $this->byte();
-        $b1 = $this->byte();
-        $b2 = $this->byte();
-        $b3 = $this->byte();
-        return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+        $data = fread($this->resource, 4);
+        if ($data === false || strlen($data) < 4) {
+            throw new StreamReaderException('Cannot read from stream or reached EOF');
+        }
+        return unpack('V', $data)[1]; // Little-endian unsigned long
+    }
+
+    public function qword(): int
+    {
+        $data = fread($this->resource, 8);
+        if ($data === false || strlen($data) < 8) {
+            throw new StreamReaderException('Cannot read from stream or reached EOF');
+        }
+        return unpack('P', $data)[1]; // Little-endian unsigned long long
     }
 
     public function offset(): int
