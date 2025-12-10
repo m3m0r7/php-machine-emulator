@@ -46,23 +46,9 @@ class InstructionExecutor implements InstructionExecutorInterface
         $ip = $runtime->memory()->offset();
         $this->lastInstructionPointer = $ip;
 
-        // Check for existing Translation Block
-        if (isset($this->translationBlocks[$ip])) {
-            $block = $this->translationBlocks[$ip];
-            return $this->executeBlock($runtime, $block);
-        }
-
-        // Update hit count for hotspot detection
-        $this->hitCount[$ip] = ($this->hitCount[$ip] ?? 0) + 1;
-
-        // If this IP is hot, try to build a Translation Block
-        if ($this->hitCount[$ip] === self::HOTSPOT_THRESHOLD) {
-            $block = $this->buildTranslationBlock($runtime, $ip);
-            if ($block !== null && $block->count() > 1) {
-                $this->translationBlocks[$ip] = $block;
-                return $this->executeBlock($runtime, $block);
-            }
-        }
+        // Translation Block disabled: mode switches (real/protected) and self-modifying code
+        // invalidate cached instruction decoding. Need proper cache invalidation before enabling.
+        // TODO: Add cache invalidation on CR0 writes, segment register changes, and memory writes
 
         // Normal single-instruction execution (with decode cache)
         return $this->executeSingleInstruction($runtime, $ip);
@@ -76,11 +62,10 @@ class InstructionExecutor implements InstructionExecutorInterface
         $memory = $runtime->memory();
         $memoryAccessor = $runtime->memoryAccessor();
 
-        // Try decode cache first
-        if (isset($this->decodeCache[$ip])) {
-            [$instruction, $opcodes, $length] = $this->decodeCache[$ip];
-            $memory->setOffset($ip + $length);
-        } else {
+        // Decode cache disabled: same IP can have different instruction meanings
+        // depending on CPU mode (real/protected), operand size prefix context, etc.
+        // TODO: Key cache by (IP, mode, operand_size) or invalidate on mode switch
+        {
             // Full decode path
             $memoryAccessor->setInstructionFetch(true);
 
