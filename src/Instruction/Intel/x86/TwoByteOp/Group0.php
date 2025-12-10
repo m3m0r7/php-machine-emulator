@@ -123,7 +123,7 @@ class Group0 implements InstructionInterface
             $access = $this->readMemory8($runtime, $accessAddr);
             $access |= 0x02; // busy bit
 
-            $phys = $this->translateLinear($runtime, $accessAddr, true);
+            $phys = $this->translateLinearWithMmio($runtime, $accessAddr, true);
             $runtime->memoryAccessor()->allocate($phys, safe: false);
             $this->writeMemory8($runtime, $phys, $access & 0xFF);
         }

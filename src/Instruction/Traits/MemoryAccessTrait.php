@@ -12,7 +12,7 @@ use PHPMachineEmulator\Util\UInt64;
  * Trait for memory access operations.
  * Provides methods for reading/writing memory at various sizes,
  * paging translation, and physical memory access.
- * Used by both x86 and x86_64 instructions.
+ * Uses Rust-backed MemoryAccessor for high performance.
  */
 trait MemoryAccessTrait
 {
@@ -21,8 +21,24 @@ trait MemoryAccessTrait
      */
     protected function readMemory8(RuntimeInterface $runtime, int $address): int
     {
-        $physical = $this->translateLinear($runtime, $address);
-        return $this->readPhysical8($runtime, $physical);
+        $ma = $runtime->memoryAccessor();
+        $mask = $this->linearMask($runtime);
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
+
+        [$value, $error] = $ma->readMemory8($address, $isUser, $pagingEnabled, $mask);
+
+        if ($error === 0xFFFFFFFF) {
+            // MMIO - handle in PHP
+            $physical = $this->translateLinearWithMmio($runtime, $address, false);
+            return $this->readMmio($runtime, $physical, 8) ?? $ma->readPhysical8($physical);
+        }
+
+        if ($error !== 0) {
+            $this->throwPageFault($runtime, $address, $error);
+        }
+
+        return $value;
     }
 
     /**
@@ -30,8 +46,23 @@ trait MemoryAccessTrait
      */
     protected function readMemory16(RuntimeInterface $runtime, int $address): int
     {
-        $physical = $this->translateLinear($runtime, $address);
-        return $this->readPhysical16($runtime, $physical);
+        $ma = $runtime->memoryAccessor();
+        $mask = $this->linearMask($runtime);
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
+
+        [$value, $error] = $ma->readMemory16($address, $isUser, $pagingEnabled, $mask);
+
+        if ($error === 0xFFFFFFFF) {
+            $physical = $this->translateLinearWithMmio($runtime, $address, false);
+            return $this->readMmio($runtime, $physical, 16) ?? $ma->readPhysical16($physical);
+        }
+
+        if ($error !== 0) {
+            $this->throwPageFault($runtime, $address, $error);
+        }
+
+        return $value;
     }
 
     /**
@@ -39,8 +70,23 @@ trait MemoryAccessTrait
      */
     protected function readMemory32(RuntimeInterface $runtime, int $address): int
     {
-        $physical = $this->translateLinear($runtime, $address);
-        return $this->readPhysical32($runtime, $physical);
+        $ma = $runtime->memoryAccessor();
+        $mask = $this->linearMask($runtime);
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
+
+        [$value, $error] = $ma->readMemory32($address, $isUser, $pagingEnabled, $mask);
+
+        if ($error === 0xFFFFFFFF) {
+            $physical = $this->translateLinearWithMmio($runtime, $address, false);
+            return $this->readMmio($runtime, $physical, 32) ?? $ma->readPhysical32($physical);
+        }
+
+        if ($error !== 0) {
+            $this->throwPageFault($runtime, $address, $error);
+        }
+
+        return $value;
     }
 
     /**
@@ -48,8 +94,29 @@ trait MemoryAccessTrait
      */
     protected function readMemory64(RuntimeInterface $runtime, int $address): UInt64
     {
-        $physical = $this->translateLinear($runtime, $address);
-        return $this->readPhysical64($runtime, $physical);
+        $ma = $runtime->memoryAccessor();
+        $mask = $this->linearMask($runtime);
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
+
+        [$value, $error] = $ma->readMemory64($address, $isUser, $pagingEnabled, $mask);
+
+        if ($error === 0xFFFFFFFF) {
+            $physical = $this->translateLinearWithMmio($runtime, $address, false);
+            $mmio = $this->readMmio($runtime, $physical, 64);
+            if ($mmio !== null) {
+                return UInt64::fromParts($mmio & 0xFFFFFFFF, ($mmio >> 32) & 0xFFFFFFFF);
+            }
+            $lo = $ma->readPhysical32($physical);
+            $hi = $ma->readPhysical32($physical + 4);
+            return UInt64::fromParts($lo, $hi);
+        }
+
+        if ($error !== 0) {
+            $this->throwPageFault($runtime, $address, $error);
+        }
+
+        return UInt64::fromParts($value & 0xFFFFFFFF, ($value >> 32) & 0xFFFFFFFF);
     }
 
     /**
@@ -58,14 +125,28 @@ trait MemoryAccessTrait
     protected function writeMemory8(RuntimeInterface $runtime, int $address, int $value): void
     {
         $ma = $runtime->memoryAccessor();
-        try {
-            $physical = $this->translateLinear($runtime, $address, true);
-            if ($this->writeMmio($runtime, $physical, $value & 0xFF, 8)) {
-                return;
+        $mask = $this->linearMask($runtime);
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
+
+        $error = $ma->writeMemory8($address, $value, $isUser, $pagingEnabled, $mask);
+
+        if ($error === 0xFFFFFFFF) {
+            // MMIO - handle in PHP
+            try {
+                $physical = $this->translateLinearWithMmio($runtime, $address, true);
+                if ($this->writeMmio($runtime, $physical, $value & 0xFF, 8)) {
+                    return;
+                }
+                $ma->writeRawByte($physical, $value & 0xFF);
+            } catch (\Throwable) {
+                // Address out of bounds - ignore write to unmapped memory
             }
-            $ma->writeRawByte($physical, $value & 0xFF);
-        } catch (\Throwable) {
-            // Address out of bounds - ignore write to unmapped memory
+            return;
+        }
+
+        if ($error !== 0) {
+            $this->throwPageFault($runtime, $address, $error);
         }
     }
 
@@ -74,12 +155,29 @@ trait MemoryAccessTrait
      */
     protected function writeMemory16(RuntimeInterface $runtime, int $address, int $value): void
     {
-        $physical = $this->translateLinear($runtime, $address, true);
-        if ($this->writeMmio($runtime, $physical, $value & 0xFFFF, 16)) {
+        $ma = $runtime->memoryAccessor();
+        $mask = $this->linearMask($runtime);
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
+
+        $error = $ma->writeMemory16($address, $value & 0xFFFF, $isUser, $pagingEnabled, $mask);
+
+        if ($error === 0xFFFFFFFF) {
+            try {
+                $physical = $this->translateLinearWithMmio($runtime, $address, true);
+                if ($this->writeMmio($runtime, $physical, $value & 0xFFFF, 16)) {
+                    return;
+                }
+                $ma->writePhysical16($physical, $value & 0xFFFF);
+            } catch (\Throwable) {
+                // Ignore write to unmapped memory
+            }
             return;
         }
-        $this->writeMemory8($runtime, $address, $value & 0xFF);
-        $this->writeMemory8($runtime, $address + 1, ($value >> 8) & 0xFF);
+
+        if ($error !== 0) {
+            $this->throwPageFault($runtime, $address, $error);
+        }
     }
 
     /**
@@ -87,14 +185,29 @@ trait MemoryAccessTrait
      */
     protected function writeMemory32(RuntimeInterface $runtime, int $address, int $value): void
     {
-        $physical = $this->translateLinear($runtime, $address, true);
-        if ($this->writeMmio($runtime, $physical, $value & 0xFFFFFFFF, 32)) {
+        $ma = $runtime->memoryAccessor();
+        $mask = $this->linearMask($runtime);
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
+
+        $error = $ma->writeMemory32($address, $value & 0xFFFFFFFF, $isUser, $pagingEnabled, $mask);
+
+        if ($error === 0xFFFFFFFF) {
+            try {
+                $physical = $this->translateLinearWithMmio($runtime, $address, true);
+                if ($this->writeMmio($runtime, $physical, $value & 0xFFFFFFFF, 32)) {
+                    return;
+                }
+                $ma->writePhysical32($physical, $value & 0xFFFFFFFF);
+            } catch (\Throwable) {
+                // Ignore write to unmapped memory
+            }
             return;
         }
-        $this->writeMemory8($runtime, $address, $value & 0xFF);
-        $this->writeMemory8($runtime, $address + 1, ($value >> 8) & 0xFF);
-        $this->writeMemory8($runtime, $address + 2, ($value >> 16) & 0xFF);
-        $this->writeMemory8($runtime, $address + 3, ($value >> 24) & 0xFF);
+
+        if ($error !== 0) {
+            $this->throwPageFault($runtime, $address, $error);
+        }
     }
 
     /**
@@ -102,214 +215,67 @@ trait MemoryAccessTrait
      */
     protected function writeMemory64(RuntimeInterface $runtime, int $address, UInt64|int $value): void
     {
-        $physical = $this->translateLinear($runtime, $address, true);
         if ($value instanceof UInt64) {
-            if ($this->writeMmio($runtime, $physical, $value->low32(), 64)) {
-                return;
-            }
+            // For UInt64, use bulk 32-bit writes
             $this->writeMemory32($runtime, $address, $value->low32());
             $this->writeMemory32($runtime, $address + 4, $value->high32());
-        } else {
-            if ($this->writeMmio($runtime, $physical, $value, 64)) {
-                return;
+            return;
+        }
+
+        $ma = $runtime->memoryAccessor();
+        $mask = $this->linearMask($runtime);
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
+
+        $error = $ma->writeMemory64($address, $value, $isUser, $pagingEnabled, $mask);
+
+        if ($error === 0xFFFFFFFF) {
+            try {
+                $physical = $this->translateLinearWithMmio($runtime, $address, true);
+                if ($this->writeMmio($runtime, $physical, $value, 64)) {
+                    return;
+                }
+                $ma->writePhysical64($physical, $value);
+            } catch (\Throwable) {
+                // Ignore write to unmapped memory
             }
-            $this->writeMemory32($runtime, $address, $value & 0xFFFFFFFF);
-            $this->writeMemory32($runtime, $address + 4, ($value >> 32) & 0xFFFFFFFF);
+            return;
+        }
+
+        if ($error !== 0) {
+            $this->throwPageFault($runtime, $address, $error);
         }
     }
 
     /**
      * Translate linear address to physical address through paging.
+     * Used when MMIO handling is needed.
      */
-    protected function translateLinear(RuntimeInterface $runtime, int $linear, bool $isWrite = false): int
+    protected function translateLinearWithMmio(RuntimeInterface $runtime, int $linear, bool $isWrite = false): int
     {
+        $ma = $runtime->memoryAccessor();
         $mask = $this->linearMask($runtime);
-        $linear &= $mask;
+        $isUser = $runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $runtime->context()->cpu()->isPagingEnabled();
 
-        if (!$runtime->context()->cpu()->isPagingEnabled()) {
-            return $linear;
+        [$physical, $error] = $ma->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $mask);
+
+        if ($error !== 0 && $error !== 0xFFFFFFFF) {
+            $this->throwPageFault($runtime, $linear, $error);
         }
 
-        $user = $runtime->context()->cpu()->cpl() === 3;
-        $cr4 = $runtime->memoryAccessor()->readControlRegister(4);
-        $pse = ($cr4 & (1 << 4)) !== 0;
-        $pae = ($cr4 & (1 << 5)) !== 0;
-
-        if ($pae) {
-            return $this->translateLinearPae($runtime, $linear, $isWrite, $user);
-        }
-
-        return $this->translateLinear32($runtime, $linear, $isWrite, $user, $pse);
+        return $physical;
     }
 
     /**
-     * 32-bit paging translation.
+     * Throw a page fault exception from packed error code.
      */
-    private function translateLinear32(RuntimeInterface $runtime, int $linear, bool $isWrite, bool $user, bool $pse): int
+    private function throwPageFault(RuntimeInterface $runtime, int $linear, int $error): void
     {
-        $cr3 = $runtime->memoryAccessor()->readControlRegister(3) & 0xFFFFF000;
-        $dirIndex = ($linear >> 22) & 0x3FF;
-        $tableIndex = ($linear >> 12) & 0x3FF;
-        $offset = $linear & 0xFFF;
-
-        $pdeAddr = ($cr3 + ($dirIndex * 4)) & 0xFFFFFFFF;
-        $pde = $this->readPhysical32($runtime, $pdeAddr);
-        $presentPde = ($pde & 0x1) !== 0;
-        if (!$presentPde) {
-            $err = ($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0);
-            throw new FaultException(0x0E, $err, 'Page directory entry not present');
-        }
-        if (($pde & 0xFFFFFF000) === 0) {
-            $err = 0x08 | ($runtime->memoryAccessor()->shouldInstructionFetch() ? 0x10 : 0);
-            throw new FaultException(0x0E, $err, 'Reserved PDE bits');
-        }
-        if ($user && (($pde & 0x4) === 0)) {
-            $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
-            throw new FaultException(0x0E, $err, 'Page directory entry not user accessible');
-        }
-        if ($isWrite && (($pde & 0x2) === 0)) {
-            $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
-            throw new FaultException(0x0E, $err, 'Page directory entry not writable');
-        }
-
-        $is4M = $pse && (($pde & (1 << 7)) !== 0);
-        if ($is4M) {
-            // 4MB page
-            $base = $pde & 0xFFC00000;
-            if ($user && (($pde & 0x4) === 0)) {
-                $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
-                throw new FaultException(0x0E, $err, '4MB PDE not user accessible');
-            }
-            if ($isWrite && (($pde & 0x2) === 0)) {
-                $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
-                throw new FaultException(0x0E, $err, '4MB PDE not writable');
-            }
-            $pde |= 0x20;
-            if ($isWrite) {
-                $pde |= 0x40;
-            }
-            $this->writePhysical32($runtime, $pdeAddr, $pde);
-            return ($base + ($linear & 0x3FFFFF)) & 0xFFFFFFFF;
-        }
-
-        $pteAddr = ($pde & 0xFFFFF000) + ($tableIndex * 4);
-        $pte = $this->readPhysical32($runtime, $pteAddr);
-        $presentPte = ($pte & 0x1) !== 0;
-        if (!$presentPte) {
-            $err = ($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0);
-            throw new FaultException(0x0E, $err, 'Page table entry not present');
-        }
-        if (($pte & 0xFFFFFF000) === 0) {
-            $err = 0x08 | ($runtime->memoryAccessor()->shouldInstructionFetch() ? 0x10 : 0);
-            throw new FaultException(0x0E, $err, 'Reserved PTE bits');
-        }
-        if ($user && (($pte & 0x4) === 0)) {
-            $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
-            throw new FaultException(0x0E, $err, 'Page table entry not user accessible');
-        }
-        if ($isWrite && (($pte & 0x2) === 0)) {
-            $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
-            throw new FaultException(0x0E, $err, 'Page table entry not writable');
-        }
-
-        // Set accessed/dirty bits
-        if ($presentPde) {
-            $pde |= 0x20;
-            $this->writePhysical32($runtime, $pdeAddr, $pde);
-        }
-        if ($presentPte) {
-            $pte |= 0x20;
-            if ($isWrite) {
-                $pte |= 0x40;
-            }
-            $this->writePhysical32($runtime, $pteAddr, $pte);
-        }
-
-        $phys = ($pte & 0xFFFFF000) + $offset;
-        return $phys & 0xFFFFFFFF;
-    }
-
-    /**
-     * PAE paging translation.
-     */
-    private function translateLinearPae(RuntimeInterface $runtime, int $linear, bool $isWrite, bool $user): int
-    {
-        $cr3 = $runtime->memoryAccessor()->readControlRegister(3) & 0xFFFFF000;
-        $pdpIndex = ($linear >> 30) & 0x3;
-        $dirIndex = ($linear >> 21) & 0x1FF;
-        $tableIndex = ($linear >> 12) & 0x1FF;
-        $offset = $linear & 0xFFF;
-
-        $pdpteAddr = ($cr3 + ($pdpIndex * 8)) & 0xFFFFFFFF;
-        $pdpte = $this->readPhysical64($runtime, $pdpteAddr);
-        if ($pdpte->and(0x1)->isZero()) {
-            $err = ($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0);
-            throw new FaultException(0x0E, $err, 'PDPT entry not present');
-        }
-        if ($user && $pdpte->and(0x4)->isZero()) {
-            $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
-            throw new FaultException(0x0E, $err, 'PDPT entry not user accessible');
-        }
-        if ($isWrite && $pdpte->and(0x2)->isZero()) {
-            $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
-            throw new FaultException(0x0E, $err, 'PDPT entry not writable');
-        }
-
-        // Mark PDPT accessed
-        $this->writePhysical64($runtime, $pdpteAddr, $pdpte->or(1 << 5));
-
-        $pdeAddr = ($pdpte->and(0xFFFFFF000)->low32() + ($dirIndex * 8)) & 0xFFFFFFFF;
-        $pde = $this->readPhysical64($runtime, $pdeAddr);
-        if ($pde->and(0x1)->isZero()) {
-            $err = ($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0);
-            throw new FaultException(0x0E, $err, 'Page directory entry not present');
-        }
-        $isLarge = !$pde->and(1 << 7)->isZero();
-        if ($user && $pde->and(0x4)->isZero()) {
-            $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
-            throw new FaultException(0x0E, $err, 'Page directory entry not user accessible');
-        }
-        if ($isWrite && $pde->and(0x2)->isZero()) {
-            $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
-            throw new FaultException(0x0E, $err, 'Page directory entry not writable');
-        }
-
-        if ($isLarge) {
-            $pde = $pde->or(0x20);
-            if ($isWrite) {
-                $pde = $pde->or(0x40);
-            }
-            $this->writePhysical64($runtime, $pdeAddr, $pde);
-            $base = $pde->and(0xFFE00000)->low32();
-            $phys = ($base + ($linear & 0x1FFFFF)) & 0xFFFFFFFF;
-            return $phys;
-        }
-
-        $pteAddr = ($pde->and(0xFFFFFF000)->low32() + ($tableIndex * 8)) & 0xFFFFFFFF;
-        $pte = $this->readPhysical64($runtime, $pteAddr);
-        if ($pte->and(0x1)->isZero()) {
-            $err = ($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0);
-            throw new FaultException(0x0E, $err, 'Page table entry not present');
-        }
-        if ($user && $pte->and(0x4)->isZero()) {
-            $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
-            throw new FaultException(0x0E, $err, 'Page table entry not user accessible');
-        }
-        if ($isWrite && $pte->and(0x2)->isZero()) {
-            $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
-            throw new FaultException(0x0E, $err, 'Page table entry not writable');
-        }
-
-        $pde = $pde->or(0x20);
-        $this->writePhysical64($runtime, $pdeAddr, $pde);
-        $pte = $pte->or(0x20);
-        if ($isWrite) {
-            $pte = $pte->or(0x40);
-        }
-        $this->writePhysical64($runtime, $pteAddr, $pte);
-
-        $phys = $pte->and(0xFFFFFF000)->low32() + $offset;
-        return $phys & 0xFFFFFFFF;
+        $vector = ($error >> 16) & 0xFF;
+        $errorCode = $error & 0xFFFF;
+        $runtime->memoryAccessor()->writeControlRegister(2, $linear & 0xFFFFFFFF);
+        throw new FaultException($vector, $errorCode, 'Page fault');
     }
 
     /**
@@ -321,23 +287,7 @@ trait MemoryAccessTrait
         if ($mmio !== null) {
             return $mmio;
         }
-
-        try {
-            $value = $runtime->memoryAccessor()->readRawByte($address);
-            if ($value !== null) {
-                return $value;
-            }
-
-            $memory = $runtime->memory();
-            $currentOffset = $memory->offset();
-            $memory->setOffset($address);
-            $byte = $memory->byte();
-            $memory->setOffset($currentOffset);
-            return $byte;
-        } catch (\Throwable $e) {
-            // Address out of bounds - return 0 (unmapped memory)
-            return 0;
-        }
+        return $runtime->memoryAccessor()->readPhysical8($address);
     }
 
     /**
@@ -349,10 +299,7 @@ trait MemoryAccessTrait
         if ($mmio !== null) {
             return $mmio;
         }
-
-        $lo = $this->readPhysical8($runtime, $address);
-        $hi = $this->readPhysical8($runtime, $address + 1);
-        return ($hi << 8) | $lo;
+        return $runtime->memoryAccessor()->readPhysical16($address);
     }
 
     /**
@@ -364,12 +311,7 @@ trait MemoryAccessTrait
         if ($mmio !== null) {
             return $mmio;
         }
-
-        $b0 = $this->readPhysical8($runtime, $address);
-        $b1 = $this->readPhysical8($runtime, $address + 1);
-        $b2 = $this->readPhysical8($runtime, $address + 2);
-        $b3 = $this->readPhysical8($runtime, $address + 3);
-        return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+        return $runtime->memoryAccessor()->readPhysical32($address);
     }
 
     /**
@@ -377,9 +319,14 @@ trait MemoryAccessTrait
      */
     protected function readPhysical64(RuntimeInterface $runtime, int $address): UInt64
     {
-        $lo = $this->readPhysical32($runtime, $address);
-        $hi = $this->readPhysical32($runtime, $address + 4);
-        return UInt64::fromParts($lo, $hi);
+        // Check for MMIO first
+        $mmio = $this->readMmio($runtime, $address, 64);
+        if ($mmio !== null) {
+            return UInt64::fromParts($mmio & 0xFFFFFFFF, ($mmio >> 32) & 0xFFFFFFFF);
+        }
+        // Use bulk 64-bit read from Rust
+        $value = $runtime->memoryAccessor()->readPhysical64($address);
+        return UInt64::fromParts($value & 0xFFFFFFFF, ($value >> 32) & 0xFFFFFFFF);
     }
 
     /**
@@ -387,8 +334,7 @@ trait MemoryAccessTrait
      */
     protected function writePhysical32(RuntimeInterface $runtime, int $address, int $value): void
     {
-        $runtime->memoryAccessor()->allocate($address, 4, safe: false);
-        $runtime->memoryAccessor()->writeBySize($address, $value, 32);
+        $runtime->memoryAccessor()->writePhysical32($address, $value);
     }
 
     /**
@@ -397,11 +343,11 @@ trait MemoryAccessTrait
     protected function writePhysical64(RuntimeInterface $runtime, int $address, UInt64|int $value): void
     {
         if ($value instanceof UInt64) {
-            $this->writePhysical32($runtime, $address, $value->low32());
-            $this->writePhysical32($runtime, $address + 4, $value->high32());
+            // Convert UInt64 to int for bulk write
+            $intValue = $value->low32() | ($value->high32() << 32);
+            $runtime->memoryAccessor()->writePhysical64($address, $intValue);
         } else {
-            $this->writePhysical32($runtime, $address, $value & 0xFFFFFFFF);
-            $this->writePhysical32($runtime, $address + 4, ($value >> 32) & 0xFFFFFFFF);
+            $runtime->memoryAccessor()->writePhysical64($address, $value);
         }
     }
 

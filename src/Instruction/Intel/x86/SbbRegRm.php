@@ -34,7 +34,7 @@ class SbbRegRm implements InstructionInterface
         // Cache effective address to avoid reading displacement twice
         $rmAddress = null;
         if ($destIsRm && $modRegRM->mode() !== 0b11) {
-            $rmAddress = $this->translateLinear($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
+            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
         }
 
         $src = $isByte

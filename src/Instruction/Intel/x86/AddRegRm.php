@@ -34,7 +34,7 @@ class AddRegRm implements InstructionInterface
         $rmAddress = null;
         if ($destIsRm && $modRegRM->mode() !== 0b11) {
             // Pre-compute r/m address so we don't re-read displacement
-            $rmAddress = $this->translateLinear($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
+            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
         }
 
         $src = $isByte

@@ -294,7 +294,7 @@ trait TaskSwitchTrait
             $descAddr = $base + ($index * 8);
             $accessAddr = $descAddr + 5;
             $access = $this->readMemory8($runtime, $accessAddr) | 0x02;
-            $phys = $this->translateLinear($runtime, $accessAddr, true);
+            $phys = $this->translateLinearWithMmio($runtime, $accessAddr, true);
             $runtime->memoryAccessor()->allocate($phys, safe: false);
             $runtime->memoryAccessor()->writeBySize($phys, $access & 0xFF, 8);
         }
@@ -307,7 +307,7 @@ trait TaskSwitchTrait
             $descAddr = $base + ($index * 8);
             $accessAddr = $descAddr + 5;
             $access = $this->readMemory8($runtime, $accessAddr) & 0xFD;
-            $phys = $this->translateLinear($runtime, $accessAddr, true);
+            $phys = $this->translateLinearWithMmio($runtime, $accessAddr, true);
             $runtime->memoryAccessor()->allocate($phys, safe: false);
             $runtime->memoryAccessor()->writeBySize($phys, $access & 0xFF, 8);
         }
@@ -337,7 +337,7 @@ trait TaskSwitchTrait
     abstract protected function writeCodeSegment(RuntimeInterface $runtime, int $selector, ?int $overrideCpl = null, ?array $descriptor = null): void;
     abstract protected function packFlags(RuntimeInterface $runtime): int;
     abstract protected function applyFlags(RuntimeInterface $runtime, int $flags, int $size = 32): void;
-    abstract protected function translateLinear(RuntimeInterface $runtime, int $linear, bool $isWrite = false): int;
+    abstract protected function translateLinearWithMmio(RuntimeInterface $runtime, int $linear, bool $isWrite = false): int;
     abstract protected function readMemory8(RuntimeInterface $runtime, int $address): int;
     abstract protected function readMemory16(RuntimeInterface $runtime, int $address): int;
     abstract protected function readMemory32(RuntimeInterface $runtime, int $address): int;

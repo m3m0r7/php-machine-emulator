@@ -241,7 +241,7 @@ class RepPrefix implements InstructionInterface
             $value = $this->readMemory8($runtime, $srcSegOff + ($step * $i));
 
             // Write using writeRawByte after allocate (same as Movsb.php line 32-34)
-            $destAddress = $this->translateLinear($runtime, $dstSegOff + ($step * $i), true);
+            $destAddress = $this->translateLinearWithMmio($runtime, $dstSegOff + ($step * $i), true);
             $ma->allocate($destAddress, safe: false);
             $ma->writeRawByte($destAddress, $value);
         }
@@ -284,7 +284,7 @@ class RepPrefix implements InstructionInterface
                 : $this->readMemory16($runtime, $srcSegOff + $offset);
 
             // Write using writeBySize after allocate (same as Movsw.php line 34-36)
-            $destAddress = $this->translateLinear($runtime, $dstSegOff + $offset, true);
+            $destAddress = $this->translateLinearWithMmio($runtime, $dstSegOff + $offset, true);
             $ma->allocate($destAddress, $width, safe: false);
             $ma->writeBySize($destAddress, $value, $opSize);
         }
@@ -316,7 +316,7 @@ class RepPrefix implements InstructionInterface
         // Process each byte using the same methods as Stosb.php
         for ($i = 0; $i < $count; $i++) {
             // Write using writeRawByte after allocate (same as Stosb.php line 33-39)
-            $address = $this->translateLinear($runtime, $dstSegOff + ($step * $i), true);
+            $address = $this->translateLinearWithMmio($runtime, $dstSegOff + ($step * $i), true);
             $ma->allocate($address, safe: false);
             $ma->writeRawByte($address, $byte);
         }
@@ -351,7 +351,7 @@ class RepPrefix implements InstructionInterface
             $offset = $step * $width * $i;
 
             // Write using writeBySize after allocate (same as Stosw.php line 30-31)
-            $address = $this->translateLinear($runtime, $dstSegOff + $offset, true);
+            $address = $this->translateLinearWithMmio($runtime, $dstSegOff + $offset, true);
             $ma->allocate($address, safe: false);
             $ma->writeBySize($address, $value, $opSize);
         }

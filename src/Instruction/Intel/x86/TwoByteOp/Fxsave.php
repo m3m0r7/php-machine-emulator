@@ -93,7 +93,7 @@ class Fxsave implements InstructionInterface
 
     private function fxrstor(RuntimeInterface $runtime, int $address): ExecutionStatus
     {
-        $this->translateLinear($runtime, $address, false);
+        $this->translateLinearWithMmio($runtime, $address, false);
         $this->mxcsr = $this->readMemory32($runtime, $address + 24);
         $this->initXmm();
 

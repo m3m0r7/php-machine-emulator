@@ -207,12 +207,24 @@ trait SegmentTrait
             return null;
         }
 
-        $limitLow = $this->readMemory8($runtime, $offset) | ($this->readMemory8($runtime, $offset + 1) << 8);
-        $baseLow = $this->readMemory8($runtime, $offset + 2) | ($this->readMemory8($runtime, $offset + 3) << 8);
-        $baseMid = $this->readMemory8($runtime, $offset + 4);
-        $access = $this->readMemory8($runtime, $offset + 5);
-        $gran = $this->readMemory8($runtime, $offset + 6);
-        $baseHigh = $this->readMemory8($runtime, $offset + 7);
+        // Read all 8 bytes at once using readMemory64
+        $desc = $this->readMemory64($runtime, $offset);
+        $descLow = $desc->low32();
+        $descHigh = $desc->high32();
+
+        // Parse descriptor fields from the 64-bit value
+        // Bytes 0-1: limit low
+        $limitLow = $descLow & 0xFFFF;
+        // Bytes 2-3: base low
+        $baseLow = ($descLow >> 16) & 0xFFFF;
+        // Byte 4: base mid
+        $baseMid = $descHigh & 0xFF;
+        // Byte 5: access
+        $access = ($descHigh >> 8) & 0xFF;
+        // Byte 6: granularity + limit high
+        $gran = ($descHigh >> 16) & 0xFF;
+        // Byte 7: base high
+        $baseHigh = ($descHigh >> 24) & 0xFF;
 
         $limitHigh = $gran & 0x0F;
         $fullLimit = $limitLow | ($limitHigh << 16);
@@ -326,4 +338,5 @@ trait SegmentTrait
 
     // Abstract methods that must be implemented by using class/trait
     abstract protected function readMemory8(RuntimeInterface $runtime, int $address): int;
+    abstract protected function readMemory64(RuntimeInterface $runtime, int $address): \PHPMachineEmulator\Util\UInt64;
 }

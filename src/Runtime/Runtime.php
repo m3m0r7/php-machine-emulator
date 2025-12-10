@@ -28,8 +28,8 @@ use PHPMachineEmulator\Runtime\Ticker\DeviceManagerTicker;
 use PHPMachineEmulator\Runtime\Ticker\PitTicker;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
-use PHPMachineEmulator\Stream\MemoryStream;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
+use PHPMachineEmulator\Stream\RustMemoryStream;
 use PHPMachineEmulator\Video\VideoInterface;
 
 class Runtime implements RuntimeInterface
@@ -42,7 +42,7 @@ class Runtime implements RuntimeInterface
     protected TickerRegistryInterface $tickerRegistry;
     protected InterruptDeliveryHandlerInterface $interruptDeliveryHandler;
     protected array $shutdown = [];
-    protected MemoryStream $memory;
+    protected MemoryStreamInterface $memory;
 
     public function __construct(
         protected MachineInterface $machine,
@@ -56,7 +56,11 @@ class Runtime implements RuntimeInterface
 
         $this->frame = new Frame($this);
         $this->addressMap = new AddressMap($this);
-        $this->memoryAccessor = new MemoryAccessor(
+
+        // Convert boot stream to memory stream (must be before RustMemoryAccessor)
+        $this->memory = $this->createMemoryStream();
+
+        $this->memoryAccessor = new RustMemoryAccessor(
             $this,
             $this->architectureProvider
                 ->observers(),
@@ -93,9 +97,6 @@ class Runtime implements RuntimeInterface
         if ($this->option()->shouldShowHeader()) {
             $this->showHeader();
         }
-
-        // Convert boot stream to memory stream
-        $this->memory = $this->createMemoryStream();
     }
 
     /**
@@ -109,13 +110,13 @@ class Runtime implements RuntimeInterface
     /**
      * Create memory stream with boot data copied in.
      */
-    private function createMemoryStream(): MemoryStream
+    private function createMemoryStream(): MemoryStreamInterface
     {
         $memoryContext = $this->logicBoard()->memory();
         $bootStream = $this->logicBoard()->media()->primary()->stream();
 
         // Create memory stream with configurable sizes from LogicBoard's MemoryContext
-        $memoryStream = new MemoryStream(
+        $memoryStream = new RustMemoryStream(
             $memoryContext->initialMemory(),
             $memoryContext->maxMemory(),
             $memoryContext->swapSize(),

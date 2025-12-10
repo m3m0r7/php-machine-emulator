@@ -46,4 +46,24 @@ interface MemoryAccessorInterface
     public function setInterruptFlag(bool $which): self;
 
     public function writeEfer(int $value): void;
+
+    // Physical memory access
+    public function readPhysical8(int $address): int;
+    public function readPhysical16(int $address): int;
+    public function readPhysical32(int $address): int;
+    public function readPhysical64(int $address): int;
+    public function writePhysical32(int $address, int $value): void;
+    public function writePhysical64(int $address, int $value): void;
+
+    // Linear address translation and memory access with paging
+    public function translateLinear(int $linear, bool $isWrite, bool $isUser, bool $pagingEnabled, int $linearMask): array;
+    public function readMemory8(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array;
+    public function readMemory16(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array;
+    public function readMemory32(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array;
+    public function readMemory64(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array;
+    public function writeMemory8(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int;
+    public function writeMemory16(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int;
+    public function writeMemory32(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int;
+    public function writeMemory64(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int;
+    public function writePhysical16(int $address, int $value): void;
 }

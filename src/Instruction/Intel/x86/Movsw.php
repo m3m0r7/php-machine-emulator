@@ -34,7 +34,7 @@ class Movsw implements InstructionInterface
             ? $this->readMemory32($runtime, $address)
             : $this->readMemory16($runtime, $address);
 
-        $destAddress = $this->translateLinear($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
+        $destAddress = $this->translateLinearWithMmio($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
         $runtime->memoryAccessor()->allocate($destAddress, $width, safe: false);
         $runtime->memoryAccessor()->writeBySize($destAddress, $value, $opSize);
 

@@ -30,7 +30,7 @@ class Stosb implements InstructionInterface
 
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
-        $address = $this->translateLinear($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
+        $address = $this->translateLinearWithMmio($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
 
 
         $runtime

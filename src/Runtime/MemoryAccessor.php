@@ -9,7 +9,6 @@ use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\MemoryAccessorException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Util\BinaryInteger;
-use PHPMachineEmulator\Util\UInt64;
 
 class MemoryAccessor implements MemoryAccessorInterface
 {
@@ -607,6 +606,8 @@ class MemoryAccessor implements MemoryAccessorInterface
         $ssSelector = $this->fetch(RegisterType::SS)->asByte();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $isUser = $this->runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
 
         if ($this->runtime->context()->cpu()->isProtectedMode()) {
             $descriptor = $this->segmentDescriptor($ssSelector);
@@ -615,7 +616,11 @@ class MemoryAccessor implements MemoryAccessorInterface
                 // Early boot code may not have GDT properly set up yet
                 // Use flat memory model (base 0) as fallback
                 $linear = ($sp & $mask) & $linearMask;
-                return $this->translateLinear($linear, $isWrite);
+                [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+                if ($error !== 0 && $error !== 0xFFFFFFFF) {
+                    $this->throwTranslationError($linear, $error);
+                }
+                return $physical;
             }
 
             // SS must be writable data, and DPL == CPL == RPL.
@@ -626,7 +631,11 @@ class MemoryAccessor implements MemoryAccessorInterface
             $isExecutable = $descriptor['executable'] ?? false;
             if ($isExecutable || !$isWritable || $dpl !== $cpl || $rpl !== $cpl) {
                 $linear = ($sp & $mask) & $linearMask;
-                return $this->translateLinear($linear, $isWrite);
+                [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+                if ($error !== 0 && $error !== 0xFFFFFFFF) {
+                    $this->throwTranslationError($linear, $error);
+                }
+                return $physical;
             }
 
             if (($sp & $mask) > $descriptor['limit']) {
@@ -634,11 +643,27 @@ class MemoryAccessor implements MemoryAccessorInterface
             }
 
             $linear = ($descriptor['base'] + ($sp & $mask)) & $linearMask;
-            return $this->translateLinear($linear, $isWrite);
+            [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+            if ($error !== 0 && $error !== 0xFFFFFFFF) {
+                $this->throwTranslationError($linear, $error);
+            }
+            return $physical;
         }
 
         $linear = ((($ssSelector << 4) & 0xFFFFF) + ($sp & $mask)) & $linearMask;
-        return $this->translateLinear($linear, $isWrite);
+        [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+        if ($error !== 0 && $error !== 0xFFFFFFFF) {
+            $this->throwTranslationError($linear, $error);
+        }
+        return $physical;
+    }
+
+    private function throwTranslationError(int $linear, int $error): void
+    {
+        $vector = ($error >> 16) & 0xFF;
+        $errorCode = $error & 0xFFFF;
+        $this->writeControlRegister(2, $linear & 0xFFFFFFFF);
+        throw new FaultException($vector, $errorCode, 'Page fault');
     }
 
     private function isGprAddress(int $address): bool
@@ -650,238 +675,19 @@ class MemoryAccessor implements MemoryAccessorInterface
         return ($address >= 0 && $address <= 7) || ($address >= 16 && $address <= 24);
     }
 
-    private function translateLinear(int $linear, bool $isWrite = false): int
+    public function readPhysical8(int $address): int
     {
-        $mask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
-        $linear &= $mask;
-
-        if (!$this->runtime->context()->cpu()->isPagingEnabled()) {
-            return $linear;
-        }
-
-        $cr4 = $this->readControlRegister(4);
-        $pae = ($cr4 & (1 << 5)) !== 0;
-
-        if ($pae) {
-            return $this->translateLinearPae($linear, $isWrite, $cr4);
-        }
-
-        return $this->translateLinear32bit($linear, $isWrite, $cr4);
+        return $this->readFromMemory($address);
     }
 
-    /**
-     * PAE (Physical Address Extension) paging translation.
-     */
-    private function translateLinearPae(int $linear, bool $isWrite, int $cr4): int
+    public function readPhysical16(int $address): int
     {
-        $user = $this->runtime->context()->cpu()->cpl() === 3;
-        $cr3 = $this->readControlRegister(3) & 0xFFFFF000;
-        $pdpIndex = ($linear >> 30) & 0x3;
-        $dirIndex = ($linear >> 21) & 0x1FF;
-        $tableIndex = ($linear >> 12) & 0x1FF;
-        $offset = $linear & 0xFFF;
-        $nxe = ($this->efer & (1 << 11)) !== 0;
-
-        // Check PDPT entry
-        $pdpteAddr = ($cr3 + ($pdpIndex * 8)) & 0xFFFFFFFF;
-        $pdpte = $this->readPhysical64($pdpteAddr);
-        $this->checkPageEntryPresent64($pdpte, $linear, $isWrite, $user, 'PDPT entry');
-        $this->checkPageEntryUserAccess64($pdpte, $linear, $isWrite, $user, 'PDPT entry');
-        $this->checkPageEntryWriteAccess64($pdpte, $linear, $isWrite, $user, 'PDPT entry');
-        $pdpte = $pdpte->or(0x20);
-        $this->writePhysical64($pdpteAddr, $pdpte);
-
-        // Check page directory entry
-        $pdeAddr = ($pdpte->and(0xFFFFFF000)->low32() + ($dirIndex * 8)) & 0xFFFFFFFF;
-        $pde = $this->readPhysical64($pdeAddr);
-        $this->checkPageEntryPresent64($pde, $linear, $isWrite, $user, 'Page directory entry');
-        $this->checkPageEntryUserAccess64($pde, $linear, $isWrite, $user, 'Page directory entry');
-        $this->checkPageEntryWriteAccess64($pde, $linear, $isWrite, $user, 'Page directory entry');
-
-        // Handle 2MB large page
-        $isLarge = !$pde->and(1 << 7)->isZero();
-        if ($isLarge) {
-            return $this->handlePaeLargePage($pde, $pdeAddr, $linear, $isWrite, $user, $nxe);
-        }
-
-        // Check page table entry
-        $pteAddr = ($pde->and(0xFFFFFF000)->low32() + ($tableIndex * 8)) & 0xFFFFFFFF;
-        $pte = $this->readPhysical64($pteAddr);
-        $this->checkPageEntryPresent64($pte, $linear, $isWrite, $user, 'Page table entry');
-        $this->checkPageEntryUserAccess64($pte, $linear, $isWrite, $user, 'Page table entry');
-        $this->checkPageEntryWriteAccess64($pte, $linear, $isWrite, $user, 'Page table entry');
-
-        // Update accessed/dirty bits
-        $this->updateAccessedDirtyBits64($pdeAddr, $pde, $pteAddr, $pte, $isWrite);
-
-        // Check NX bit
-        $this->checkExecuteDisable64($pte, $linear, $user, $nxe);
-
-        $phys = $pte->and(0xFFFFFF000)->low32() + $offset;
-        return $phys & 0xFFFFFFFF;
+        $lo = $this->readFromMemory($address);
+        $hi = $this->readFromMemory($address + 1);
+        return ($hi << 8) | $lo;
     }
 
-    /**
-     * 32-bit paging translation.
-     */
-    private function translateLinear32bit(int $linear, bool $isWrite, int $cr4): int
-    {
-        $user = $this->runtime->context()->cpu()->cpl() === 3;
-        $pse = ($cr4 & (1 << 4)) !== 0;
-        $cr3 = $this->readControlRegister(3) & 0xFFFFF000;
-        $dirIndex = ($linear >> 22) & 0x3FF;
-        $tableIndex = ($linear >> 12) & 0x3FF;
-        $offset = $linear & 0xFFF;
-
-        // Check page directory entry
-        $pdeAddr = ($cr3 + ($dirIndex * 4)) & 0xFFFFFFFF;
-        $pde = $this->readPhysical32($pdeAddr);
-        $this->checkPageEntryPresent32($pde, $linear, $isWrite, $user, 'Page directory entry');
-
-        // Handle 4MB large page
-        $is4M = $pse && (($pde & (1 << 7)) !== 0);
-        if ($is4M) {
-            return $this->handle32bitLargePage($pde, $pdeAddr, $linear, $isWrite, $user);
-        }
-
-        $this->checkPageEntryUserAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
-        $this->checkPageEntryWriteAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
-
-        // Check page table entry
-        $pteAddr = ($pde & 0xFFFFF000) + ($tableIndex * 4);
-        $pte = $this->readPhysical32($pteAddr);
-        $this->checkPageEntryPresent32($pte, $linear, $isWrite, $user, 'Page table entry');
-        $this->checkPageEntryUserAccess32($pte, $linear, $isWrite, $user, 'Page table entry');
-        $this->checkPageEntryWriteAccess32($pte, $linear, $isWrite, $user, 'Page table entry');
-
-        // Update accessed/dirty bits
-        $this->updateAccessedDirtyBits32($pdeAddr, $pde, $pteAddr, $pte, $isWrite);
-
-        $phys = ($pte & 0xFFFFF000) + $offset;
-        return $phys & 0xFFFFFFFF;
-    }
-
-    private function checkPageEntryPresent64(UInt64 $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
-    {
-        if ($entry->and(0x1)->isZero()) {
-            $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0));
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, "{$entryName} not present");
-        }
-    }
-
-    private function checkPageEntryUserAccess64(UInt64 $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
-    {
-        if ($user && $entry->and(0x4)->isZero()) {
-            $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | 0b100 | 0b1);
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, "{$entryName} not user accessible");
-        }
-    }
-
-    private function checkPageEntryWriteAccess64(UInt64 $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
-    {
-        if ($isWrite && $entry->and(0x2)->isZero()) {
-            $err = $this->errorCodeWithFetch(0b10 | ($user ? 0b100 : 0) | 0b1);
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, "{$entryName} not writable");
-        }
-    }
-
-    private function checkPageEntryPresent32(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
-    {
-        if (($entry & 0x1) === 0) {
-            $err = $this->errorCodeWithFetch(($isWrite ? 0b10 : 0) | ($user ? 0b100 : 0));
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, "{$entryName} not present");
-        }
-    }
-
-    private function checkPageEntryUserAccess32(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
-    {
-        if ($user && (($entry & 0x4) === 0)) {
-            $err = ($isWrite ? 0b10 : 0) | 0b100 | 0b1;
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, "{$entryName} not user accessible");
-        }
-    }
-
-    private function checkPageEntryWriteAccess32(int $entry, int $linear, bool $isWrite, bool $user, string $entryName): void
-    {
-        if ($isWrite && (($entry & 0x2) === 0)) {
-            $err = 0b10 | ($user ? 0b100 : 0) | 0b1;
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, "{$entryName} not writable");
-        }
-    }
-
-    private function handlePaeLargePage(UInt64 $pde, int $pdeAddr, int $linear, bool $isWrite, bool $user, bool $nxe): int
-    {
-        $pde = $pde->or(0x20);
-        if ($isWrite) {
-            $pde = $pde->or(0x40);
-        }
-        $this->writePhysical64($pdeAddr, $pde);
-
-        // Check NX bit (bit 63)
-        if ($this->shouldInstructionFetch() && $nxe && $pde->isNegativeSigned()) {
-            $err = 0x01 | ($user ? 0b100 : 0) | 0x10;
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, 'Execute-disable large page');
-        }
-
-        $phys = $pde->and(0xFFE00000)->low32() + ($linear & 0x1FFFFF);
-        return $phys & 0xFFFFFFFF;
-    }
-
-    private function handle32bitLargePage(int $pde, int $pdeAddr, int $linear, bool $isWrite, bool $user): int
-    {
-        $this->checkPageEntryUserAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
-        $this->checkPageEntryWriteAccess32($pde, $linear, $isWrite, $user, 'Page directory entry');
-
-        $pde |= 0x20;
-        if ($isWrite) {
-            $pde |= 0x40;
-        }
-        $this->writePhysical32($pdeAddr, $pde);
-
-        $phys = ($pde & 0xFFC00000) + ($linear & 0x3FFFFF);
-        return $phys & 0xFFFFFFFF;
-    }
-
-    private function updateAccessedDirtyBits64(int $pdeAddr, UInt64 $pde, int $pteAddr, UInt64 $pte, bool $isWrite): void
-    {
-        $pde = $pde->or(0x20);
-        $this->writePhysical64($pdeAddr, $pde);
-        $pte = $pte->or(0x20);
-        if ($isWrite) {
-            $pte = $pte->or(0x40);
-        }
-        $this->writePhysical64($pteAddr, $pte);
-    }
-
-    private function updateAccessedDirtyBits32(int $pdeAddr, int $pde, int $pteAddr, int $pte, bool $isWrite): void
-    {
-        $pde |= 0x20;
-        $this->writePhysical32($pdeAddr, $pde);
-        $pte |= 0x20;
-        if ($isWrite) {
-            $pte |= 0x40;
-        }
-        $this->writePhysical32($pteAddr, $pte);
-    }
-
-    private function checkExecuteDisable64(UInt64 $pte, int $linear, bool $user, bool $nxe): void
-    {
-        // Check NX bit (bit 63)
-        if ($this->shouldInstructionFetch() && $nxe && $pte->isNegativeSigned()) {
-            $err = 0x01 | ($user ? 0b100 : 0) | 0x10;
-            $this->setCr2($linear);
-            throw new FaultException(0x0E, $err, 'Execute-disable page');
-        }
-    }
-
-    private function readPhysical32(int $address): int
+    public function readPhysical32(int $address): int
     {
         $value = 0;
         for ($i = 0; $i < 4; $i++) {
@@ -890,43 +696,98 @@ class MemoryAccessor implements MemoryAccessorInterface
         return $value & 0xFFFFFFFF;
     }
 
-    private function readPhysical64(int $address): UInt64
+    public function readPhysical64(int $address): int
     {
         $lo = $this->readPhysical32($address);
         $hi = $this->readPhysical32($address + 4);
-        return UInt64::fromParts($lo, $hi);
+        return $lo | ($hi << 32);
     }
 
-    private function writePhysical32(int $address, int $value): void
+    public function writePhysical32(int $address, int $value): void
     {
         for ($i = 0; $i < 4; $i++) {
             $this->writeToMemory($address + $i, ($value >> ($i * 8)) & 0xFF);
         }
     }
 
-    private function writePhysical64(int $address, UInt64|int $value): void
+    public function writePhysical64(int $address, int $value): void
     {
-        if ($value instanceof UInt64) {
-            $this->writePhysical32($address, $value->low32());
-            $this->writePhysical32($address + 4, $value->high32());
-        } else {
-            $this->writePhysical32($address, $value & 0xFFFFFFFF);
-            $this->writePhysical32($address + 4, ($value >> 32) & 0xFFFFFFFF);
-        }
+        $this->writePhysical32($address, $value & 0xFFFFFFFF);
+        $this->writePhysical32($address + 4, ($value >> 32) & 0xFFFFFFFF);
     }
 
-    private function setCr2(int $linear): void
+    public function translateLinear(int $linear, bool $isWrite, bool $isUser, bool $pagingEnabled, int $linearMask): array
     {
-        $this->writeControlRegister(2, $linear & 0xFFFFFFFF);
+        // Simple implementation: mask address and return
+        // Paging translation is not supported in pure PHP MemoryAccessor (use RustMemoryAccessor)
+        $physical = $linear & $linearMask;
+        if (!$pagingEnabled) {
+            return [$physical, 0];
+        }
+        // If paging is enabled, this path should not be used (RustMemoryAccessor handles it)
+        // But for safety, return the linear address as-is
+        return [$physical, 0];
     }
 
-    private function errorCodeWithFetch(int $err): int
+    public function readMemory8(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array
     {
-        if ($this->shouldInstructionFetch()) {
-            $err |= 0x10;
-        }
-        return $err & 0xFFFF;
+        $physical = $linear & $linearMask;
+        return [$this->readPhysical8($physical), 0];
     }
+
+    public function readMemory16(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array
+    {
+        $physical = $linear & $linearMask;
+        return [$this->readPhysical16($physical), 0];
+    }
+
+    public function readMemory32(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array
+    {
+        $physical = $linear & $linearMask;
+        return [$this->readPhysical32($physical), 0];
+    }
+
+    public function readMemory64(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array
+    {
+        $physical = $linear & $linearMask;
+        return [$this->readPhysical64($physical), 0];
+    }
+
+    public function writeMemory8(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
+    {
+        $physical = $linear & $linearMask;
+        $this->writeToMemory($physical, $value & 0xFF);
+        return 0;
+    }
+
+    public function writeMemory16(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
+    {
+        $physical = $linear & $linearMask;
+        $this->writeToMemory($physical, $value & 0xFF);
+        $this->writeToMemory($physical + 1, ($value >> 8) & 0xFF);
+        return 0;
+    }
+
+    public function writeMemory32(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
+    {
+        $physical = $linear & $linearMask;
+        $this->writePhysical32($physical, $value);
+        return 0;
+    }
+
+    public function writeMemory64(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
+    {
+        $physical = $linear & $linearMask;
+        $this->writePhysical64($physical, $value);
+        return 0;
+    }
+
+    public function writePhysical16(int $address, int $value): void
+    {
+        $this->writeToMemory($address, $value & 0xFF);
+        $this->writeToMemory($address + 1, ($value >> 8) & 0xFF);
+    }
+
     private function segmentDescriptor(int $selector): ?array
     {
         $ti = ($selector >> 2) & 0x1;
