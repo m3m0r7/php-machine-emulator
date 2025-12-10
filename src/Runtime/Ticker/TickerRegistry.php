@@ -29,10 +29,7 @@ class TickerRegistry implements TickerRegistryInterface
     public function tick(RuntimeInterface $runtime): void
     {
         foreach ($this->tickers as $ticker) {
-            if ($ticker->interval() === 0) {
-                $ticker->tick($runtime);
-                continue;
-            }
+            $ticker->tick($runtime);
         }
     }
 }
