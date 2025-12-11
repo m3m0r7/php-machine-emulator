@@ -7,7 +7,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -24,14 +23,14 @@ class PushImm implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
         $size = $runtime->context()->cpu()->operandSize();
 
         $value = $opcode === 0x68
             ? ($size === 32
-                ? (($reader->short()) | ($reader->short() << 16)) // basic dword read
-                : $reader->short())
-            : $reader->streamReader()->signedByte();
+                ? (($memory->short()) | ($memory->short() << 16)) // basic dword read
+                : $memory->short())
+            : $memory->signedByte();
 
         $runtime
             ->memoryAccessor()

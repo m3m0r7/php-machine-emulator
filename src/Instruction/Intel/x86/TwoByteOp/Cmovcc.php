@@ -9,7 +9,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -34,8 +33,8 @@ class Cmovcc implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
 
         $cc = ($opcode & 0xFF) & 0x0F;
@@ -46,12 +45,12 @@ class Cmovcc implements InstructionInterface
         if (!$this->conditionMet($runtime, $cc)) {
             // Still consume addressing but don't perform move
             if (ModType::from($modrm->mode()) !== ModType::REGISTER_TO_REGISTER) {
-                $this->rmLinearAddress($runtime, $reader, $modrm);
+                $this->rmLinearAddress($runtime, $memory, $modrm);
             }
             return ExecutionStatus::SUCCESS;
         }
 
-        $value = $this->readRm($runtime, $reader, $modrm, $opSize);
+        $value = $this->readRm($runtime, $memory, $modrm, $opSize);
         $this->writeRegisterBySize($runtime, $modrm->registerOrOPCode(), $value, $opSize);
 
         return ExecutionStatus::SUCCESS;

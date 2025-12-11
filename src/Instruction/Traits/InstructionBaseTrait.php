@@ -15,7 +15,6 @@ use PHPMachineEmulator\Instruction\InstructionListInterface;
  */
 trait InstructionBaseTrait
 {
-    use EnhanceStreamReaderTrait;
     use RegisterAccessTrait;
     use SegmentTrait;
     use MemoryAccessTrait;

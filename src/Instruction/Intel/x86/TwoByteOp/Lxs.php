@@ -10,7 +10,6 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -34,8 +33,8 @@ class Lxs implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
 
         $secondByte = $opcode & 0xFF;
@@ -50,7 +49,7 @@ class Lxs implements InstructionInterface
             default => RegisterType::DS,
         };
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modrm);
+        $address = $this->rmLinearAddress($runtime, $memory, $modrm);
 
         $offset = $opSize === 32
             ? $this->readMemory32($runtime, $address)

@@ -9,8 +9,8 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -29,23 +29,23 @@ class Group6 implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
 
         return match ($modrm->registerOrOPCode()) {
-            0b000 => $this->sgdt($runtime, $reader, $modrm),
-            0b001 => $this->sidt($runtime, $reader, $modrm),
-            0b010 => $this->lgdt($runtime, $reader, $modrm),
-            0b011 => $this->lidt($runtime, $reader, $modrm),
-            0b101 => $this->lmsw($runtime, $reader, $modrm),
-            0b111 => $this->invlpg($runtime, $reader, $modrm),
+            0b000 => $this->sgdt($runtime, $memory, $modrm),
+            0b001 => $this->sidt($runtime, $memory, $modrm),
+            0b010 => $this->lgdt($runtime, $memory, $modrm),
+            0b011 => $this->lidt($runtime, $memory, $modrm),
+            0b101 => $this->lmsw($runtime, $memory, $modrm),
+            0b111 => $this->invlpg($runtime, $memory, $modrm),
             default => ExecutionStatus::SUCCESS,
         };
     }
 
-    private function sgdt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function sgdt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $address = $this->rmLinearAddress($runtime, $reader, $modrm);
+        $address = $this->rmLinearAddress($runtime, $memory, $modrm);
         $gdtr = $runtime->context()->cpu()->gdtr();
         $this->writeMemory16($runtime, $address, $gdtr['limit'] ?? 0);
         $base = $gdtr['base'] ?? 0;
@@ -54,9 +54,9 @@ class Group6 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function sidt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function sidt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $address = $this->rmLinearAddress($runtime, $reader, $modrm);
+        $address = $this->rmLinearAddress($runtime, $memory, $modrm);
         $idtr = $runtime->context()->cpu()->idtr();
         $this->writeMemory16($runtime, $address, $idtr['limit'] ?? 0);
         $base = $idtr['base'] ?? 0;
@@ -65,9 +65,9 @@ class Group6 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function lgdt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function lgdt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $address = $this->rmLinearAddress($runtime, $reader, $modrm);
+        $address = $this->rmLinearAddress($runtime, $memory, $modrm);
         $limit = $this->readMemory16($runtime, $address);
         $base = $this->readMemory16($runtime, $address + 2);
         $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
@@ -98,9 +98,9 @@ class Group6 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function lidt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function lidt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $address = $this->rmLinearAddress($runtime, $reader, $modrm);
+        $address = $this->rmLinearAddress($runtime, $memory, $modrm);
         $limit = $this->readMemory16($runtime, $address);
         $base = $this->readMemory16($runtime, $address + 2);
         $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
@@ -108,9 +108,9 @@ class Group6 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function lmsw(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function lmsw(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $value = $this->readRm16($runtime, $reader, $modrm);
+        $value = $this->readRm16($runtime, $memory, $modrm);
         // LMSW only affects lower 4 bits of CR0: PE, MP, EM, TS
         $cr0 = $runtime->memoryAccessor()->readControlRegister(0);
         $cr0 = ($cr0 & 0xFFFFFFF0) | ($value & 0xF);
@@ -125,10 +125,10 @@ class Group6 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function invlpg(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function invlpg(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         // Just consume the memory operand; no TLB modeled
-        $this->rmLinearAddress($runtime, $reader, $modrm);
+        $this->rmLinearAddress($runtime, $memory, $modrm);
         return ExecutionStatus::SUCCESS;
     }
 }

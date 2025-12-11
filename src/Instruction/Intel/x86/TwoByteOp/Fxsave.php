@@ -9,7 +9,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -31,9 +30,9 @@ class Fxsave implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrmByte = $reader->streamReader()->byte();
-        $modrm = $reader->modRegRM($modrmByte);
+        $memory = $runtime->memory();
+        $modrmByte = $memory->byte();
+        $modrm = $memory->modRegRM($modrmByte);
         $mod = ModType::from($modrm->mode());
         $reg = $modrm->registerOrOPCode() & 0x7;
 
@@ -43,7 +42,7 @@ class Fxsave implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modrm);
+        $address = $this->rmLinearAddress($runtime, $memory, $modrm);
 
         if ($reg === 0) { // FXSAVE
             return $this->fxsave($runtime, $address);

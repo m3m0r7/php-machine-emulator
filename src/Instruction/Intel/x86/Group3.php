@@ -10,9 +10,9 @@ use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Util\UInt64;
 
@@ -29,21 +29,20 @@ class Group3 implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $enhancedStreamReader
-            ->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $isByte = $opcode === 0xF6;
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
 
         match ($modRegRM->digit()) {
-            0x0, 0x1 => $this->test($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
-            0x2 => $this->not($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
-            0x3 => $this->neg($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
-            0x4 => $this->mul($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
-            0x5 => $this->imul($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
-            0x6 => $this->div($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
-            0x7 => $this->idiv($runtime, $enhancedStreamReader, $modRegRM, $isByte, $opSize),
+            0x0, 0x1 => $this->test($runtime, $memory, $modRegRM, $isByte, $opSize),
+            0x2 => $this->not($runtime, $memory, $modRegRM, $isByte, $opSize),
+            0x3 => $this->neg($runtime, $memory, $modRegRM, $isByte, $opSize),
+            0x4 => $this->mul($runtime, $memory, $modRegRM, $isByte, $opSize),
+            0x5 => $this->imul($runtime, $memory, $modRegRM, $isByte, $opSize),
+            0x6 => $this->div($runtime, $memory, $modRegRM, $isByte, $opSize),
+            0x7 => $this->idiv($runtime, $memory, $modRegRM, $isByte, $opSize),
             default => throw new ExecutionException(
                 sprintf(
                     'The %s#%d was not implemented yet',
@@ -57,15 +56,15 @@ class Group3 implements InstructionInterface
     }
 
 
-    protected function test(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
+    protected function test(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         $size = $isByte ? 8 : $opSize;
         // x86 encoding order: ModR/M -> displacement -> immediate
         // readRm consumes displacement, so must be called BEFORE reading immediate
-        $value = $this->readRm($runtime, $streamReader, $modRegRM, $size);
+        $value = $this->readRm($runtime, $memory, $modRegRM, $size);
         $immediate = $isByte
-            ? $streamReader->streamReader()->byte()
-            : ($opSize === 32 ? $streamReader->dword() : $streamReader->short());
+            ? $memory->byte()
+            : ($opSize === 32 ? $memory->dword() : $memory->short());
 
         $runtime
             ->memoryAccessor()
@@ -76,7 +75,7 @@ class Group3 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function not(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
+    protected function not(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         $size = $isByte ? 8 : $opSize;
         $mask = $this->maskForSize($size);
@@ -94,7 +93,7 @@ class Group3 implements InstructionInterface
             }
         } else {
             // Calculate address once to avoid consuming displacement bytes twice
-            $address = $this->rmLinearAddress($runtime, $streamReader, $modRegRM);
+            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
             if ($isByte) {
                 $value = $this->readMemory8($runtime, $address);
                 $result = ~$value & $mask;
@@ -114,7 +113,7 @@ class Group3 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function neg(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
+    protected function neg(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         $size = $isByte ? 8 : $opSize;
         $mask = $this->maskForSize($size);
@@ -140,7 +139,7 @@ class Group3 implements InstructionInterface
             }
         } else {
             // Calculate address once to avoid consuming displacement bytes twice
-            $address = $this->rmLinearAddress($runtime, $streamReader, $modRegRM);
+            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
             if ($isByte) {
                 $value = $this->readMemory8($runtime, $address) & $mask;
                 $result = (-$value) & $mask;
@@ -170,10 +169,10 @@ class Group3 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function mul(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
+    protected function mul(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
-            $operand = $this->readRm8($runtime, $streamReader, $modRegRM);
+            $operand = $this->readRm8($runtime, $memory, $modRegRM);
             $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
             $product = $al * $operand;
             $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $product & 0xFFFF);
@@ -182,7 +181,7 @@ class Group3 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $operand = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+        $operand = $this->readRm($runtime, $memory, $modRegRM, $opSize);
         $acc = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
         $ma = $runtime->memoryAccessor();
 
@@ -225,10 +224,10 @@ class Group3 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function imul(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
+    protected function imul(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
-            $operandRaw = $this->readRm8($runtime, $streamReader, $modRegRM);
+            $operandRaw = $this->readRm8($runtime, $memory, $modRegRM);
             $alRaw = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
             $operand = $this->signExtend($operandRaw, 8);
             $al = $this->signExtend($alRaw, 8);
@@ -239,7 +238,7 @@ class Group3 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $operand = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+        $operand = $this->readRm($runtime, $memory, $modRegRM, $opSize);
         $acc = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
 
         $sOperand = $this->signExtend($operand, $opSize);
@@ -262,10 +261,10 @@ class Group3 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function div(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
+    protected function div(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
-            $divider = $this->readRm8($runtime, $streamReader, $modRegRM);
+            $divider = $this->readRm8($runtime, $memory, $modRegRM);
             if ($divider === 0) {
                 throw new FaultException(0x00, 0, 'Divide by zero');
             }
@@ -280,7 +279,7 @@ class Group3 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $divider = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+        $divider = $this->readRm($runtime, $memory, $modRegRM, $opSize);
         if ($divider === 0) {
             throw new FaultException(0x00, 0, 'Divide by zero');
         }
@@ -337,10 +336,10 @@ class Group3 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function idiv(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
+    protected function idiv(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
-            $dividerRaw = $this->readRm8($runtime, $streamReader, $modRegRM);
+            $dividerRaw = $this->readRm8($runtime, $memory, $modRegRM);
             $divider = $this->signExtend($dividerRaw, 8);
             if ($divider === 0) {
                 throw new FaultException(0x00, 0, 'Divide by zero');
@@ -360,7 +359,7 @@ class Group3 implements InstructionInterface
             $runtime->memoryAccessor()->setCarryFlag(false)->setOverflowFlag(false);
             return ExecutionStatus::SUCCESS;
         } else {
-            $dividerRaw = $this->readRm($runtime, $streamReader, $modRegRM, $opSize);
+            $dividerRaw = $this->readRm($runtime, $memory, $modRegRM, $opSize);
             $divider = $this->signExtend($dividerRaw, $opSize);
             if ($divider === 0) {
                 throw new FaultException(0x00, 0, 'Divide by zero');

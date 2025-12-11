@@ -9,7 +9,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -35,8 +34,8 @@ class Xadd implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
         $ma = $runtime->memoryAccessor();
 
         $isByte = ($opcode & 0xFF) === 0xC0 || ($opcode === 0x0FC0);
@@ -44,7 +43,7 @@ class Xadd implements InstructionInterface
         $mask = $opSize === 32 ? 0xFFFFFFFF : (($opSize === 16) ? 0xFFFF : 0xFF);
 
         $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
-        $linearAddr = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+        $linearAddr = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modrm);
 
         if ($isByte) {
             $dest = $isRegister

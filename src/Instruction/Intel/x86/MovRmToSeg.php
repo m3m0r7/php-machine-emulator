@@ -9,7 +9,6 @@ use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class MovRmToSeg implements InstructionInterface
@@ -24,11 +23,11 @@ class MovRmToSeg implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $seg = $this->segmentFromDigit($modRegRM->registerOrOPCode());
-        $value = $this->readRm16($runtime, $reader, $modRegRM);
+        $value = $this->readRm16($runtime, $memory, $modRegRM);
 
         // In protected mode, cache the segment descriptor for Big Real Mode support
         if ($runtime->context()->cpu()->isProtectedMode() && $value !== 0) {

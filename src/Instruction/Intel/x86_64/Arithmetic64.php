@@ -96,8 +96,8 @@ class Arithmetic64 implements InstructionInterface
      */
     private function processRmReg(RuntimeInterface $runtime, string $operation, int $size): ExecutionStatus
     {
-        $reader = $this->enhanceReader($runtime);
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $this->enhanceReader($runtime);
+        $modRegRM = $memory->byteAsModRegRM();
         $cpu = $runtime->context()->cpu();
 
         // Read source from reg field
@@ -108,14 +108,14 @@ class Arithmetic64 implements InstructionInterface
         $src = $this->readReg64($runtime, $regCode, $size);
 
         // Read destination from r/m field
-        $dst = $this->readRm64($runtime, $reader, $modRegRM, $size);
+        $dst = $this->readRm64($runtime, $memory, $modRegRM, $size);
 
         // Perform operation
         $result = $this->performOperation($runtime, $operation, $dst, $src, $size);
 
         // Write result (except for CMP)
         if ($operation !== 'CMP') {
-            $this->writeRm64($runtime, $reader, $modRegRM, $result, $size);
+            $this->writeRm64($runtime, $memory, $modRegRM, $result, $size);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -126,12 +126,12 @@ class Arithmetic64 implements InstructionInterface
      */
     private function processRegRm(RuntimeInterface $runtime, string $operation, int $size): ExecutionStatus
     {
-        $reader = $this->enhanceReader($runtime);
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $this->enhanceReader($runtime);
+        $modRegRM = $memory->byteAsModRegRM();
         $cpu = $runtime->context()->cpu();
 
         // Read source from r/m field
-        $src = $this->readRm64($runtime, $reader, $modRegRM, $size);
+        $src = $this->readRm64($runtime, $memory, $modRegRM, $size);
 
         // Read destination from reg field
         $regCode = $modRegRM->register();
@@ -156,13 +156,13 @@ class Arithmetic64 implements InstructionInterface
      */
     private function processRaxImm(RuntimeInterface $runtime, string $operation, int $size): ExecutionStatus
     {
-        $reader = $this->enhanceReader($runtime);
+        $memory = $this->enhanceReader($runtime);
 
         // Read RAX
         $dst = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($size);
 
         // Read immediate (32-bit, sign-extended for 64-bit)
-        $imm32 = $reader->int32();
+        $imm32 = $memory->int32();
         if ($size === 64) {
             $src = $this->signExtendImm32($imm32);
         } else {

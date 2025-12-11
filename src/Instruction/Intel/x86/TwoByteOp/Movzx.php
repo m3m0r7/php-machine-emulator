@@ -9,7 +9,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -34,16 +33,16 @@ class Movzx implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
 
         // Determine if byte or word source based on opcode
         $isByte = ($opcode & 0xFF) === 0xB6 || ($opcode === 0x0FB6);
 
         $value = $isByte
-            ? $this->readRm8($runtime, $reader, $modrm)
-            : $this->readRm16($runtime, $reader, $modrm);
+            ? $this->readRm8($runtime, $memory, $modrm)
+            : $this->readRm16($runtime, $memory, $modrm);
 
         $destReg = $modrm->registerOrOPCode();
 

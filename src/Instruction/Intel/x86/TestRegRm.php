@@ -7,7 +7,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class TestRegRm implements InstructionInterface
@@ -23,18 +22,18 @@ class TestRegRm implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $isByte = $opcode === 0x84;
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
 
         if ($isByte) {
-            $left = $this->readRm8($runtime, $reader, $modRegRM);
+            $left = $this->readRm8($runtime, $memory, $modRegRM);
             $right = $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
             $result = $left & $right;
         } else {
-            $left = $this->readRm($runtime, $reader, $modRegRM, $opSize);
+            $left = $this->readRm($runtime, $memory, $modRegRM, $opSize);
             $right = $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
             $result = ($left & $right) & ($opSize === 32 ? 0xFFFFFFFF : 0xFFFF);
         }

@@ -8,7 +8,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Jmp implements InstructionInterface
@@ -23,11 +22,11 @@ class Jmp implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
 
         $relOffset = $runtime->context()->cpu()->operandSize() === 32
-            ? $enhancedStreamReader->signedDword()
-            : $enhancedStreamReader->signedShort();
+            ? $memory->signedDword()
+            : $memory->signedShort();
 
         $pos = $runtime
                 ->memory()

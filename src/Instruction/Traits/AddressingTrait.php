@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Traits;
 
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 
 /**
  * Trait for address calculation operations.
@@ -36,19 +36,19 @@ trait AddressingTrait
      *
      * @return array{int, RegisterType} [offset, defaultSegment]
      */
-    protected function effectiveAddressInfo(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): array
+    protected function effectiveAddressInfo(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): array
     {
         $addrSize = $runtime->context()->cpu()->addressSize();
 
         if ($addrSize === 64) {
-            return $this->effectiveAddressAndSegment64($runtime, $reader, $modRegRM);
+            return $this->effectiveAddressAndSegment64($runtime, $memory, $modRegRM);
         }
 
         if ($addrSize === 32) {
-            return $this->effectiveAddressAndSegment32($runtime, $reader, $modRegRM);
+            return $this->effectiveAddressAndSegment32($runtime, $memory, $modRegRM);
         }
 
-        $offset = $this->effectiveAddress16($runtime, $reader, $modRegRM);
+        $offset = $this->effectiveAddress16($runtime, $memory, $modRegRM);
         $seg = $this->defaultSegmentFor16($modRegRM);
 
         return [$offset, $seg];
@@ -57,9 +57,9 @@ trait AddressingTrait
     /**
      * Calculate linear address from ModR/M.
      */
-    protected function rmLinearAddress(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, RegisterType|null $segmentOverride = null): int
+    protected function rmLinearAddress(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, RegisterType|null $segmentOverride = null): int
     {
-        [$offset, $defaultSegment] = $this->effectiveAddressInfo($runtime, $reader, $modRegRM);
+        [$offset, $defaultSegment] = $this->effectiveAddressInfo($runtime, $memory, $modRegRM);
         $cpuOverride = $runtime->context()->cpu()->segmentOverride();
         $segment = $segmentOverride ?? $cpuOverride ?? $defaultSegment;
 
@@ -71,16 +71,16 @@ trait AddressingTrait
     /**
      * Resolve 16-bit effective address for the given ModR/M.
      */
-    protected function effectiveAddress16(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): int
+    protected function effectiveAddress16(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
     {
         $mode = ModType::from($modRegRM->mode());
         $rm = $modRegRM->registerOrMemoryAddress();
         $disp = 0;
 
         if ($mode === ModType::SIGNED_8BITS_DISPLACEMENT) {
-            $disp = $reader->streamReader()->signedByte();
+            $disp = $memory->signedByte();
         } elseif ($mode === ModType::SIGNED_16BITS_DISPLACEMENT) {
-            $disp = $reader->signedShort();
+            $disp = $memory->signedShort();
         }
 
         $val = static function (RuntimeInterface $runtime, RegisterType $reg): int {
@@ -95,7 +95,7 @@ trait AddressingTrait
             0b100 => $val($runtime, RegisterType::ESI),
             0b101 => $val($runtime, RegisterType::EDI),
             0b110 => $mode === ModType::NO_DISPLACEMENT_OR_16BITS_DISPLACEMENT
-                ? $reader->short() // direct address
+                ? $memory->short() // direct address
                 : $val($runtime, RegisterType::EBP),
             0b111 => $val($runtime, RegisterType::EBX),
         };
@@ -108,7 +108,7 @@ trait AddressingTrait
      *
      * @return array{int, RegisterType} [offset, segment]
      */
-    protected function effectiveAddressAndSegment32(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): array
+    protected function effectiveAddressAndSegment32(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): array
     {
         $mode = ModType::from($modRegRM->mode());
         $rm = $modRegRM->registerOrMemoryAddress();
@@ -135,19 +135,19 @@ trait AddressingTrait
         // x86 encoding order: ModR/M -> SIB (if present) -> Displacement
         // SIB byte must be read BEFORE displacement when rm=4
         if ($rm === 0b100) {
-            $sib = $reader->byteAsSIB();
+            $sib = $memory->byteAsSIB();
             $scale = 1 << $sib->scale();
             $indexVal = $sib->index() === 0b100 ? 0 : $regVal($runtime, $sib->index());
 
             // Now read displacement after SIB
             if ($mode === ModType::SIGNED_8BITS_DISPLACEMENT) {
-                $disp = $reader->streamReader()->signedByte();
+                $disp = $memory->signedByte();
             } elseif ($mode === ModType::SIGNED_16BITS_DISPLACEMENT) {
-                $disp = $reader->signedDword();
+                $disp = $memory->signedDword();
             }
 
             if ($sib->base() === 0b101 && $mode === ModType::NO_DISPLACEMENT_OR_16BITS_DISPLACEMENT) {
-                $disp = $reader->signedDword();
+                $disp = $memory->signedDword();
             } else {
                 $baseVal = $regVal($runtime, $sib->base());
                 $defaultSegment = in_array($sib->base(), [0b100, 0b101], true) ? RegisterType::SS : RegisterType::DS;
@@ -155,13 +155,13 @@ trait AddressingTrait
         } else {
             // No SIB, read displacement directly
             if ($mode === ModType::SIGNED_8BITS_DISPLACEMENT) {
-                $disp = $reader->streamReader()->signedByte();
+                $disp = $memory->signedByte();
             } elseif ($mode === ModType::SIGNED_16BITS_DISPLACEMENT) {
-                $disp = $reader->signedDword();
+                $disp = $memory->signedDword();
             }
 
             if ($mode === ModType::NO_DISPLACEMENT_OR_16BITS_DISPLACEMENT && $rm === 0b101) {
-                $disp = $reader->signedDword();
+                $disp = $memory->signedDword();
             } else {
                 $baseVal = $regVal($runtime, $rm);
                 $defaultSegment = in_array($rm, [0b100, 0b101], true) ? RegisterType::SS : RegisterType::DS;
@@ -192,7 +192,7 @@ trait AddressingTrait
      *
      * @return array{int, RegisterType} [offset, segment]
      */
-    protected function effectiveAddressAndSegment64(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): array
+    protected function effectiveAddressAndSegment64(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): array
     {
         $mode = ModType::from($modRegRM->mode());
         $rm = $modRegRM->registerOrMemoryAddress();
@@ -234,7 +234,7 @@ trait AddressingTrait
 
         if ($rm === 0b100) {
             // SIB byte present
-            $sib = $reader->byteAsSIB();
+            $sib = $memory->byteAsSIB();
             $scale = 1 << $sib->scale();
 
             $baseCode = $rexB ? ($sib->base() | 0b1000) : $sib->base();
@@ -245,14 +245,14 @@ trait AddressingTrait
 
             // Read displacement after SIB
             if ($mode === ModType::SIGNED_8BITS_DISPLACEMENT) {
-                $disp = $reader->streamReader()->signedByte();
+                $disp = $memory->signedByte();
             } elseif ($mode === ModType::SIGNED_16BITS_DISPLACEMENT) {
-                $disp = $reader->signedDword();
+                $disp = $memory->signedDword();
             }
 
             // Base = 5 (RBP/R13) with mod=00 means disp32 only (no base)
             if ($sib->base() === 0b101 && $mode === ModType::NO_DISPLACEMENT_OR_16BITS_DISPLACEMENT) {
-                $disp = $reader->signedDword();
+                $disp = $memory->signedDword();
             } else {
                 $baseVal = $regVal64($runtime, $sib->base(), $rexB);
                 // RSP/R12 or RBP/R13 use SS segment by default
@@ -261,16 +261,16 @@ trait AddressingTrait
         } else {
             // No SIB
             if ($mode === ModType::SIGNED_8BITS_DISPLACEMENT) {
-                $disp = $reader->streamReader()->signedByte();
+                $disp = $memory->signedByte();
             } elseif ($mode === ModType::SIGNED_16BITS_DISPLACEMENT) {
-                $disp = $reader->signedDword();
+                $disp = $memory->signedDword();
             }
 
             // mod=00, rm=5 in 64-bit mode is RIP-relative addressing
             if ($mode === ModType::NO_DISPLACEMENT_OR_16BITS_DISPLACEMENT && $rm === 0b101) {
-                $disp = $reader->signedDword();
+                $disp = $memory->signedDword();
                 // RIP-relative: address = RIP + disp32
-                $rip = $runtime->memory()->offset();
+                $rip = $memory->offset();
                 $offset = ($rip + $disp) & 0xFFFFFFFFFFFFFFFF;
                 return [$offset, RegisterType::DS];
             } else {

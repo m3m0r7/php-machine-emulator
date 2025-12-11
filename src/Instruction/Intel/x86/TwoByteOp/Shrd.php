@@ -10,7 +10,6 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -36,19 +35,19 @@ class Shrd implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
         $isImm = ($opcode & 0xFF) === 0xAC || ($opcode === 0x0FAC);
 
         $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
-        $linearAddr = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+        $linearAddr = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modrm);
 
         // Read count after displacement is consumed
         $count = $isImm
-            ? ($reader->streamReader()->byte() & 0x1F)
+            ? ($memory->byte() & 0x1F)
             : ($runtime->memoryAccessor()->fetch(RegisterType::ECX)->asLowBit() & 0x1F);
 
         if ($count === 0) {

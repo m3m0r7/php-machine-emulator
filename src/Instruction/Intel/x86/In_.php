@@ -8,7 +8,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class In_ implements InstructionInterface
@@ -24,12 +23,12 @@ class In_ implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $enhanced = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
         $isByte = ($opcode === 0xE4 || $opcode === 0xEC);
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
 
         $port = match ($opcode) {
-            0xE4, 0xE5 => $enhanced->streamReader()->byte(),
+            0xE4, 0xE5 => $memory->byte(),
             0xEC, 0xED => $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asByte() & 0xFFFF,
         };
 

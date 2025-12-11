@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Stream;
 
+use PHPMachineEmulator\Instruction\Stream\ModRegRM;
+use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Instruction\Stream\SIB;
+use PHPMachineEmulator\Instruction\Stream\SIBInterface;
+
 /**
  * Unified memory stream with hybrid storage.
  *
@@ -336,6 +341,12 @@ class MemoryStream implements MemoryStreamInterface
         return $low | ($high << 8);
     }
 
+    public function signedShort(): int
+    {
+        $value = $this->short();
+        return $value >= 0x8000 ? $value - 0x10000 : $value;
+    }
+
     public function dword(): int
     {
         $b0 = $this->byte();
@@ -343,6 +354,27 @@ class MemoryStream implements MemoryStreamInterface
         $b2 = $this->byte();
         $b3 = $this->byte();
         return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+    }
+
+    public function signedDword(): int
+    {
+        $value = $this->dword();
+        return $value >= 0x80000000 ? $value - 0x100000000 : $value;
+    }
+
+    public function byteAsSIB(): SIBInterface
+    {
+        return SIB::fromByte($this->byte());
+    }
+
+    public function byteAsModRegRM(): ModRegRMInterface
+    {
+        return ModRegRM::fromByte($this->byte());
+    }
+
+    public function modRegRM(int $byte): ModRegRMInterface
+    {
+        return ModRegRM::fromByte($byte);
     }
 
     public function read(int $length): string

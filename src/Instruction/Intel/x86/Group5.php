@@ -18,8 +18,8 @@ use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Timer;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\TimeOfDay;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Video;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -35,23 +35,23 @@ class Group5 implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         return match ($modRegRM->digit()) {
-            0x0 => $this->inc($runtime, $reader, $modRegRM),
-            0x1 => $this->dec($runtime, $reader, $modRegRM),
-            0x2 => $this->callNearRm($runtime, $reader, $modRegRM),
-            0x3 => $this->callFarRm($runtime, $reader, $modRegRM),
-            0x4 => $this->jmpNearRm($runtime, $reader, $modRegRM),
-            0x5 => $this->jmpFarRm($runtime, $reader, $modRegRM),
-            0x6 => $this->push($runtime, $reader, $modRegRM),
-            0x7 => $this->handleDigit7($runtime, $reader, $modRegRM),
+            0x0 => $this->inc($runtime, $memory, $modRegRM),
+            0x1 => $this->dec($runtime, $memory, $modRegRM),
+            0x2 => $this->callNearRm($runtime, $memory, $modRegRM),
+            0x3 => $this->callFarRm($runtime, $memory, $modRegRM),
+            0x4 => $this->jmpNearRm($runtime, $memory, $modRegRM),
+            0x5 => $this->jmpFarRm($runtime, $memory, $modRegRM),
+            0x6 => $this->push($runtime, $memory, $modRegRM),
+            0x7 => $this->handleDigit7($runtime, $memory, $modRegRM),
             default => $this->handleUnimplementedDigit($runtime, $modRegRM),
         };
     }
 
-    protected function inc(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function inc(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
@@ -64,7 +64,7 @@ class Group5 implements InstructionInterface
             $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
         } else {
             // Calculate address once to avoid consuming displacement bytes twice
-            $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
             $value = $size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address);
             $result = ($value + 1) & $mask;
             if ($size === 32) {
@@ -86,7 +86,7 @@ class Group5 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function dec(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function dec(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
@@ -99,7 +99,7 @@ class Group5 implements InstructionInterface
             $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
         } else {
             // Calculate address once to avoid consuming displacement bytes twice
-            $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
             $value = $size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address);
             $result = ($value - 1) & $mask;
             if ($size === 32) {
@@ -121,11 +121,11 @@ class Group5 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function callNearRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function callNearRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
 
-        $target = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $target = $this->readRm($runtime, $memory, $modRegRM, $size);
         $pos = $runtime->memory()->offset();
 
         // Check for NULL pointer call
@@ -145,10 +145,10 @@ class Group5 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function jmpNearRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function jmpNearRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
-        $target = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $target = $this->readRm($runtime, $memory, $modRegRM, $size);
 
         $runtime->option()->logger()->debug(sprintf(
             'JMP [r/m] (Group5): target=0x%08X mode=%d rm=%d',
@@ -172,9 +172,9 @@ class Group5 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function callFarRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function callFarRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $addr = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $addr = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         $opSize = $runtime->context()->cpu()->operandSize();
         $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
         $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
@@ -224,9 +224,9 @@ class Group5 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function jmpFarRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function jmpFarRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $addr = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $addr = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         $opSize = $runtime->context()->cpu()->operandSize();
         $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
         $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
@@ -304,15 +304,15 @@ class Group5 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function push(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function push(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
-        $value = $this->readRm($runtime, $reader, $modRegRM, $size);
+        $value = $this->readRm($runtime, $memory, $modRegRM, $size);
         $runtime->memoryAccessor()->push(RegisterType::ESP, $value, $size);
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function handleDigit7(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function handleDigit7(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         // Intel spec: digit 7 of 0xFF is undefined
         // Some assemblers may encode it as a long-form PUSH
@@ -324,7 +324,7 @@ class Group5 implements InstructionInterface
 
         // Consume any displacement bytes
         if (ModType::from($modRegRM->mode()) !== ModType::REGISTER_TO_REGISTER) {
-            $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $this->rmLinearAddress($runtime, $memory, $modRegRM);
         }
 
         // Skip the immediate/memory operand - just continue execution

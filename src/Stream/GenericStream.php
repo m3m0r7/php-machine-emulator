@@ -37,6 +37,12 @@ trait GenericStream
         return unpack('v', $data)[1]; // Little-endian unsigned short
     }
 
+    public function signedShort(): int
+    {
+        $value = $this->short();
+        return $value >= 0x8000 ? $value - 0x10000 : $value;
+    }
+
     public function dword(): int
     {
         $data = fread($this->resource, 4);
@@ -44,6 +50,12 @@ trait GenericStream
             throw new StreamReaderException('Cannot read from stream or reached EOF');
         }
         return unpack('V', $data)[1]; // Little-endian unsigned long
+    }
+
+    public function signedDword(): int
+    {
+        $value = $this->dword();
+        return $value >= 0x80000000 ? $value - 0x100000000 : $value;
     }
 
     public function qword(): int

@@ -8,7 +8,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -39,13 +38,13 @@ class Xchg implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         if ($opcode === 0x86) {
             // For XCHG r8, r/m8: must calculate address ONCE to avoid consuming displacement twice
             $isRegister8 = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-            $linearAddress8 = $isRegister8 ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $linearAddress8 = $isRegister8 ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
 
             // Read values
             if ($isRegister8) {
@@ -70,7 +69,7 @@ class Xchg implements InstructionInterface
         // Important: We need to read the address ONCE and reuse it, otherwise displacement bytes
         // will be consumed twice (once for read, once for write).
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $linearAddress = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $linearAddress = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
 
         // Read values
         if ($isRegister) {

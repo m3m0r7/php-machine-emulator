@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Stream;
 
 use FFI;
+use PHPMachineEmulator\Instruction\Stream\ModRegRM;
+use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Instruction\Stream\SIB;
+use PHPMachineEmulator\Instruction\Stream\SIBInterface;
 
 /**
  * Rust-backed high-performance memory stream implementation.
@@ -184,6 +188,21 @@ C;
         return self::$ffi->memory_stream_swap_size($this->handle);
     }
 
+    public function byteAsSIB(): SIBInterface
+    {
+        return SIB::fromByte($this->byte());
+    }
+
+    public function byteAsModRegRM(): ModRegRMInterface
+    {
+        return ModRegRM::fromByte($this->byte());
+    }
+
+    public function modRegRM(int $byte): ModRegRMInterface
+    {
+        return ModRegRM::fromByte($byte);
+    }
+
     // ========================================
     // StreamReaderInterface implementation
     // ========================================
@@ -229,9 +248,21 @@ C;
         return self::$ffi->memory_stream_short($this->handle);
     }
 
+    public function signedShort(): int
+    {
+        $value = $this->short();
+        return $value >= 0x8000 ? $value - 0x10000 : $value;
+    }
+
     public function dword(): int
     {
         return self::$ffi->memory_stream_dword($this->handle);
+    }
+
+    public function signedDword(): int
+    {
+        $value = $this->dword();
+        return $value >= 0x80000000 ? $value - 0x100000000 : $value;
     }
 
     public function qword(): int

@@ -9,7 +9,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -34,8 +33,8 @@ class Setcc implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
 
         $cc = ($opcode & 0xFF) & 0x0F;
         if ($opcode > 0xFF) {
@@ -47,7 +46,7 @@ class Setcc implements InstructionInterface
         if (ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER) {
             $this->write8BitRegister($runtime, $modrm->registerOrMemoryAddress(), $val);
         } else {
-            $addr = $this->rmLinearAddress($runtime, $reader, $modrm);
+            $addr = $this->rmLinearAddress($runtime, $memory, $modrm);
             $this->writeMemory8($runtime, $addr, $val);
         }
 

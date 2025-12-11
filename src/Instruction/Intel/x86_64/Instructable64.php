@@ -6,10 +6,10 @@ namespace PHPMachineEmulator\Instruction\Intel\x86_64;
 
 use PHPMachineEmulator\Instruction\Traits\InstructionBaseTrait;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Util\UInt64;
 
 /**
@@ -124,18 +124,18 @@ trait Instructable64
     /**
      * Get effective address info with 64-bit support.
      */
-    protected function effectiveAddressInfo(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): array
+    protected function effectiveAddressInfo(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): array
     {
         $cpu = $runtime->context()->cpu();
 
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             $addrSize = $cpu->addressSize();
             if ($addrSize === 64) {
-                return $this->effectiveAddressAndSegment64($runtime, $reader, $modRegRM);
+                return $this->effectiveAddressAndSegment64($runtime, $memory, $modRegRM);
             }
         }
 
-        return $this->baseEffectiveAddressInfo($runtime, $reader, $modRegRM);
+        return $this->baseEffectiveAddressInfo($runtime, $memory, $modRegRM);
     }
 
     /**
@@ -215,7 +215,7 @@ trait Instructable64
     /**
      * Read R/M operand with REX.B extension for register mode.
      */
-    protected function readRm64(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): int
+    protected function readRm64(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): int
     {
         $cpu = $runtime->context()->cpu();
 
@@ -234,7 +234,7 @@ trait Instructable64
         }
 
         // Memory operand
-        $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         return match ($size) {
             8 => $this->readMemory8($runtime, $address),
             16 => $this->readMemory16($runtime, $address),
@@ -247,7 +247,7 @@ trait Instructable64
     /**
      * Write R/M operand with REX.B extension for register mode.
      */
-    protected function writeRm64(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $value, int $size): void
+    protected function writeRm64(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value, int $size): void
     {
         $cpu = $runtime->context()->cpu();
 
@@ -275,7 +275,7 @@ trait Instructable64
         }
 
         // Memory operand
-        $linearAddress = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         match ($size) {
             8 => $this->writeMemory8($runtime, $linearAddress, $value),
             16 => $this->writeMemory16($runtime, $linearAddress, $value),
@@ -288,7 +288,7 @@ trait Instructable64
     /**
      * Calculate effective address with 64-bit addressing (including RIP-relative).
      */
-    protected function effectiveAddressAndSegment64(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): array
+    protected function effectiveAddressAndSegment64(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): array
     {
         $cpu = $runtime->context()->cpu();
         $mod = $modRegRM->mode();
@@ -311,13 +311,13 @@ trait Instructable64
         $needsSib = ($rm & 0b111) === 0b100;
 
         if ($needsSib) {
-            return $this->decodeSib64($runtime, $reader, $mod);
+            return $this->decodeSib64($runtime, $memory, $mod);
         }
 
         // Check for RIP-relative addressing (mod == 00, rm == 5)
         if ($mod === 0b00 && ($rm & 0b111) === 0b101) {
             // RIP-relative addressing in 64-bit mode
-            $disp32 = $reader->int32();
+            $disp32 = $memory->signedDword();
             $rip = UInt64::of($runtime->memory()->offset());
             $address = $rip->add($this->signExtend32to64($disp32));
             return [$address->toInt(), $segment];
@@ -330,8 +330,8 @@ trait Instructable64
         // Add displacement based on mod
         $displacement = match ($mod) {
             0b00 => UInt64::zero(),
-            0b01 => $this->signExtend8to64($reader->byte()),
-            0b10 => $this->signExtend32to64($reader->int32()),
+            0b01 => $this->signExtend8to64($memory->byte()),
+            0b10 => $this->signExtend32to64($memory->signedDword()),
             default => UInt64::zero(),
         };
 
@@ -342,10 +342,10 @@ trait Instructable64
     /**
      * Decode SIB byte for 64-bit addressing.
      */
-    private function decodeSib64(RuntimeInterface $runtime, EnhanceStreamReader $reader, int $mod): array
+    private function decodeSib64(RuntimeInterface $runtime, MemoryStreamInterface $memory, int $mod): array
     {
         $cpu = $runtime->context()->cpu();
-        $sib = $reader->byte();
+        $sib = $memory->byte();
 
         $scale = ($sib >> 6) & 0b11;
         $index = ($sib >> 3) & 0b111;
@@ -365,15 +365,15 @@ trait Instructable64
         $baseValue = UInt64::zero();
         if ($mod === 0b00 && ($base & 0b111) === 0b101) {
             // No base register, disp32 follows
-            $baseValue = $this->signExtend32to64($reader->int32());
+            $baseValue = $this->signExtend32to64($memory->signedDword());
         } else {
             $baseRegType = $this->getRegisterType64($base);
             $baseValue = UInt64::of($runtime->memoryAccessor()->fetch($baseRegType)->asBytesBySize(64));
 
             // Add displacement
             $displacement = match ($mod) {
-                0b01 => $this->signExtend8to64($reader->byte()),
-                0b10 => $this->signExtend32to64($reader->int32()),
+                0b01 => $this->signExtend8to64($memory->byte()),
+                0b10 => $this->signExtend32to64($memory->signedDword()),
                 default => UInt64::zero(),
             };
             $baseValue = $baseValue->add($displacement);

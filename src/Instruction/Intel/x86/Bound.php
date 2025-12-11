@@ -7,7 +7,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Exception\FaultException;
 
@@ -23,15 +22,15 @@ class Bound implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRM = $memory->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
 
         // Get register value to check
         $regValue = $this->readRegisterBySize($runtime, $modRM->source(), $opSize);
 
         // Get memory address of bounds array
-        $address = $this->rmLinearAddress($runtime, $reader, $modRM);
+        $address = $this->rmLinearAddress($runtime, $memory, $modRM);
 
         // Read lower and upper bounds from memory
         if ($opSize === 32) {

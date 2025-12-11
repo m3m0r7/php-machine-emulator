@@ -9,8 +9,8 @@ use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -33,18 +33,18 @@ class FpuStub implements InstructionInterface
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
         $this->assertFpuAvailable($runtime);
-        $reader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
 
         return match ($opcode) {
             0x9B => ExecutionStatus::SUCCESS, // FWAIT
-            0xD8 => $this->handleGenericFpu($runtime, $reader), // FADD/FMUL/FCOM/etc.
-            0xD9 => $this->handleD9($runtime, $reader),
-            0xDA => $this->handleGenericFpu($runtime, $reader), // FIADD/FIMUL/etc.
-            0xDB => $this->handleDB($runtime, $reader),
-            0xDC => $this->handleGenericFpu($runtime, $reader), // FADD/FMUL/etc. (double)
-            0xDD => $this->handleDD($runtime, $reader),
-            0xDE => $this->handleGenericFpu($runtime, $reader), // FIADD/FIMUL/etc. (word)
-            0xDF => $this->handleDF($runtime, $reader),
+            0xD8 => $this->handleGenericFpu($runtime, $memory), // FADD/FMUL/FCOM/etc.
+            0xD9 => $this->handleD9($runtime, $memory),
+            0xDA => $this->handleGenericFpu($runtime, $memory), // FIADD/FIMUL/etc.
+            0xDB => $this->handleDB($runtime, $memory),
+            0xDC => $this->handleGenericFpu($runtime, $memory), // FADD/FMUL/etc. (double)
+            0xDD => $this->handleDD($runtime, $memory),
+            0xDE => $this->handleGenericFpu($runtime, $memory), // FIADD/FIMUL/etc. (word)
+            0xDF => $this->handleDF($runtime, $memory),
             default => ExecutionStatus::SUCCESS,
         };
     }
@@ -53,9 +53,9 @@ class FpuStub implements InstructionInterface
      * Handle generic FPU opcodes (0xD8, 0xDA, 0xDC, 0xDE) by consuming the ModR/M byte
      * and any displacement bytes, then returning SUCCESS.
      */
-    private function handleGenericFpu(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
+    private function handleGenericFpu(RuntimeInterface $runtime, MemoryStreamInterface $memory): ExecutionStatus
     {
-        $next = $reader->streamReader()->byte();
+        $next = $memory->byte();
         $mod = ($next >> 6) & 0x3;
         $rm = $next & 0x7;
 
@@ -65,14 +65,14 @@ class FpuStub implements InstructionInterface
         }
 
         // Memory operand form - consume displacement bytes
-        $this->consumeRmBytes($reader, $mod, $rm);
+        $this->consumeRmBytes($memory, $mod, $rm);
 
         return ExecutionStatus::SUCCESS;
     }
 
-    private function handleD9(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
+    private function handleD9(RuntimeInterface $runtime, MemoryStreamInterface $memory): ExecutionStatus
     {
-        $next = $reader->streamReader()->byte();
+        $next = $memory->byte();
         $mod = ($next >> 6) & 0x3;
         $reg = ($next >> 3) & 0x7;
         $rm = $next & 0x7;
@@ -83,22 +83,22 @@ class FpuStub implements InstructionInterface
 
         if ($reg === 5) {
             // FLDCW m2byte
-            $addr = $this->rmLinearAddressFromModrm($runtime, $reader, $next);
+            $addr = $this->rmLinearAddressFromModrm($runtime, $memory, $next);
             $this->readMemory16($runtime, $addr); // consume
         } elseif ($reg === 7) {
             // FNSTCW m2byte
-            $addr = $this->rmLinearAddressFromModrm($runtime, $reader, $next);
+            $addr = $this->rmLinearAddressFromModrm($runtime, $memory, $next);
             $this->writeMemory16($runtime, $addr, 0x037F); // default control word
         } else {
-            $this->consumeRmBytes($reader, $mod, $rm);
+            $this->consumeRmBytes($memory, $mod, $rm);
         }
 
         return ExecutionStatus::SUCCESS;
     }
 
-    private function handleDB(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
+    private function handleDB(RuntimeInterface $runtime, MemoryStreamInterface $memory): ExecutionStatus
     {
-        $next = $reader->streamReader()->byte();
+        $next = $memory->byte();
         if ($next === 0xE3) {
             // FNINIT
             $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asByte());
@@ -107,13 +107,13 @@ class FpuStub implements InstructionInterface
 
         $mod = ($next >> 6) & 0x3;
         $rm = $next & 0x7;
-        $this->consumeRmBytes($reader, $mod, $rm);
+        $this->consumeRmBytes($memory, $mod, $rm);
         return ExecutionStatus::SUCCESS;
     }
 
-    private function handleDD(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
+    private function handleDD(RuntimeInterface $runtime, MemoryStreamInterface $memory): ExecutionStatus
     {
-        $next = $reader->streamReader()->byte();
+        $next = $memory->byte();
         $mod = ($next >> 6) & 0x3;
         $reg = ($next >> 3) & 0x7;
         $rm = $next & 0x7;
@@ -122,7 +122,7 @@ class FpuStub implements InstructionInterface
             return ExecutionStatus::SUCCESS; // ignore register forms
         }
 
-        $addr = $this->rmLinearAddressFromModrm($runtime, $reader, $next);
+        $addr = $this->rmLinearAddressFromModrm($runtime, $memory, $next);
         $saveSize = $runtime->context()->cpu()->operandSize() === 32 ? 108 : 94;
 
         if ($reg === 6) { // FNSAVE m94/108byte
@@ -135,15 +135,15 @@ class FpuStub implements InstructionInterface
                 $this->readMemory8($runtime, ($addr + $i) & 0xFFFFFFFF);
             }
         } else {
-            $this->consumeRmBytes($reader, $mod, $rm);
+            $this->consumeRmBytes($memory, $mod, $rm);
         }
 
         return ExecutionStatus::SUCCESS;
     }
 
-    private function handleDF(RuntimeInterface $runtime, EnhanceStreamReader $reader): ExecutionStatus
+    private function handleDF(RuntimeInterface $runtime, MemoryStreamInterface $memory): ExecutionStatus
     {
-        $next = $reader->streamReader()->byte();
+        $next = $memory->byte();
         if ($next === 0xE0) {
             // FNSTSW AX
             $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, 0);
@@ -156,28 +156,28 @@ class FpuStub implements InstructionInterface
 
         if ($mod !== 0b11 && $reg === 4) {
             // FNSTSW m2byte
-            $addr = $this->rmLinearAddressFromModrm($runtime, $reader, $next);
+            $addr = $this->rmLinearAddressFromModrm($runtime, $memory, $next);
             $this->writeMemory16($runtime, $addr, 0);
             return ExecutionStatus::SUCCESS;
         }
 
-        $this->consumeRmBytes($reader, $mod, $rm);
+        $this->consumeRmBytes($memory, $mod, $rm);
         return ExecutionStatus::SUCCESS;
     }
 
-    private function rmLinearAddressFromModrm(RuntimeInterface $runtime, EnhanceStreamReader $reader, int $modrmByte): int
+    private function rmLinearAddressFromModrm(RuntimeInterface $runtime, MemoryStreamInterface $memory, int $modrmByte): int
     {
-        $modrm = $reader->modRegRM($modrmByte);
-        return $this->rmLinearAddress($runtime, $reader, $modrm);
+        $modrm = $memory->modRegRM($modrmByte);
+        return $this->rmLinearAddress($runtime, $memory, $modrm);
     }
 
-    private function consumeRmBytes(EnhanceStreamReader $reader, int $mod, int $rm): void
+    private function consumeRmBytes(MemoryStreamInterface $memory, int $mod, int $rm): void
     {
         // Best-effort discard of displacement.
         if ($mod === 0b01) {
-            $reader->streamReader()->byte();
+            $memory->byte();
         } elseif ($mod === 0b10 || ($mod === 0b00 && $rm === 0b110)) {
-            $reader->short();
+            $memory->short();
         }
     }
 

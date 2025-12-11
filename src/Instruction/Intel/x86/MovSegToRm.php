@@ -9,7 +9,6 @@ use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -25,8 +24,8 @@ class MovSegToRm implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $seg = $this->segmentFromDigit($modRegRM->registerOrOPCode());
         $value = $runtime->memoryAccessor()->fetch($seg)->asByte();
@@ -34,7 +33,7 @@ class MovSegToRm implements InstructionInterface
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $runtime->memoryAccessor()->write16Bit($modRegRM->registerOrMemoryAddress(), $value);
         } else {
-            $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
             $runtime->memoryAccessor()->allocate($address, safe: false);
             $runtime->memoryAccessor()->write16Bit($address, $value);
         }

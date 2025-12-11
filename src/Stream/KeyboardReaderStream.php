@@ -91,7 +91,27 @@ class KeyboardReaderStream implements StreamReaderInterface
         );
     }
 
+    public function signedShort(): int
+    {
+        throw new KeyboardException(
+            sprintf(
+                'The keyboard reader is not supported %s',
+                __FUNCTION__,
+            ),
+        );
+    }
+
     public function dword(): int
+    {
+        throw new KeyboardException(
+            sprintf(
+                'The keyboard reader is not supported %s',
+                __FUNCTION__,
+            ),
+        );
+    }
+
+    public function signedDword(): int
     {
         throw new KeyboardException(
             sprintf(

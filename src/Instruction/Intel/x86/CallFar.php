@@ -7,7 +7,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -23,10 +22,10 @@ class CallFar implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
         $size = $runtime->context()->cpu()->operandSize();
-        $offset = $size === 32 ? $reader->dword() : $reader->short();
-        $segment = $reader->short();
+        $offset = $size === 32 ? $memory->dword() : $memory->short();
+        $segment = $memory->short();
 
         $pos = $runtime->memory()->offset();
 

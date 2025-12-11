@@ -9,7 +9,6 @@ use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -32,15 +31,15 @@ class Lds implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException('LDS/LES does not support register-direct addressing');
         }
 
         // Get the memory address
-        [$address] = $this->effectiveAddressInfo($runtime, $reader, $modRegRM);
+        [$address] = $this->effectiveAddressInfo($runtime, $memory, $modRegRM);
 
         $size = $runtime->context()->cpu()->operandSize();
         $ma = $runtime->memoryAccessor();

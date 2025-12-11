@@ -7,7 +7,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -23,12 +22,12 @@ class Call implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
 
         $opSize = $runtime->context()->cpu()->operandSize();
         $offset = $opSize === 32
-            ? $enhancedStreamReader->signedDword()
-            : $enhancedStreamReader->signedShort();
+            ? $memory->signedDword()
+            : $memory->signedShort();
 
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 

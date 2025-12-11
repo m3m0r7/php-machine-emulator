@@ -8,8 +8,8 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -27,32 +27,32 @@ class Group1 implements InstructionInterface
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
         $ip = $runtime->memory()->offset();
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $enhancedStreamReader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $size = $runtime->context()->cpu()->operandSize();
         $isReg = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
 
         // For memory operands, consume displacement BEFORE reading immediate
         // x86 encoding order: opcode, modrm, displacement, immediate
-        $linearAddr = !$isReg ? $this->rmLinearAddress($runtime, $enhancedStreamReader, $modRegRM) : 0;
+        $linearAddr = !$isReg ? $this->rmLinearAddress($runtime, $memory, $modRegRM) : 0;
 
         // NOW read the immediate value (after displacement has been consumed)
         $operand = $this->isSignExtendedWordOperation($opcode)
-            ? $enhancedStreamReader->streamReader()->signedByte()
+            ? $memory->signedByte()
             : ($this->isByteOperation($opcode)
-                ? $enhancedStreamReader->streamReader()->byte()
-                : ($size === 32 ? $enhancedStreamReader->dword() : $enhancedStreamReader->short()));
+                ? $memory->byte()
+                : ($size === 32 ? $memory->dword() : $memory->short()));
 
         match ($modRegRM->digit()) {
-            0x0 => $this->add($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x1 => $this->or($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x2 => $this->adc($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x3 => $this->sbb($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x4 => $this->and($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x5 => $this->sub($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x6 => $this->xor($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x7 => $this->cmp($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x0 => $this->add($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x1 => $this->or($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x2 => $this->adc($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x3 => $this->sbb($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x4 => $this->and($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x5 => $this->sub($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x6 => $this->xor($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x7 => $this->cmp($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
         };
 
         return ExecutionStatus::SUCCESS;
@@ -68,7 +68,7 @@ class Group1 implements InstructionInterface
         return $opcode === 0x83;
     }
 
-    protected function add(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function add(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $original = $isReg
@@ -134,7 +134,7 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function or(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function or(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $original = $isReg
@@ -179,7 +179,7 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function adc(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function adc(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
@@ -245,7 +245,7 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function sbb(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function sbb(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         $borrow = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
@@ -312,7 +312,7 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function and(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function and(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
@@ -357,7 +357,7 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function sub(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function sub(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
@@ -422,7 +422,7 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function xor(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function xor(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
@@ -467,7 +467,7 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function cmp(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function cmp(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $left = $isReg

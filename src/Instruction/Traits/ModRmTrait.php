@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Traits;
 
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Util\UInt64;
 
 /**
@@ -21,13 +21,13 @@ trait ModRmTrait
      * Read operand from R/M field by size.
      * @return int|UInt64 Returns UInt64 for 64-bit reads, int otherwise
      */
-    protected function readRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): int|UInt64
+    protected function readRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): int|UInt64
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             return $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
         }
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
 
         $value = match ($size) {
             8 => $this->readMemory8($runtime, $address),
@@ -43,7 +43,7 @@ trait ModRmTrait
     /**
      * Write operand to R/M field by size.
      */
-    protected function writeRm(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int|UInt64 $value, int $size): void
+    protected function writeRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int|UInt64 $value, int $size): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $intValue = $value instanceof UInt64 ? $value->toInt() : $value;
@@ -51,7 +51,7 @@ trait ModRmTrait
             return;
         }
 
-        $linearAddress = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         match ($size) {
             8 => $this->writeMemory8($runtime, $linearAddress, $value instanceof UInt64 ? $value->low32() & 0xFF : $value),
             16 => $this->writeMemory16($runtime, $linearAddress, $value instanceof UInt64 ? $value->low32() & 0xFFFF : $value),
@@ -64,40 +64,40 @@ trait ModRmTrait
     /**
      * Read 8-bit operand from R/M field.
      */
-    protected function readRm8(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): int
+    protected function readRm8(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             return $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
         }
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         return $this->readMemory8($runtime, $address);
     }
 
     /**
      * Write 8-bit operand to R/M field.
      */
-    protected function writeRm8(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $value): void
+    protected function writeRm8(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $value);
             return;
         }
 
-        $linearAddress = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         $this->writeMemory8($runtime, $linearAddress, $value);
     }
 
     /**
      * Read 16-bit operand from R/M field.
      */
-    protected function readRm16(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): int
+    protected function readRm16(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             return $runtime->memoryAccessor()->fetch($modRegRM->registerOrMemoryAddress())->asByte();
         }
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         $value = $this->readMemory16($runtime, $address);
 
         return $value;
@@ -106,62 +106,62 @@ trait ModRmTrait
     /**
      * Write 16-bit operand to R/M field.
      */
-    protected function writeRm16(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $value): void
+    protected function writeRm16(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $runtime->memoryAccessor()->write16Bit($modRegRM->registerOrMemoryAddress(), $value);
             return;
         }
 
-        $linearAddress = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         $this->writeMemory16($runtime, $linearAddress, $value);
     }
 
     /**
      * Read 32-bit operand from R/M field.
      */
-    protected function readRm32(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): int
+    protected function readRm32(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             return $runtime->memoryAccessor()->fetch($modRegRM->registerOrMemoryAddress())->asBytesBySize(32);
         }
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         return $this->readMemory32($runtime, $address);
     }
 
     /**
      * Write 32-bit operand to R/M field.
      */
-    protected function writeRm32(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $value): void
+    protected function writeRm32(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $runtime->memoryAccessor()->writeBySize($modRegRM->registerOrMemoryAddress(), $value, 32);
             return;
         }
 
-        $linearAddress = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         $this->writeMemory32($runtime, $linearAddress, $value);
     }
 
     /**
      * Read 64-bit operand from R/M field.
      */
-    protected function readRm64(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): UInt64
+    protected function readRm64(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): UInt64
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $value = $runtime->memoryAccessor()->fetch($modRegRM->registerOrMemoryAddress())->asBytesBySize(64);
             return UInt64::of($value);
         }
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         return $this->readMemory64($runtime, $address);
     }
 
     /**
      * Write 64-bit operand to R/M field.
      */
-    protected function writeRm64(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, UInt64|int $value): void
+    protected function writeRm64(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, UInt64|int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $intValue = $value instanceof UInt64 ? $value->toInt() : $value;
@@ -169,7 +169,7 @@ trait ModRmTrait
             return;
         }
 
-        $linearAddress = $this->rmLinearAddress($runtime, $reader, $modRegRM);
+        $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
         $this->writeMemory64($runtime, $linearAddress, $value);
     }
 
@@ -178,7 +178,7 @@ trait ModRmTrait
     abstract protected function writeRegisterBySize(RuntimeInterface $runtime, int|\PHPMachineEmulator\Instruction\RegisterType $register, int $value, int $size): void;
     abstract protected function read8BitRegister(RuntimeInterface $runtime, int $register): int;
     abstract protected function write8BitRegister(RuntimeInterface $runtime, int $register, int $value): void;
-    abstract protected function rmLinearAddress(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, \PHPMachineEmulator\Instruction\RegisterType|null $segmentOverride = null): int;
+    abstract protected function rmLinearAddress(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, \PHPMachineEmulator\Instruction\RegisterType|null $segmentOverride = null): int;
     abstract protected function readMemory8(RuntimeInterface $runtime, int $address): int;
     abstract protected function readMemory16(RuntimeInterface $runtime, int $address): int;
     abstract protected function readMemory32(RuntimeInterface $runtime, int $address): int;

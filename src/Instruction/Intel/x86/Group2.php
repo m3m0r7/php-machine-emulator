@@ -9,8 +9,8 @@ use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -27,26 +27,26 @@ class Group2 implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $enhancedStreamReader
+        $memory = $runtime->memory();
+        $modRegRM = $memory
             ->byteAsModRegRM();
         $opSize = $this->isByteOp($opcode) ? 8 : $runtime->context()->cpu()->operandSize();
 
         return match ($modRegRM->digit()) {
-            0x0 => $this->rotateLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
-            0x1 => $this->rotateRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
-            0x2 => $this->rotateCarryLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
-            0x3 => $this->rotateCarryRight($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
-            0x4, 0x6 => $this->shiftLeft($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize), // 0x6 is undocumented SAL alias
-            0x5 => $this->shiftRightLogical($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
-            0x7 => $this->shiftRightArithmetic($runtime, $opcode, $enhancedStreamReader, $modRegRM, $opSize),
+            0x0 => $this->rotateLeft($runtime, $opcode, $memory, $modRegRM, $opSize),
+            0x1 => $this->rotateRight($runtime, $opcode, $memory, $modRegRM, $opSize),
+            0x2 => $this->rotateCarryLeft($runtime, $opcode, $memory, $modRegRM, $opSize),
+            0x3 => $this->rotateCarryRight($runtime, $opcode, $memory, $modRegRM, $opSize),
+            0x4, 0x6 => $this->shiftLeft($runtime, $opcode, $memory, $modRegRM, $opSize), // 0x6 is undocumented SAL alias
+            0x5 => $this->shiftRightLogical($runtime, $opcode, $memory, $modRegRM, $opSize),
+            0x7 => $this->shiftRightArithmetic($runtime, $opcode, $memory, $modRegRM, $opSize),
             default => throw new ExecutionException(
                 sprintf('The digit (0b%s) is not supported yet', decbin($modRegRM->digit()))
             ),
         };
     }
 
-    protected function count(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM): int
+    protected function count(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
     {
         return match ($opcode) {
             0xC0, 0xC1 => $runtime->memory()->byte(),
@@ -61,11 +61,11 @@ class Group2 implements InstructionInterface
         return in_array($opcode, [0xC0, 0xD0, 0xD2], true);
     }
 
-    protected function rotateLeft(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    protected function rotateLeft(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
@@ -123,11 +123,11 @@ class Group2 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function rotateRight(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    protected function rotateRight(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
@@ -187,11 +187,11 @@ class Group2 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function rotateCarryLeft(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    protected function rotateCarryLeft(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
         if ($this->isByteOp($opcode)) {
@@ -257,11 +257,11 @@ class Group2 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function rotateCarryRight(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    protected function rotateCarryRight(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
         if ($this->isByteOp($opcode)) {
@@ -329,11 +329,11 @@ class Group2 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function shiftLeft(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    protected function shiftLeft(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
@@ -389,11 +389,11 @@ class Group2 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function shiftRightLogical(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    protected function shiftRightLogical(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
@@ -441,11 +441,11 @@ class Group2 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function shiftRightArithmetic(RuntimeInterface $runtime, int $opcode, EnhanceStreamReader $reader, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
+    protected function shiftRightArithmetic(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $reader, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $reader, $modRegRM) & 0x1F;
+        $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister

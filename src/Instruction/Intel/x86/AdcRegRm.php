@@ -7,7 +7,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class AdcRegRm implements InstructionInterface
@@ -23,8 +22,8 @@ class AdcRegRm implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x10, 0x12], true);
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
@@ -34,16 +33,16 @@ class AdcRegRm implements InstructionInterface
         // Cache effective address to avoid reading displacement twice
         $rmAddress = null;
         if ($destIsRm && $modRegRM->mode() !== 0b11) {
-            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
+            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $memory, $modRegRM), true);
         }
 
         $src = $isByte
             ? ($destIsRm
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
-                : $this->readRm8($runtime, $reader, $modRegRM))
+                : $this->readRm8($runtime, $memory, $modRegRM))
             : ($destIsRm
                 ? $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize)
-                : $this->readRm($runtime, $reader, $modRegRM, $opSize));
+                : $this->readRm($runtime, $memory, $modRegRM, $opSize));
 
         if ($isByte) {
             $dest = $destIsRm

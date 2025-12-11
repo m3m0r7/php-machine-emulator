@@ -9,7 +9,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -36,13 +35,13 @@ class BitOp implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
         $maskBits = $opSize === 32 ? 0x1F : 0x0F;
 
         $isReg = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
-        $baseAddr = $isReg ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+        $baseAddr = $isReg ? null : $this->rmLinearAddress($runtime, $memory, $modrm);
 
         $secondByte = $opcode & 0xFF;
         if ($opcode > 0xFF) {
@@ -52,7 +51,7 @@ class BitOp implements InstructionInterface
         $isImmediate = $secondByte === 0xBA;
 
         if ($isImmediate) {
-            $imm = $reader->streamReader()->byte() & 0xFF;
+            $imm = $memory->byte() & 0xFF;
             $op = match ($modrm->registerOrOPCode() & 0x7) {
                 0b100 => 'bt',
                 0b101 => 'bts',

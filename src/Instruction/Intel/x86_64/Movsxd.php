@@ -34,14 +34,14 @@ class Movsxd implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
-        $reader = $this->enhanceReader($runtime);
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $this->enhanceReader($runtime);
+        $modRegRM = $memory->byteAsModRegRM();
 
         $cpu = $runtime->context()->cpu();
 
         if ($cpu->rexW()) {
             // MOVSXD r64, r/m32: Read 32-bit, sign-extend to 64-bit
-            $value32 = $this->readRm($runtime, $reader, $modRegRM, 32);
+            $value32 = $this->readRm($runtime, $memory, $modRegRM, 32);
 
             // Sign-extend 32-bit to 64-bit using UInt64
             $value64 = UInt64::of($value32 & 0xFFFFFFFF);
@@ -58,7 +58,7 @@ class Movsxd implements InstructionInterface
             $this->writeRegisterBySize($runtime, $regCode, $value64->toInt(), 64);
         } else {
             // Without REX.W: acts as 32-bit MOV
-            $value32 = $this->readRm($runtime, $reader, $modRegRM, 32);
+            $value32 = $this->readRm($runtime, $memory, $modRegRM, 32);
             $regCode = $modRegRM->register();
             $this->writeRegisterBySize($runtime, $regCode, $value32, 32);
         }
