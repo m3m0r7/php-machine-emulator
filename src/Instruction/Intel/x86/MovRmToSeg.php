@@ -29,8 +29,10 @@ class MovRmToSeg implements InstructionInterface
         $seg = $this->segmentFromDigit($modRegRM->registerOrOPCode());
         $value = $this->readRm16($runtime, $memory, $modRegRM);
 
+        $cpu = $runtime->context()->cpu();
+
         // In protected mode, cache the segment descriptor for Big Real Mode support
-        if ($runtime->context()->cpu()->isProtectedMode() && $value !== 0) {
+        if ($cpu->isProtectedMode() && $value !== 0) {
             $descriptor = $this->readSegmentDescriptor($runtime, $value);
             if ($descriptor !== null && $descriptor['present']) {
                 $runtime->context()->cpu()->cacheSegmentDescriptor($seg, $descriptor);
@@ -44,6 +46,21 @@ class MovRmToSeg implements InstructionInterface
         }
 
         $runtime->memoryAccessor()->write16Bit($seg, $value);
+
+        // In real mode, reloading a segment register resets its hidden cache
+        // to real-mode base/limit, disabling Unreal Mode for that segment.
+        if (!$cpu->isProtectedMode()) {
+            $cpu->cacheSegmentDescriptor($seg, [
+                'base' => (($value << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
+        }
 
         if ($seg === RegisterType::SS) {
             $esp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(

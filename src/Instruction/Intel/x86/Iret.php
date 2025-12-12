@@ -26,7 +26,8 @@ class Iret implements InstructionInterface
         $ma = $runtime->memoryAccessor();
 
         $ip = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
-        $cs = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+        // CS selectors are always 16-bit, even when operand size is 32-bit.
+        $cs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
         $flags = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
 
         if ($runtime->context()->cpu()->isProtectedMode() && (($flags & (1 << 14)) !== 0)) {
@@ -54,7 +55,7 @@ class Iret implements InstructionInterface
 
         if ($returningToOuter) {
             $newEsp = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
-            $newSs = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+            $newSs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
             $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
             $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $opSize);
         }

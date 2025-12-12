@@ -37,8 +37,12 @@ class MovToCr implements InstructionInterface
         }
 
         $cr = $modrm->registerOrOPCode() & 0b111;
-        $size = $runtime->context()->cpu()->operandSize();
+        // MOV to/from control registers always uses r32 (or r64 in long mode),
+        // independent of the current operand-size attribute.
+        $cpu = $runtime->context()->cpu();
+        $size = ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) ? 64 : 32;
         $val = $runtime->memoryAccessor()->fetch($modrm->registerOrMemoryAddress())->asBytesBySize($size);
+        $wasProtected = $runtime->context()->cpu()->isProtectedMode();
 
         if ($cr === 0) {
             $val |= 0x22; // MP + NE set so kernel assumes FPU present
@@ -56,6 +60,9 @@ class MovToCr implements InstructionInterface
         if ($cr === 0) {
             $runtime->context()->cpu()->setProtectedMode((bool) ($val & 0x1));
             $runtime->context()->cpu()->setPagingEnabled((bool) ($val & 0x80000000));
+            if ($wasProtected && !$runtime->context()->cpu()->isProtectedMode()) {
+                $this->cacheCurrentSegmentDescriptors($runtime);
+            }
         }
         if ($cr === 3 && $runtime->context()->cpu()->isPagingEnabled()) {
             $runtime->context()->cpu()->setPagingEnabled(true);

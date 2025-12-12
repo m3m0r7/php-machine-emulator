@@ -360,12 +360,13 @@ class Int_ implements InstructionInterface
 
         if ($privilegeChange) {
             // On privilege change, old SS/ESP are pushed after loading the new stack.
-            $ma->push(RegisterType::ESP, $oldSs, $operandSize);
+            $ma->push(RegisterType::ESP, $oldSs, 16);
             $ma->push(RegisterType::ESP, $oldEsp, $operandSize);
         }
 
         $ma->push(RegisterType::ESP, $flags, $operandSize);
-        $ma->push(RegisterType::ESP, $ma->fetch(RegisterType::CS)->asByte(), $operandSize);
+        // CS selector is always 16-bit.
+        $ma->push(RegisterType::ESP, $ma->fetch(RegisterType::CS)->asByte(), 16);
         $ma->push(RegisterType::ESP, $returnIp, $operandSize);
         if ($errorCode !== null) {
             $ma->push(RegisterType::ESP, $errorCode & 0xFFFF, $operandSize);

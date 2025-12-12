@@ -108,6 +108,20 @@ class RepPrefix implements InstructionInterface
 
             $stringInstructionIp = $ipBeforeExecute;
 
+            // For CMPS/SCAS with REPE/REPNE, termination condition must be checked
+            // after the first iteration as well. If the condition already failed,
+            // stop immediately without executing further iterations.
+            $opcode = $opcodes[0];
+            if ($lastInstruction instanceof Cmpsb ||
+                $lastInstruction instanceof Cmpsw ||
+                $lastInstruction instanceof Scasb ||
+                $lastInstruction instanceof Scasw) {
+                $zf = $runtime->memoryAccessor()->shouldZeroFlag();
+                if (($opcode === 0xF2 && $zf) || ($opcode === 0xF3 && !$zf)) {
+                    return $lastResult;
+                }
+            }
+
             // Check if this is a bulk-optimizable instruction (STOS, MOVS without ZF check)
             $isBulkOptimizable = false;
             if ($lastInstruction !== null) {
@@ -119,9 +133,9 @@ class RepPrefix implements InstructionInterface
                 }
             }
 
-            // Bulk optimization - only when not crossing page boundaries (4KB)
-            $opcode = $opcodes[0];
-            if ($counter > 0 && $lastInstruction !== null) {
+            // Bulk optimization - only for instructions that do not depend on ZF (MOVS/STOS/LODS/INS/OUTS).
+            // CMPS/SCAS are handled in the standard per-iteration loop to preserve exact REP semantics.
+            if ($counter > 0 && $lastInstruction !== null && $isBulkOptimizable) {
                 $bulkResult = $this->tryBulkExecute($runtime, $lastInstruction, $counter, $opcode);
                 if ($bulkResult !== null) {
                     return $bulkResult;
@@ -196,6 +210,11 @@ class RepPrefix implements InstructionInterface
             $instruction instanceof Movsw => $this->bulkMovsw($runtime, $count),
             $instruction instanceof Stosb => $this->bulkStosb($runtime, $count),
             $instruction instanceof Stosw => $this->bulkStosw($runtime, $count),
+            $instruction instanceof Cmpsb => $this->bulkCmpsb($runtime, $count, $opcode),
+            $instruction instanceof Cmpsw => $this->bulkCmpsw($runtime, $count, $opcode),
+            $instruction instanceof Scasb => $this->bulkScasb($runtime, $count, $opcode),
+            $instruction instanceof Scasw => $this->bulkScasw($runtime, $count, $opcode),
+
             default => null,
         };
     }
@@ -235,15 +254,78 @@ class RepPrefix implements InstructionInterface
         $srcSegOff = $this->segmentOffsetAddress($runtime, $sourceSegment, $si);
         $dstSegOff = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
 
+        $checkAfterCopy = false;
+
+        // Debug: Log any REP MOVSB that writes to 0x0700 area
+        if ($dstSegOff >= 0x0700 && $dstSegOff < 0x0710) {
+            $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
+            $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
+            $ip = $runtime->memory()->offset();
+            $runtime->option()->logger()->warning(sprintf(
+                'REP MOVSB to 0x0700: IP=0x%05X DS=0x%04X ES=0x%04X SI=0x%04X DI=0x%04X src=0x%05X dst=0x%05X count=%d',
+                $ip, $ds, $es, $si, $di, $srcSegOff, $dstSegOff, $count
+            ));
+            // Debug: check source data
+            $srcData = [];
+            for ($j = 0; $j < 8; $j++) {
+                $srcData[] = sprintf('%02X', $this->readMemory8($runtime, $srcSegOff + $j));
+            }
+            $runtime->option()->logger()->warning(sprintf(
+                'REP MOVSB source data: %s',
+                implode(' ', $srcData)
+            ));
+        }
+        // Debug: Log relocation copy (0x0700 -> 0x9F840)
+        if ($srcSegOff >= 0x0700 && $srcSegOff < 0x0D00 && $dstSegOff >= 0x9F000) {
+            $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
+            $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
+            $runtime->option()->logger()->warning(sprintf(
+                'REP MOVSB RELOC: DS=0x%04X ES=0x%04X SI=0x%04X DI=0x%04X src=0x%05X dst=0x%05X count=%d',
+                $ds, $es, $si, $di, $srcSegOff, $dstSegOff, $count
+            ));
+            // Check value at absolute 0x0837 (where MOV [CS:0x137] wrote 0x01)
+            $srcVal = $this->readMemory8($runtime, 0x0837);
+            $runtime->option()->logger()->warning(sprintf(
+                'REP MOVSB RELOC: mem[0x0837]=0x%02X (expected 0x01)',
+                $srcVal
+            ));
+            // Also check destination 0x9F977 before copy
+            $dstVal = $this->readMemory8($runtime, 0x9F977);
+            $runtime->option()->logger()->warning(sprintf(
+                'REP MOVSB RELOC: mem[0x9F977]=0x%02X before copy',
+                $dstVal
+            ));
+            // Set flag to check after copy
+            $checkAfterCopy = true;
+        }
+
         // Process each byte using the same methods as Movsb.php
         for ($i = 0; $i < $count; $i++) {
             // Read using readMemory8 (same as Movsb.php line 27-30)
-            $value = $this->readMemory8($runtime, $srcSegOff + ($step * $i));
+            $srcAddr = $srcSegOff + ($step * $i);
+            $value = $this->readMemory8($runtime, $srcAddr);
 
             // Write using writeRawByte after allocate (same as Movsb.php line 32-34)
-            $destAddress = $this->translateLinearWithMmio($runtime, $dstSegOff + ($step * $i), true);
+            $dstAddr = $dstSegOff + ($step * $i);
+            $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
             $ma->allocate($destAddress, safe: false);
             $ma->writeRawByte($destAddress, $value);
+
+            // Debug: track writes to 0x0700-0x0710
+            if ($dstAddr >= 0x0700 && $dstAddr <= 0x0710) {
+                $runtime->option()->logger()->warning(sprintf(
+                    'REP MOVSB WRITE: 0x%05X <- 0x%02X (from 0x%05X)',
+                    $dstAddr, $value, $srcAddr
+                ));
+            }
+
+            // Debug: track writes to 0x0CA0-0x0CB0 area (source data for setup code)
+            if ($dstAddr >= 0x0CA0 && $dstAddr <= 0x0CB0) {
+                $runtime->option()->logger()->warning(sprintf(
+                    'REP MOVSB WRITE to source area: 0x%05X <- 0x%02X',
+                    $dstAddr, $value
+                ));
+            }
         }
 
         // Update registers
@@ -251,6 +333,15 @@ class RepPrefix implements InstructionInterface
         $this->writeIndex($runtime, RegisterType::ESI, $si + $totalStep);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $totalStep);
         $this->writeIndex($runtime, RegisterType::ECX, 0);
+
+        // Check after copy
+        if ($checkAfterCopy) {
+            $dstValAfter = $this->readMemory8($runtime, 0x9F977);
+            $runtime->option()->logger()->warning(sprintf(
+                'REP MOVSB RELOC: mem[0x9F977]=0x%02X after copy',
+                $dstValAfter
+            ));
+        }
 
         return ExecutionStatus::SUCCESS;
     }

@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Runtime;
 
 use FFI;
 use PHPMachineEmulator\Collection\MemoryAccessorObserverCollectionInterface;
+use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Stream\RustMemoryStream;
 
@@ -378,11 +379,12 @@ C;
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
             $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($size);
             $bytes = intdiv($size, 8);
+            $address = $this->stackLinearAddress($sp, $size, false);
 
             // Read value from stack
             $value = 0;
             for ($i = 0; $i < $bytes; $i++) {
-                $value |= self::$ffi->memory_accessor_read_from_memory($this->handle, $sp + $i) << ($i * 8);
+                $value |= self::$ffi->memory_accessor_read_from_memory($this->handle, $address + $i) << ($i * 8);
             }
 
             // Update SP
@@ -408,13 +410,14 @@ C;
             $bytes = intdiv($size, 8);
             $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
             $newSp = ($sp - $bytes) & $mask;
+            $address = $this->stackLinearAddress($newSp, $size, true);
 
             $this->writeBySize(RegisterType::ESP, $newSp, $size);
-            $this->allocate($newSp, $bytes, safe: false);
+            $this->allocate($address, $bytes, safe: false);
 
             $masked = $value & ((1 << $size) - 1);
             for ($i = 0; $i < $bytes; $i++) {
-                $this->writeBySize($newSp + $i, ($masked >> ($i * 8)) & 0xFF, 8);
+                $this->writeBySize($address + $i, ($masked >> ($i * 8)) & 0xFF, 8);
             }
 
             return $this;
@@ -662,6 +665,146 @@ C;
         );
 
         return [$resultPhysical->cdata, $resultError->cdata];
+    }
+
+    /**
+     * Compute stack linear address honoring segment base/limit and cached descriptors.
+     */
+    private function stackLinearAddress(int $sp, int $size, bool $isWrite = false): int
+    {
+        $ssSelector = $this->fetch(RegisterType::SS)->asByte();
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $isUser = $this->runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
+
+        if ($this->runtime->context()->cpu()->isProtectedMode()) {
+            $descriptor = $this->segmentDescriptor($ssSelector);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $cpl = $this->runtime->context()->cpu()->cpl();
+                $rpl = $ssSelector & 0x3;
+                $dpl = $descriptor['dpl'] ?? 0;
+                $isWritable = ($descriptor['type'] & 0x2) !== 0;
+                $isExecutable = $descriptor['executable'] ?? false;
+                if ($isExecutable || !$isWritable || $dpl !== $cpl || $rpl !== $cpl) {
+                    $linear = ($sp & $mask) & $linearMask;
+                } else {
+                    if (($sp & $mask) > $descriptor['limit']) {
+                        throw new FaultException(0x0C, $ssSelector, 'Stack limit exceeded');
+                    }
+                    $linear = ($descriptor['base'] + ($sp & $mask)) & $linearMask;
+                }
+                [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+                return $error === 0 ? $physical : $linear;
+            }
+            $linear = ($sp & $mask) & $linearMask;
+            [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+            return $error === 0 ? $physical : $linear;
+        }
+
+        $cached = $this->runtime->context()->cpu()->getCachedSegmentDescriptor(RegisterType::SS);
+        if ($cached !== null) {
+            $effSp = $sp & $mask;
+            $limit = $cached['limit'] ?? $mask;
+            if ($effSp > $limit) {
+                $effSp = $sp & 0xFFFF;
+            }
+            $base = $cached['base'] ?? (($ssSelector << 4) & 0xFFFFF);
+            $linear = ($base + $effSp) & $linearMask;
+        } else {
+            $linear = ((($ssSelector << 4) & 0xFFFFF) + ($sp & $mask)) & $linearMask;
+        }
+
+        [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+        return $error === 0 ? $physical : $linear;
+    }
+
+    /**
+     * Read a segment descriptor from GDT/LDT.
+     */
+    private function segmentDescriptor(int $selector): ?array
+    {
+        $ti = ($selector >> 2) & 0x1;
+        if ($ti === 1) {
+            $ldtr = $this->runtime->context()->cpu()->ldtr();
+            $base = $ldtr['base'] ?? 0;
+            $limit = $ldtr['limit'] ?? 0;
+            if (($ldtr['selector'] ?? 0) === 0) {
+                return null;
+            }
+        } else {
+            $gdtr = $this->runtime->context()->cpu()->gdtr();
+            $base = $gdtr['base'] ?? 0;
+            $limit = $gdtr['limit'] ?? 0;
+        }
+
+        $index = ($selector >> 3) & 0x1FFF;
+        $offset = $base + ($index * 8);
+
+        if ($offset + 7 > $base + $limit) {
+            return null;
+        }
+
+        $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $isUser = $this->runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
+
+        // Fast path: fetch full 64-bit descriptor in one FFI call.
+        $desc64 = self::$ffi->new('uint64_t');
+        $descErr = self::$ffi->new('uint32_t');
+        self::$ffi->memory_accessor_read_memory_64(
+            $this->handle,
+            $offset,
+            $isUser,
+            $pagingEnabled,
+            $linearMask,
+            FFI::addr($desc64),
+            FFI::addr($descErr)
+        );
+
+        if ($descErr->cdata === 0) {
+            $val = $desc64->cdata;
+            $b0 = $val & 0xFF;
+            $b1 = ($val >> 8) & 0xFF;
+            $b2 = ($val >> 16) & 0xFF;
+            $b3 = ($val >> 24) & 0xFF;
+            $b4 = ($val >> 32) & 0xFF;
+            $b5 = ($val >> 40) & 0xFF;
+            $b6 = ($val >> 48) & 0xFF;
+            $b7 = ($val >> 56) & 0xFF;
+        } else {
+            // Fallback: byte-by-byte read (should rarely happen).
+            $b0 = self::$ffi->memory_accessor_read_from_memory($this->handle, $offset);
+            $b1 = self::$ffi->memory_accessor_read_from_memory($this->handle, $offset + 1);
+            $b2 = self::$ffi->memory_accessor_read_from_memory($this->handle, $offset + 2);
+            $b3 = self::$ffi->memory_accessor_read_from_memory($this->handle, $offset + 3);
+            $b4 = self::$ffi->memory_accessor_read_from_memory($this->handle, $offset + 4);
+            $b5 = self::$ffi->memory_accessor_read_from_memory($this->handle, $offset + 5);
+            $b6 = self::$ffi->memory_accessor_read_from_memory($this->handle, $offset + 6);
+            $b7 = self::$ffi->memory_accessor_read_from_memory($this->handle, $offset + 7);
+        }
+
+        $limitLow = $b0 | ($b1 << 8);
+        $limitHigh = $b6 & 0x0F;
+        $fullLimit = $limitLow | ($limitHigh << 16);
+        if (($b6 & 0x80) !== 0) {
+            $fullLimit = ($fullLimit << 12) | 0xFFF;
+        }
+
+        $baseAddr = $b2 | ($b3 << 8) | ($b4 << 16) | ($b7 << 24);
+        $present = ($b5 & 0x80) !== 0;
+        $dpl = ($b5 >> 5) & 0x3;
+        $type = $b5 & 0x0F;
+        $executable = ($type & 0x08) !== 0;
+
+        return [
+            'base' => $baseAddr & 0xFFFFFFFF,
+            'limit' => $fullLimit & 0xFFFFFFFF,
+            'present' => $present,
+            'dpl' => $dpl,
+            'type' => $type,
+            'executable' => $executable,
+        ];
     }
 
     /**

@@ -13,6 +13,8 @@ use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\InstructionExecutorInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Instruction\Intel\TranslationBlock;
+use PHPMachineEmulator\Instruction\Intel\PatternedInstruction\PatternedInstructionsList;
+use PHPMachineEmulator\Instruction\Intel\PatternedInstruction\PatternedInstructionsListStats;
 
 class InstructionExecutor implements InstructionExecutorInterface
 {
@@ -39,7 +41,17 @@ class InstructionExecutor implements InstructionExecutorInterface
      */
     private array $translationBlocks = [];
 
-    private const HOTSPOT_THRESHOLD = 1;  // この回数を超えたらホット
+    /**
+     * Patterned instructions list for optimizing frequently-executed code patterns
+     */
+    private PatternedInstructionsList $patternedInstructionsList;
+
+    private const HOTSPOT_THRESHOLD = 1;
+
+    public function __construct()
+    {
+        $this->patternedInstructionsList = new PatternedInstructionsList();
+    }
 
     public function execute(RuntimeInterface $runtime): ExecutionStatus
     {
@@ -49,6 +61,12 @@ class InstructionExecutor implements InstructionExecutorInterface
         // REP/iteration handler active? Fall back to single-step to keep lastInstruction accurate.
         if ($runtime->context()->cpu()->iteration()->isActive()) {
             return $this->executeSingleInstruction($runtime, $ip);
+        }
+
+        // Try hot pattern detection first (fastest path for known patterns)
+        $patternResult = $this->patternedInstructionsList->tryExecutePattern($runtime, $ip);
+        if ($patternResult !== null && $patternResult->isSuccess()) {
+            return $patternResult->executionStatus();
         }
 
         // Execute existing translation block if present
@@ -196,6 +214,22 @@ class InstructionExecutor implements InstructionExecutorInterface
 
                 if (isset($this->translationBlocks[$exitIp])) {
                     $candidateBlock = $this->translationBlocks[$exitIp];
+
+
+                    $runtime->option()->logger()->info(
+                        "PATTERN (OP): " . implode(" ", array_map(
+                            fn ($ins) => implode(" ", array_map(fn ($v) => sprintf("0x%02X", $v), $ins[1])),
+                            $candidateBlock->instructions(),
+                        )),
+                    );
+
+                    $runtime->option()->logger()->info(
+                        "PATTERN (MN): " . implode(" ", array_map(
+                            fn ($ins) => preg_replace("/^.+\\\\(.+?)$/", '$1', get_class($ins[0])),
+                            $candidateBlock->instructions(),
+                        )),
+                    );
+
                     // Avoid chaining to the same block to prevent tight self-cycles inside chaining loop
                     if ($candidateBlock !== $block) {
                         $nextBlock = $candidateBlock;
@@ -437,5 +471,22 @@ class InstructionExecutor implements InstructionExecutorInterface
         $this->decodeCache = [];
         $this->hitCount = [];
         $this->translationBlocks = [];
+        $this->patternedInstructionsList->invalidateCaches();
+    }
+
+    /**
+     * Get hot pattern detector statistics.
+     */
+    public function getHotPatternStats(): PatternedInstructionsListStats
+    {
+        return $this->patternedInstructionsList->getStats();
+    }
+
+    /**
+     * Get patterned instructions list.
+     */
+    public function patternedInstructionsList(): PatternedInstructionsList
+    {
+        return $this->patternedInstructionsList;
     }
 }

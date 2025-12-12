@@ -264,7 +264,26 @@ class Group3 implements InstructionInterface
     protected function div(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         if ($isByte) {
+            // Debug: check segment override for DIV at IO.SYS flag check
+            $ip = $memory->offset();
+            $segOverride = $runtime->context()->cpu()->segmentOverride();
+            if ($ip >= 0x9FAF0 && $ip <= 0x9FB00) {
+                $runtime->option()->logger()->warning(sprintf(
+                    'DIV DEBUG: IP=0x%05X segOverride=%s CS=0x%04X',
+                    $ip, $segOverride?->name ?? 'none',
+                    $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte()
+                ));
+            }
+
             $divider = $this->readRm8($runtime, $memory, $modRegRM);
+
+            if ($ip >= 0x9FAF0 && $ip <= 0x9FB00) {
+                $runtime->option()->logger()->warning(sprintf(
+                    'DIV DEBUG: divider=0x%02X (expected 0x01)',
+                    $divider
+                ));
+            }
+
             if ($divider === 0) {
                 throw new FaultException(0x00, 0, 'Divide by zero');
             }

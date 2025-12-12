@@ -38,7 +38,10 @@ class MovFromCr implements InstructionInterface
 
         $cr = $modrm->registerOrOPCode() & 0b111;
         $val = $runtime->memoryAccessor()->readControlRegister($cr);
-        $size = $runtime->context()->cpu()->operandSize();
+        // MOV to/from control registers always uses r32 (or r64 in long mode),
+        // independent of the current operand-size attribute.
+        $cpu = $runtime->context()->cpu();
+        $size = ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) ? 64 : 32;
         $this->writeRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $val, $size);
 
         return ExecutionStatus::SUCCESS;

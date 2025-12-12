@@ -41,7 +41,8 @@ class CallFar implements InstructionInterface
         }
 
         // push return CS:IP (address of next instruction)
-        $runtime->memoryAccessor()->push(RegisterType::ESP, $currentCs, $size);
+        // Segment selectors are always 16-bit, even when the operand size is 32-bit.
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $currentCs, 16);
         $runtime->memoryAccessor()->push(RegisterType::ESP, $returnOffset, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {

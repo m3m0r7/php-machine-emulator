@@ -95,6 +95,12 @@ class ISOBootImageStream implements BootableStreamInterface
         return $low | ($high << 8);
     }
 
+    public function signedShort(): int
+    {
+        $value = $this->short();
+        return $value >= 0x8000 ? $value - 0x10000 : $value;
+    }
+
     public function dword(): int
     {
         $b0 = $this->byte();
@@ -102,6 +108,12 @@ class ISOBootImageStream implements BootableStreamInterface
         $b2 = $this->byte();
         $b3 = $this->byte();
         return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+    }
+
+    public function signedDword(): int
+    {
+        $value = $this->dword();
+        return $value >= 0x80000000 ? $value - 0x100000000 : $value;
     }
 
     public function read(int $length): string

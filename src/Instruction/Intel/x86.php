@@ -198,6 +198,11 @@ class x86 implements InstructionListInterface
         return $this->register ??= new Register();
     }
 
+    public function __debugInfo(): array
+    {
+        return [];
+    }
+
     /**
      * Find instruction by opcode bytes.
      * Uses longest-first matching to find the best match.

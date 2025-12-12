@@ -35,6 +35,11 @@ class WindowCanvas
         $this->batchBufferSize = self::MAX_BATCH_SIZE;
     }
 
+    public function __debugInfo(): array
+    {
+        return [];
+    }
+
     /**
      * Get batch buffer, expanding if needed
      */

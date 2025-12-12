@@ -650,7 +650,19 @@ class MemoryAccessor implements MemoryAccessorInterface
             return $physical;
         }
 
-        $linear = ((($ssSelector << 4) & 0xFFFFF) + ($sp & $mask)) & $linearMask;
+        // Real mode: still honor cached descriptor (Unreal Mode) if present
+        $cached = $this->runtime->context()->cpu()->getCachedSegmentDescriptor(RegisterType::SS);
+        if ($cached !== null) {
+            $effSp = $sp & $mask;
+            $limit = $cached['limit'] ?? $mask;
+            if ($effSp > $limit) {
+                $effSp = $sp & 0xFFFF;
+            }
+            $base = $cached['base'] ?? (($ssSelector << 4) & 0xFFFFF);
+            $linear = ($base + $effSp) & $linearMask;
+        } else {
+            $linear = ((($ssSelector << 4) & 0xFFFFF) + ($sp & $mask)) & $linearMask;
+        }
         [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
         if ($error !== 0 && $error !== 0xFFFFFFFF) {
             $this->throwTranslationError($linear, $error);

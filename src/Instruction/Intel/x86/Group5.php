@@ -203,8 +203,8 @@ class Group5 implements InstructionInterface
             }
         }
 
-        // push return CS:IP on current stack
-        $runtime->memoryAccessor()->push(RegisterType::ESP, $currentCs, $size);
+        // push return CS:IP on current stack (CS is always 16-bit)
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $currentCs, 16);
         $runtime->memoryAccessor()->push(RegisterType::ESP, $returnOffset, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {

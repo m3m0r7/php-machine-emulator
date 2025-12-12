@@ -168,6 +168,11 @@ class System implements InterruptInterface
         }
 
         if (empty($this->e820Entries)) {
+            // Build a memory map that matches the emulator's configured RAM size.
+            $maxMemory = $runtime->logicBoard()->memory()->maxMemory();
+            $extendedBase = 0x00100000;
+            $extendedLength = $maxMemory > $extendedBase ? $maxMemory - $extendedBase : 0;
+
             $this->e820Entries = [
                 // Low memory (0 - 640KB) - usable
                 [
@@ -190,35 +195,16 @@ class System implements InterruptInterface
                     'type' => 2, // reserved
                     'attr' => 0,
                 ],
-                // Extended memory (1MB - 3GB) - usable
-                [
-                    'base' => 0x00100000,
-                    'length' => 0xBFE00000, // ~3GB - 2MB for ACPI
+            ];
+
+            if ($extendedLength > 0) {
+                $this->e820Entries[] = [
+                    'base' => $extendedBase,
+                    'length' => $extendedLength,
                     'type' => 1, // usable
                     'attr' => 1,
-                ],
-                // ACPI reclaimable
-                [
-                    'base' => 0xBFF00000,
-                    'length' => 0x00080000, // 512KB
-                    'type' => 3, // ACPI reclaimable
-                    'attr' => 1,
-                ],
-                // ACPI NVS
-                [
-                    'base' => 0xBFF80000,
-                    'length' => 0x00080000, // 512KB
-                    'type' => 4, // ACPI NVS
-                    'attr' => 1,
-                ],
-                // High memory hole & devices (3GB - 4GB)
-                [
-                    'base' => 0xC0000000,
-                    'length' => 0x40000000, // 1GB reserved for devices
-                    'type' => 2, // reserved
-                    'attr' => 0,
-                ],
-            ];
+                ];
+            }
         }
 
         $index = $ebx;

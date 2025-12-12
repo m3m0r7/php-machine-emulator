@@ -475,6 +475,18 @@ class Group1 implements InstructionInterface
                 : $this->readMemory8($runtime, $linearAddr);
             $left &= 0xFF;
             $op = $operand & 0xFF;
+
+            // Debug: check if this is the flag check at CS:0x137
+            $debugIP = $runtime->memory()->offset();
+            if ($debugIP >= 0x9FAF0 && $debugIP <= 0x9FB00 && $op === 0x00) {
+                $segOverride = $runtime->context()->cpu()->segmentOverride();
+                $cs = $runtime->memoryAccessor()->fetch(\PHPMachineEmulator\Instruction\RegisterType::CS)->asByte();
+                $runtime->option()->logger()->warning(sprintf(
+                    'CMP DEBUG: afterIP=0x%05X linearAddr=0x%05X left=0x%02X isReg=%d segOverride=%s CS=0x%04X',
+                    $debugIP, $linearAddr, $left, $isReg ? 1 : 0, $segOverride?->name ?? 'none', $cs
+                ));
+            }
+
             $calc = $left - $op;
             $result = $calc & 0xFF;
             // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign

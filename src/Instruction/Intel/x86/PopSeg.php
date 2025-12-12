@@ -33,18 +33,42 @@ class PopSeg implements InstructionInterface
             0x1F => RegisterType::DS,
         };
 
-        $size = $runtime->context()->cpu()->operandSize();
+        // Segment pops are always 16-bit, regardless of operand size overrides.
         $espBefore = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(32);
 
-        $value = $runtime->memoryAccessor()->pop(RegisterType::ESP, $size)->asBytesBySize($size);
+        $value = $runtime->memoryAccessor()->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+        $cpu = $runtime->context()->cpu();
+
+        // In protected mode, cache descriptor for Unreal Mode support.
+        if ($cpu->isProtectedMode() && $value !== 0) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $value);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $cpu->cacheSegmentDescriptor($seg, $descriptor);
+            }
+        }
+
         $runtime->memoryAccessor()->write16Bit($seg, $value);
 
+        // In real mode, loading a segment resets its hidden cache to real-mode values.
+        if (!$cpu->isProtectedMode()) {
+            $cpu->cacheSegmentDescriptor($seg, [
+                'base' => (($value << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
+        }
+
         $espAfter = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(32);
-        if ($espAfter !== $espBefore + ($size === 32 ? 4 : 2)) {
+        if ($espAfter !== $espBefore + 2) {
             $runtime->option()->logger()->debug(sprintf(
                 'POP %s: ESP before=0x%08X after=0x%08X size=%d (unexpected!)',
                 match($seg) { RegisterType::ES => 'ES', RegisterType::DS => 'DS', RegisterType::SS => 'SS', default => '??' },
-                $espBefore, $espAfter, $size
+                $espBefore, $espAfter, 16
             ));
         }
 

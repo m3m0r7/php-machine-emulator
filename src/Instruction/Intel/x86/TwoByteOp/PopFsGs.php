@@ -39,7 +39,29 @@ class PopFsGs implements InstructionInterface
         $seg = $secondByte === 0xA1 ? RegisterType::FS : RegisterType::GS;
         $opSize = $runtime->context()->cpu()->operandSize();
         $val = $runtime->memoryAccessor()->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize) & 0xFFFF;
+        $cpu = $runtime->context()->cpu();
+
+        if ($cpu->isProtectedMode() && $val !== 0) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $val);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $cpu->cacheSegmentDescriptor($seg, $descriptor);
+            }
+        }
+
         $runtime->memoryAccessor()->write16Bit($seg, $val);
+
+        if (!$cpu->isProtectedMode()) {
+            $cpu->cacheSegmentDescriptor($seg, [
+                'base' => (($val << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

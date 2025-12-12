@@ -58,7 +58,29 @@ class Lxs implements InstructionInterface
 
         $destReg = $modrm->registerOrOPCode();
         $this->writeRegisterBySize($runtime, $destReg, $offset, $opSize);
+        $cpu = $runtime->context()->cpu();
+
+        if ($cpu->isProtectedMode() && $segValue !== 0) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $segValue);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $cpu->cacheSegmentDescriptor($segment, $descriptor);
+            }
+        }
+
         $runtime->memoryAccessor()->write16Bit($segment, $segValue & 0xFFFF);
+
+        if (!$cpu->isProtectedMode()) {
+            $cpu->cacheSegmentDescriptor($segment, [
+                'base' => ((($segValue & 0xFFFF) << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

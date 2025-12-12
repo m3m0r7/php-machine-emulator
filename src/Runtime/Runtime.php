@@ -44,6 +44,18 @@ class Runtime implements RuntimeInterface
     protected array $shutdown = [];
     protected MemoryStreamInterface $memory;
 
+    /**
+     * Instruction counter for tick throttling.
+     * Ticks are processed every TICK_INTERVAL instructions for performance.
+     */
+    private int $instructionCounter = 0;
+
+    /**
+     * Number of instructions between tick processing.
+     * Higher values = better performance but less responsive to interrupts/timers.
+     */
+    private const TICK_INTERVAL = 256;
+
     public function __construct(
         protected MachineInterface $machine,
         protected RuntimeOptionInterface $runtimeOption,
@@ -123,7 +135,14 @@ class Runtime implements RuntimeInterface
         );
 
         $loadAddress = $bootStream->loadAddress();
-        $bootSize = $bootStream->fileSize();
+        // Only load the boot strap portion, not the entire boot image/disk.
+        // For El Torito floppy emulation, BIOS loads just the boot sector (512 bytes).
+        // Use catalogSectorCount (in 512-byte units) when available; otherwise default to 1 sector.
+        $bootSize = 512;
+        if ($bootStream instanceof \PHPMachineEmulator\Stream\ISO\ISOBootImageStream) {
+            $catalogSectors = max(1, $bootStream->bootImage()->catalogSectorCount());
+            $bootSize = min($bootStream->fileSize(), $catalogSectors * 512);
+        }
 
         $this->option()->logger()->debug(
             sprintf(
@@ -161,7 +180,12 @@ class Runtime implements RuntimeInterface
         $iterationContext = $cpu->iteration();
 
         while (!$this->memory->isEOF()) {
-            $this->tickTimers();
+            // Throttled tick processing for performance
+            // Only process ticks every TICK_INTERVAL instructions
+            if (++$this->instructionCounter >= self::TICK_INTERVAL) {
+                $this->instructionCounter = 0;
+                $this->tickTimers();
+            }
 
             // Execute instruction with iteration context
             // The iterate() method will handle REP loops internally if a handler is set

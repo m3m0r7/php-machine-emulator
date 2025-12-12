@@ -56,9 +56,9 @@ trait SegmentTrait
             default => 0xFFFF,
         };
         $linearMask = $this->linearMask($runtime);
+        $selector = $runtime->memoryAccessor()->fetch($segment)->asByte();
 
         if ($runtime->context()->cpu()->isProtectedMode()) {
-            $selector = $runtime->memoryAccessor()->fetch($segment)->asByte();
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor !== null && $descriptor['present']) {
                 $effOffset = $offset & $offsetMask;
@@ -70,21 +70,17 @@ trait SegmentTrait
         }
 
         // Big Real Mode (Unreal Mode) support:
-        // If we have a cached descriptor with extended limit, use it
-        // This happens when code loads a 4GB segment in PM, then returns to RM
+        // If we have a cached descriptor (loaded in PM), use that base/limit even in real mode.
+        // This models Unreal Mode where segment caches retain 32-bit bases/limits after PE is cleared.
         $cachedDescriptor = $runtime->context()->cpu()->getCachedSegmentDescriptor($segment);
-        if ($cachedDescriptor !== null && $addressSize === 32) {
-            // Using 32-bit addressing in real mode with cached descriptor
-            $effOffset = $offset & 0xFFFFFFFF;
-
-            // Check against cached limit (usually 4GB for Big Real Mode)
-            if (isset($cachedDescriptor['limit']) && $effOffset > $cachedDescriptor['limit']) {
-                // Limit exceeded - fall back to normal real mode
+        if ($cachedDescriptor !== null) {
+            $effOffset = $offset & $offsetMask;
+            $limit = $cachedDescriptor['limit'] ?? $offsetMask;
+            if ($effOffset > $limit) {
+                // Clamp to 16-bit wraparound if offset exceeds the cached limit
                 $effOffset = $offset & 0xFFFF;
             }
-
-            // In Big Real Mode, base is from the cached descriptor (usually 0)
-            $base = $cachedDescriptor['base'] ?? 0;
+            $base = $cachedDescriptor['base'] ?? (($selector << 4) & 0xFFFFF);
             return ($base + $effOffset) & $linearMask;
         }
 
@@ -284,6 +280,9 @@ trait SegmentTrait
         $ctx = $runtime->context()->cpu();
         if ($ctx->isProtectedMode()) {
             $descriptor ??= $this->readSegmentDescriptor($runtime, $normalized);
+        } else {
+            // Real mode always defaults to 16-bit code; ignore cached descriptor size
+            $descriptor = null;
         }
         $defaultSize = $descriptor['default'] ?? ($ctx->isProtectedMode() ? 32 : 16);
         $ctx->setDefaultOperandSize($defaultSize);
@@ -334,6 +333,25 @@ trait SegmentTrait
         }
 
         return $dpl;
+    }
+
+    /**
+     * Cache the current segment descriptors for all segment registers.
+     * This is used when leaving protected mode so that the real-mode
+     * execution can continue to use the cached bases/limits (Unreal Mode).
+     */
+    protected function cacheCurrentSegmentDescriptors(RuntimeInterface $runtime): void
+    {
+        foreach ([RegisterType::CS, RegisterType::DS, RegisterType::ES, RegisterType::FS, RegisterType::GS, RegisterType::SS] as $seg) {
+            $selector = $runtime->memoryAccessor()->fetch($seg)->asByte();
+            if ($selector === 0) {
+                continue;
+            }
+            $descriptor = $this->readSegmentDescriptor($runtime, $selector);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $runtime->context()->cpu()->cacheSegmentDescriptor($seg, $descriptor);
+            }
+        }
     }
 
     // Abstract methods that must be implemented by using class/trait

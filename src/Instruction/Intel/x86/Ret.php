@@ -31,6 +31,8 @@ class Ret implements InstructionInterface
 
         $ma = $runtime->memoryAccessor();
         $espBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize($size);
+        $stackPeek = $this->segmentOffsetAddress($runtime, RegisterType::SS, $espBefore);
+        $stackPeekVal = $this->readMemory16($runtime, $stackPeek);
         $returnIp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
         $targetCs = $ma->fetch(RegisterType::CS)->asByte();
@@ -40,18 +42,25 @@ class Ret implements InstructionInterface
         $nextCpl = null;
 
         if ($opcode === 0xCB || $opcode === 0xCA) {
+            $espBeforeFar = $ma->fetch(RegisterType::ESP)->asBytesBySize(32);
             // FAR ret: pop CS as well
-            $targetCs = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
+            $targetCs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
             if ($runtime->context()->cpu()->isProtectedMode()) {
                 $descriptor = $this->resolveCodeDescriptor($runtime, $targetCs);
                 $nextCpl = $this->computeCplForTransfer($runtime, $targetCs, $descriptor);
             }
             $newCpl = $targetCs & 0x3;
+            $runtime->option()->logger()->debug(sprintf(
+                'RET FAR: returnIp=0x%04X targetCs=0x%04X ESP(before)=0x%08X',
+                $returnIp,
+                $targetCs,
+                $espBeforeFar
+            ));
 
             if ($runtime->context()->cpu()->isProtectedMode() && $newCpl > $currentCpl) {
                 // Returning to outer privilege: pop new ESP/SS from current stack before switching.
                 $newEsp = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
-                $newSs = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
+                $newSs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
                 $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
                 $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $size);
             }
@@ -68,7 +77,32 @@ class Ret implements InstructionInterface
         if ($runtime->option()->shouldChangeOffset()) {
             // Always use linearCodeAddress for both near and far returns
             // This properly handles protected mode by resolving segment base from descriptor
-            $cs = ($opcode === 0xCB || $opcode === 0xCA) ? $targetCs : $ma->fetch(RegisterType::CS)->asByte();
+            $cs = ($opcode === 0xCB || $opcode === 0xCA) ? ($targetCs & 0xFFFF) : $ma->fetch(RegisterType::CS)->asByte();
+            if ($opcode === 0xC3 || $opcode === 0xC2) {
+                if ($returnIp < 0x0800 && !$runtime->context()->cpu()->isProtectedMode()) {
+                    $stackAddr = $this->segmentOffsetAddress($runtime, RegisterType::SS, $espBefore);
+                    $stackTop = $this->readMemory16($runtime, $stackAddr);
+                    $stackNext = $this->readMemory16($runtime, $stackAddr + 2);
+                    $cachedSs = $runtime->context()->cpu()->getCachedSegmentDescriptor(RegisterType::SS);
+                    $ss = $ma->fetch(RegisterType::SS)->asByte();
+                    $runtime->option()->logger()->debug(sprintf(
+                        'RET NEAR: returnIp=0x%04X CS=0x%04X SS=0x%04X ESP(before)=0x%08X ESP(after)=0x%08X opSize=%d defaultOp=%d stackTop=0x%04X next=0x%04X stackAddr=0x%08X cachedSS[base=0x%08X limit=0x%08X present=%s]',
+                        $returnIp,
+                        $cs,
+                        $ss,
+                        $espBefore,
+                        $ma->fetch(RegisterType::ESP)->asBytesBySize(32),
+                        $size,
+                        $runtime->context()->cpu()->defaultOperandSize(),
+                        $stackPeekVal,
+                        $stackNext,
+                        $stackAddr,
+                        $cachedSs['base'] ?? 0,
+                        $cachedSs['limit'] ?? 0,
+                        $cachedSs ? 'yes' : 'no'
+                    ));
+                }
+            }
             $linear = $this->linearCodeAddress($runtime, $cs, $returnIp, $size);
             $runtime->memory()->setOffset($linear);
         }

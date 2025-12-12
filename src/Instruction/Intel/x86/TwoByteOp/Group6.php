@@ -113,6 +113,7 @@ class Group6 implements InstructionInterface
         $value = $this->readRm16($runtime, $memory, $modrm);
         // LMSW only affects lower 4 bits of CR0: PE, MP, EM, TS
         $cr0 = $runtime->memoryAccessor()->readControlRegister(0);
+        $wasProtected = $runtime->context()->cpu()->isProtectedMode();
         $cr0 = ($cr0 & 0xFFFFFFF0) | ($value & 0xF);
         $runtime->option()->logger()->debug(sprintf(
             'LMSW: value=0x%04X -> CR0=0x%08X',
@@ -122,6 +123,9 @@ class Group6 implements InstructionInterface
         $runtime->memoryAccessor()->writeControlRegister(0, $cr0);
         $runtime->context()->cpu()->setProtectedMode((bool) ($cr0 & 0x1));
         $runtime->context()->cpu()->setPagingEnabled((bool) ($cr0 & 0x80000000));
+        if ($wasProtected && !$runtime->context()->cpu()->isProtectedMode()) {
+            $this->cacheCurrentSegmentDescriptors($runtime);
+        }
         return ExecutionStatus::SUCCESS;
     }
 

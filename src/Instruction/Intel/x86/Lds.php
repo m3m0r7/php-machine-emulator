@@ -65,6 +65,27 @@ class Lds implements InstructionInterface
             $segment,
         );
 
+        // Maintain hidden segment cache for protected/unreal and real-mode semantics.
+        $cpu = $runtime->context()->cpu();
+        if ($cpu->isProtectedMode() && $segment !== 0) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $segment);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $cpu->cacheSegmentDescriptor($segmentReg, $descriptor);
+            }
+        }
+        if (!$cpu->isProtectedMode()) {
+            $cpu->cacheSegmentDescriptor($segmentReg, [
+                'base' => (($segment << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
+        }
+
         return ExecutionStatus::SUCCESS;
     }
 }

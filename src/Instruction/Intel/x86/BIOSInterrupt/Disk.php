@@ -200,6 +200,11 @@ class Disk implements InterruptInterface
         // Restore bootStream offset
         $bootStream->setOffset($savedBootOffset);
 
+        // Invalidate instruction decode/translation caches for the affected memory region
+        // This is critical when loading code (e.g., program executables) to memory,
+        // as the old cached instructions would be stale
+        $runtime->architectureProvider()->instructionExecutor()->invalidateCaches();
+
         // update AL with sectors read, AH = 0, clear CF
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
         $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorsToRead);
@@ -324,6 +329,9 @@ class Disk implements InterruptInterface
                 $runtime->memoryAccessor()->writeRawByte($address, ord($data[$i]));
             }
 
+            // Invalidate instruction caches when loading code
+            $runtime->architectureProvider()->instructionExecutor()->invalidateCaches();
+
             $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorCount);
             $runtime->memoryAccessor()->setCarryFlag(false);
@@ -367,6 +375,9 @@ class Disk implements InterruptInterface
         }
 
         $bootStream->setOffset($savedBootOffset);
+
+        // Invalidate instruction caches when loading code
+        $runtime->architectureProvider()->instructionExecutor()->invalidateCaches();
 
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
         $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorCount);

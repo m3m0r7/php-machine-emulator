@@ -89,6 +89,36 @@ trait ModRmTrait
     }
 
     /**
+     * Write 8-bit operand to R/M field with debug logging.
+     */
+    protected function writeRm8WithDebug(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value, bool $debug): void
+    {
+        if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
+            $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $value);
+            return;
+        }
+
+        $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+        if ($debug) {
+            $runtime->option()->logger()->warning(sprintf(
+                'writeRm8WithDebug: linearAddress=0x%05X value=0x%02X',
+                $linearAddress,
+                $value
+            ));
+        }
+        $this->writeMemory8($runtime, $linearAddress, $value);
+        if ($debug) {
+            // Verify the write
+            $readBack = $this->readMemory8($runtime, $linearAddress);
+            $runtime->option()->logger()->warning(sprintf(
+                'writeRm8WithDebug: readBack=0x%02X at 0x%05X',
+                $readBack,
+                $linearAddress
+            ));
+        }
+    }
+
+    /**
      * Read 16-bit operand from R/M field.
      */
     protected function readRm16(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
