@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Stream\ISO\ISO9660;
+use PHPMachineEmulator\Stream\ISO\ElTorito;
 use PHPMachineEmulator\Stream\ISO\ISOBootImageStream;
 
 class Disk implements InterruptInterface
@@ -17,6 +18,11 @@ class Disk implements InterruptInterface
     private const CD_SECTOR_SIZE = ISO9660::SECTOR_SIZE;
     private const SECTORS_PER_TRACK = 63;
     private const HEADS_PER_CYLINDER = 16;
+    private const FLOPPY_CYLINDERS = 80;
+    private const FLOPPY_HEADS = 2;
+    private const FLOPPY_SECTORS_PER_TRACK = 18;
+    private const ELTORITO_EMULATED_FLOPPY_DRIVE = 0x10;
+    private static ?bool $traceInt13Caller = null;
 
     public function __construct(protected RuntimeInterface $runtime)
     {
@@ -61,12 +67,17 @@ class Disk implements InterruptInterface
     {
         $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
 
+        if (!$this->isValidBiosDrive($runtime, $dl)) {
+            $this->fail($runtime, 0x01);
+            return;
+        }
+
         // Use appropriate geometry based on drive type
         if ($dl < 0x80) {
             // 1.44MB floppy geometry
-            $heads = 2;
-            $sectors = 18;
-            $cylinders = 80;
+            $heads = self::FLOPPY_HEADS;
+            $sectors = self::FLOPPY_SECTORS_PER_TRACK;
+            $cylinders = self::FLOPPY_CYLINDERS;
         } else {
             // Hard disk geometry
             $heads = self::HEADS_PER_CYLINDER;
@@ -82,7 +93,8 @@ class Disk implements InterruptInterface
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::ECX, $cylinders - 1);    // CH (max cylinder number)
 
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::EDX, $heads - 1);    // DH (max head number)
-        $runtime->memoryAccessor()->writeToLowBit(RegisterType::EDX, $dl < 0x80 ? 0x01 : 0x01);  // DL = number of drives
+        $driveCount = $dl < 0x80 ? $this->floppyDriveCount($runtime) : $this->hardDriveCount($runtime);
+        $runtime->memoryAccessor()->writeToLowBit(RegisterType::EDX, $driveCount & 0xFF);  // DL = number of drives
 
         $runtime->memoryAccessor()->setCarryFlag(false);
     }
@@ -99,11 +111,6 @@ class Disk implements InterruptInterface
             $runtime->memory()->offset() & 0xFFFF
         ));
 
-        if ($sectorsToRead === 0) {
-            $this->fail($runtime, 0x04); // sector not found
-            return;
-        }
-
         $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
@@ -117,6 +124,16 @@ class Disk implements InterruptInterface
         $dx = $runtime->memoryAccessor()->fetch(RegisterType::EDX);
         $dh = $dx->asHighBit();  // head
         $dl = $dx->asLowBit(); // drive
+
+        if (!$this->isValidBiosDrive($runtime, $dl)) {
+            $this->fail($runtime, 0x01); // invalid command/drive
+            return;
+        }
+
+        if ($sectorsToRead === 0) {
+            $this->fail($runtime, 0x0D); // invalid number of sectors
+            return;
+        }
 
         // Read from bootStream (disk image) directly, not from unified memory
         $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
@@ -137,16 +154,37 @@ class Disk implements InterruptInterface
 
         // For floppy emulation (DL < 0x80), use 1.44MB floppy geometry
         if ($dl < 0x80) {
-            $sectorsPerTrack = 18;
-            $headsPerCylinder = 2;
+            $sectorsPerTrack = self::FLOPPY_SECTORS_PER_TRACK;
+            $headsPerCylinder = self::FLOPPY_HEADS;
+            $cylinders = self::FLOPPY_CYLINDERS;
         } else {
             $sectorsPerTrack = self::SECTORS_PER_TRACK;
             $headsPerCylinder = self::HEADS_PER_CYLINDER;
+            $cylinders = 1024;
+        }
+
+        if ($head >= $headsPerCylinder || $sector > $sectorsPerTrack || $cylinder >= $cylinders) {
+            $this->fail($runtime, 0x04);
+            return;
         }
 
         $lba = ($cylinder * $headsPerCylinder + $head) * $sectorsPerTrack + ($sector - 1);
         $bytes = $sectorsToRead * self::SECTOR_SIZE;
         $bufferAddress = $this->segmentLinearAddress($runtime, $es, $bx, $addressSize);
+
+        if ($this->shouldTraceInt13Caller() && ($lba === 67 || $lba === 1343)) {
+            [$retCs, $retIp, $retFlags, $callerCs, $callerIp] = $this->peekChainedReturnFrame16($runtime);
+            $runtime->option()->logger()->debug(sprintf(
+                'INT 13h caller: return=%04X:%04X (callsite~%04X:%04X) FLAGS=0x%04X chainReturn=%04X:%04X',
+                $retCs,
+                $retIp,
+                $retCs,
+                ($retIp - 2) & 0xFFFF,
+                $retFlags,
+                $callerCs,
+                $callerIp,
+            ));
+        }
 
         // Also debug the [0x01FA] value for MikeOS
         $bootLoadAddress = $runtime->logicBoard()->media()->primary()?->stream()?->loadAddress() ?? 0x7C00;
@@ -477,11 +515,6 @@ class Disk implements InterruptInterface
 
     private function writeSectorsCHS(RuntimeInterface $runtime, int $sectorsToWrite): void
     {
-        if ($sectorsToWrite === 0) {
-            $this->fail($runtime, 0x04);
-            return;
-        }
-
         $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
@@ -496,6 +529,16 @@ class Disk implements InterruptInterface
         $dh = $dx->asHighBit();
         $dl = $dx->asLowBit();
 
+        if (!$this->isValidBiosDrive($runtime, $dl)) {
+            $this->fail($runtime, 0x01);
+            return;
+        }
+
+        if ($sectorsToWrite === 0) {
+            $this->fail($runtime, 0x0D);
+            return;
+        }
+
         $cylinder = (($cl >> 6) & 0x03) << 8;
         $cylinder |= $ch;
         $sector = $cl & 0x3F;
@@ -508,11 +551,18 @@ class Disk implements InterruptInterface
 
         // Use appropriate geometry based on drive type
         if ($dl < 0x80) {
-            $sectorsPerTrack = 18;
-            $headsPerCylinder = 2;
+            $sectorsPerTrack = self::FLOPPY_SECTORS_PER_TRACK;
+            $headsPerCylinder = self::FLOPPY_HEADS;
+            $cylinders = self::FLOPPY_CYLINDERS;
         } else {
             $sectorsPerTrack = self::SECTORS_PER_TRACK;
             $headsPerCylinder = self::HEADS_PER_CYLINDER;
+            $cylinders = 1024;
+        }
+
+        if ($head >= $headsPerCylinder || $sector > $sectorsPerTrack || $cylinder >= $cylinders) {
+            $this->fail($runtime, 0x04);
+            return;
         }
 
         $lba = ($cylinder * $headsPerCylinder + $head) * $sectorsPerTrack + ($sector - 1);
@@ -554,6 +604,13 @@ class Disk implements InterruptInterface
         $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
         $ma = $runtime->memoryAccessor();
 
+        if (!$this->isValidBiosDrive($runtime, $dl)) {
+            // No such drive.
+            $ma->writeToHighBit(RegisterType::EAX, 0x00);
+            $ma->setCarryFlag(false);
+            return;
+        }
+
         if ($dl >= 0x80) {
             // Hard disk - return type 3
             $ma->writeToHighBit(RegisterType::EAX, 0x03);
@@ -562,11 +619,61 @@ class Disk implements InterruptInterface
             $ma->write16Bit(RegisterType::ECX, ($totalSectors >> 16) & 0xFFFF);
             $ma->write16Bit(RegisterType::EDX, $totalSectors & 0xFFFF);
         } else {
-            // Floppy or no drive
-            $ma->writeToHighBit(RegisterType::EAX, 0x00);
+            // Floppy drive with change-line support (typical 1.44MB).
+            $ma->writeToHighBit(RegisterType::EAX, 0x02);
         }
 
         $ma->setCarryFlag(false);
+    }
+
+    private function floppyDriveCount(RuntimeInterface $runtime): int
+    {
+        $equipFlags = $this->readMemory16($runtime, 0x410);
+        if (($equipFlags & 0x1) === 0) {
+            return 0;
+        }
+
+        return ((($equipFlags >> 6) & 0x3) + 1);
+    }
+
+    private function hardDriveCount(RuntimeInterface $runtime): int
+    {
+        return $this->readMemory8($runtime, 0x475) & 0xFF;
+    }
+
+    private function isValidBiosDrive(RuntimeInterface $runtime, int $dl): bool
+    {
+        if ($dl < 0x80) {
+            $count = $this->floppyDriveCount($runtime);
+            if ($dl < $count) {
+                return true;
+            }
+
+            // El Torito floppy emulation can appear as a non-standard "virtual" drive number
+            // even though the BDA equipment flags only represent up to 4 physical floppies.
+            return $dl === self::ELTORITO_EMULATED_FLOPPY_DRIVE && $this->isElToritoFloppyEmulation($runtime);
+        }
+
+        $count = $this->hardDriveCount($runtime);
+        return ($dl - 0x80) < $count;
+    }
+
+    private function isElToritoFloppyEmulation(RuntimeInterface $runtime): bool
+    {
+        $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
+        if (!$bootStream instanceof ISOBootImageStream) {
+            return false;
+        }
+        if ($bootStream->isNoEmulation()) {
+            return false;
+        }
+
+        $mediaType = $bootStream->bootImage()->mediaType();
+        return in_array($mediaType, [
+            ElTorito::MEDIA_FLOPPY_1_2M,
+            ElTorito::MEDIA_FLOPPY_1_44M,
+            ElTorito::MEDIA_FLOPPY_2_88M,
+        ], true);
     }
 
     /**
@@ -705,5 +812,42 @@ class Disk implements InterruptInterface
         $lo = $this->readMemory16($runtime, $address);
         $hi = $this->readMemory16($runtime, $address + 2);
         return ($hi << 16) | $lo;
+    }
+
+    private function shouldTraceInt13Caller(): bool
+    {
+        if (self::$traceInt13Caller === null) {
+            $env = getenv('PHPME_TRACE_INT13_CALLER');
+            self::$traceInt13Caller = $env !== false && $env !== '' && $env !== '0';
+        }
+        return self::$traceInt13Caller;
+    }
+
+    /**
+     * Peek the stack frame expected by an INT handler (or PUSHF+CALL FAR chain):
+     * [SP+0]=IP, [SP+2]=CS, [SP+4]=FLAGS (all 16-bit).
+     *
+     * Also attempt to read the next FAR return address at [SP+6]=IP, [SP+8]=CS.
+     *
+     * @return array{int,int,int,int,int} [CS, IP, FLAGS, chainCS, chainIP]
+     */
+    private function peekChainedReturnFrame16(RuntimeInterface $runtime): array
+    {
+        $ma = $runtime->memoryAccessor();
+        $ss = $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+        $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize(16) & 0xFFFF;
+        $linearMask = $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $frameLinear = ((($ss << 4) & 0xFFFFF) + $sp) & $linearMask;
+
+        $ip = $this->readMemory16($runtime, $frameLinear);
+        $cs = $this->readMemory16($runtime, ($frameLinear + 2) & $linearMask);
+        $flags = $this->readMemory16($runtime, ($frameLinear + 4) & $linearMask);
+
+        // Best-effort: if called via a FAR CALL (common in DOS/IO.SYS),
+        // the caller return CS:IP sits right under the FLAGS we pushed.
+        $chainIp = $this->readMemory16($runtime, ($frameLinear + 6) & $linearMask);
+        $chainCs = $this->readMemory16($runtime, ($frameLinear + 8) & $linearMask);
+
+        return [$cs, $ip, $flags, $chainCs, $chainIp];
     }
 }

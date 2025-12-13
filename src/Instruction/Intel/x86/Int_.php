@@ -44,16 +44,16 @@ class Int_ implements InstructionInterface
         $opSize = $runtime->context()->cpu()->operandSize();
         $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
         $isProtected = $runtime->context()->cpu()->isProtectedMode();
-        $returnVal = !$isProtected
-            ? $returnIp
-            : $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
+        // $returnIp is a linear address (the code stream offset). Convert to an offset
+        // relative to the current CS before pushing it for IRET/IRETD.
+        $returnOffset = $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
 
         if ($isProtected) {
-            $this->protectedModeInterrupt($runtime, $vector, $returnVal, $errorCode, false);
+            $this->protectedModeInterrupt($runtime, $vector, $returnOffset, $errorCode, false);
             return;
         }
 
-        $this->vectorInterrupt($runtime, $vector, $returnVal);
+        $this->vectorInterrupt($runtime, $vector, $returnOffset);
     }
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
@@ -63,7 +63,60 @@ class Int_ implements InstructionInterface
             ->memory()
             ->byte();
 
+        // INT 11h (Equipment List) is used during DOS boot to detect hardware.
+        // Provide a minimal BIOS implementation when IVT still points to ROM.
+        if ($vector === 0x11) {
+            $vectorAddress = ($vector * 4) & 0xFFFF;
+            $ivtSegment = $this->readMemory16($runtime, $vectorAddress + 2);
+            if ($ivtSegment !== 0xF000) {
+                return $this->handleUnknownInterrupt($runtime, $vector);
+            }
+            $equipFlags = $this->readMemory16($runtime, 0x410);
+            $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $equipFlags, 16);
+            $runtime->memoryAccessor()->setCarryFlag(false);
+            return ExecutionStatus::SUCCESS;
+        }
+
+        // INT 14h (Serial) is probed during DOS boot based on equipment flags.
+        // We do not emulate UART hardware yet, so report "port not present/timeout"
+        // to keep DOS from calling into uninitialized driver vectors.
+        if ($vector === 0x14) {
+            $ma = $runtime->memoryAccessor();
+            // Set AH=0x80 (timeout/error), AL=0, CF=1.
+            $ma->writeToHighBit(RegisterType::EAX, 0x80);
+            $ma->writeToLowBit(RegisterType::EAX, 0x00);
+            $ma->setCarryFlag(true);
+            return ExecutionStatus::SUCCESS;
+        }
+
         $operand = BIOSInterrupt::tryFrom($vector);
+
+        // INT 15h AH=C0 ("Get System Configuration Parameters") is polled during DOS boot.
+        // Some DOS/BIOS implementations hook INT 15h early and then chain to the ROM handler.
+        // Our ROM handler lives in PHP, so if the vector is hooked we can safely handle AH=C0
+        // directly here to avoid getting stuck in broken chain stubs.
+        if ($operand === BIOSInterrupt::SYSTEM_INTERRUPT) {
+            $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(16);
+            $ah = ($ax >> 8) & 0xFF;
+            if ($ah === 0xC0) {
+                ($this->interruptInstances[System::class] ??= new System())->process($runtime);
+                return ExecutionStatus::SUCCESS;
+            }
+        }
+
+        // If a BIOS interrupt vector has been hooked by software (IVT no longer points
+        // into the BIOS ROM segment), respect the hook and delegate via IVT.
+        // This is critical once DOS/drivers install their own handlers (e.g. INT 13h).
+        if ($operand !== null
+            && $operand !== BIOSInterrupt::DOS_TERMINATE_INTERRUPT
+            && $operand !== BIOSInterrupt::DOS_INTERRUPT
+        ) {
+            $vectorAddress = ($vector * 4) & 0xFFFF;
+            $ivtSegment = $this->readMemory16($runtime, $vectorAddress + 2);
+            if ($ivtSegment !== 0xF000) {
+                return $this->handleUnknownInterrupt($runtime, $vector);
+            }
+        }
 
         match ($operand) {
             BIOSInterrupt::TIMER_INTERRUPT => ($this->interruptInstances[Timer::class] ??= new Timer())
@@ -80,17 +133,31 @@ class Int_ implements InstructionInterface
                 ->process($runtime),
             BIOSInterrupt::SYSTEM_INTERRUPT => ($this->interruptInstances[System::class] ??= new System())->process($runtime),
             BIOSInterrupt::COMBOOT_INTERRUPT => throw new NotImplementedException('INT 22h (COMBOOT API) is not implemented'),
-            BIOSInterrupt::DOS_TERMINATE_INTERRUPT => null,
-            BIOSInterrupt::DOS_INTERRUPT => null,
+            // DOS interrupts are handled below to respect IVT hooks when DOS is loaded.
+            BIOSInterrupt::DOS_TERMINATE_INTERRUPT, BIOSInterrupt::DOS_INTERRUPT => null,
             default => $this->handleUnknownInterrupt($runtime, $vector),
         };
 
-        if ($operand === BIOSInterrupt::DOS_TERMINATE_INTERRUPT) {
-            return ExecutionStatus::EXIT;
-        }
+        // DOS interrupts (INT 20h/21h):
+        // If DOS has hooked these vectors, delegate to IVT-based handling.
+        // Otherwise provide minimal built-in DOS services (or terminate).
+        if ($operand === BIOSInterrupt::DOS_TERMINATE_INTERRUPT || $operand === BIOSInterrupt::DOS_INTERRUPT) {
+            $vectorAddress = ($vector * 4) & 0xFFFF;
+            $ivtOffset = $this->readMemory16($runtime, $vectorAddress);
+            $ivtSegment = $this->readMemory16($runtime, $vectorAddress + 2);
+            $ivtIsDefault = ($ivtSegment === 0xF000 && $ivtOffset === 0xFF53);
 
-        if ($operand === BIOSInterrupt::DOS_INTERRUPT) {
-            return ($this->interruptInstances[Dos::class] ??= new Dos($this->instructionList))->process($runtime, $opcode);
+            if (!$ivtIsDefault) {
+                // DOS is present and has installed its own handler.
+                return $this->handleUnknownInterrupt($runtime, $vector);
+            }
+
+            if ($operand === BIOSInterrupt::DOS_TERMINATE_INTERRUPT) {
+                return ExecutionStatus::EXIT;
+            }
+
+            // Minimal DOS services when no handler is installed yet.
+            return ($this->interruptInstances[Dos::class] ??= new Dos())->process($runtime, $opcodes);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -101,11 +168,16 @@ class Int_ implements InstructionInterface
      */
     private function handleUnknownInterrupt(RuntimeInterface $runtime, int $vector): ExecutionStatus
     {
-        $returnOffset = $runtime->memory()->offset();
+        $opSize = $runtime->context()->cpu()->operandSize();
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+        $returnLinear = $runtime->memory()->offset();
+        $returnOffset = $this->codeOffsetFromLinear($runtime, $cs, $returnLinear, $opSize);
         $runtime->option()->logger()->debug(sprintf(
-            'INT 0x%02X: Not implemented as BIOS service, delegating to IVT-based interrupt handling (return=0x%05X)',
+            'INT 0x%02X: Not implemented as BIOS service, delegating to IVT-based interrupt handling (return_linear=0x%05X return_offset=0x%04X CS=0x%04X)',
             $vector,
-            $returnOffset
+            $returnLinear,
+            $returnOffset,
+            $cs,
         ));
         $this->vectorInterrupt($runtime, $vector, $returnOffset);
         return ExecutionStatus::SUCCESS;

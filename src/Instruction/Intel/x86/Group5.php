@@ -125,21 +125,25 @@ class Group5 implements InstructionInterface
     {
         $size = $runtime->context()->cpu()->operandSize();
 
-        $target = $this->readRm($runtime, $memory, $modRegRM, $size);
-        $pos = $runtime->memory()->offset();
+        // Indirect near call uses an offset relative to current CS.
+        $targetOffset = $this->readRm($runtime, $memory, $modRegRM, $size);
+        $posLinear = $runtime->memory()->offset();
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+        $returnOffset = $this->codeOffsetFromLinear($runtime, $cs, $posLinear, $size);
+        $linearTarget = $this->linearCodeAddress($runtime, $cs, (int)$targetOffset, $size);
 
         // Check for NULL pointer call
-        if ($target === 0) {
+        if (($cs & 0xFFFF) === 0 && ((int)$targetOffset & 0xFFFF) === 0) {
             throw new NullPointerException(sprintf(
                 'CALL to NULL pointer (0x00000000) at IP=0x%05X - possible uninitialized function pointer or failed module load',
-                $pos - 2
+                $posLinear - 2
             ));
         }
 
-        $runtime->memoryAccessor()->push(RegisterType::ESP, $pos, $runtime->context()->cpu()->operandSize());
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $returnOffset, $size);
 
         if ($runtime->option()->shouldChangeOffset()) {
-            $runtime->memory()->setOffset($target);
+            $runtime->memory()->setOffset($linearTarget);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -148,7 +152,10 @@ class Group5 implements InstructionInterface
     protected function jmpNearRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $size = $runtime->context()->cpu()->operandSize();
-        $target = $this->readRm($runtime, $memory, $modRegRM, $size);
+        // Indirect near jump uses an offset relative to current CS.
+        $targetOffset = $this->readRm($runtime, $memory, $modRegRM, $size);
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+        $target = $this->linearCodeAddress($runtime, $cs, (int)$targetOffset, $size);
 
         $runtime->option()->logger()->debug(sprintf(
             'JMP [r/m] (Group5): target=0x%08X mode=%d rm=%d',
@@ -187,6 +194,47 @@ class Group5 implements InstructionInterface
             'CALL FAR: DS=0x%X BX=0x%X SI=0x%X addr=0x%X offset=0x%X segment=0x%X',
             $ds, $bx, $si, $addr, $offset, $segment
         ));
+
+        // In real mode, some DOS initialization paths call through optional far pointers.
+        // If the pointer is NULL or points into an all-zero/uninitialized region, skip it
+        // instead of jumping into garbage.
+        if (!$runtime->context()->cpu()->isProtectedMode()) {
+            if ($segment === 0 && $offset === 0) {
+                $runtime->option()->logger()->debug('CALL FAR: null far pointer, skipping');
+                // If caller used PUSHF before chaining to an IRET-style handler,
+                // remove that flags word to keep the stack balanced.
+                $sp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(16);
+                $flagsLinear = $this->segmentOffsetAddress($runtime, RegisterType::SS, $sp);
+                $flagsCandidate = $this->readMemory16($runtime, $flagsLinear);
+                if (($flagsCandidate & 0x2) !== 0 && ($flagsCandidate & 0x28) === 0 && ($flagsCandidate & 0x8000) === 0) {
+                    $runtime->memoryAccessor()->pop(RegisterType::ESP, 16);
+                }
+                return ExecutionStatus::SUCCESS;
+            }
+            $linearTarget = $this->linearCodeAddress($runtime, $segment, $offset, $opSize);
+            $allZero = true;
+            for ($i = 0; $i < 8; $i++) {
+                if ($this->readMemory8($runtime, $linearTarget + $i) !== 0x00) {
+                    $allZero = false;
+                    break;
+                }
+            }
+            if ($allZero) {
+                $runtime->option()->logger()->debug(sprintf(
+                    'CALL FAR: target 0x%04X:%04X (linear 0x%05X) looks uninitialized, skipping',
+                    $segment,
+                    $offset,
+                    $linearTarget
+                ));
+                $sp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(16);
+                $flagsLinear = $this->segmentOffsetAddress($runtime, RegisterType::SS, $sp);
+                $flagsCandidate = $this->readMemory16($runtime, $flagsLinear);
+                if (($flagsCandidate & 0x2) !== 0 && ($flagsCandidate & 0x28) === 0 && ($flagsCandidate & 0x8000) === 0) {
+                    $runtime->memoryAccessor()->pop(RegisterType::ESP, 16);
+                }
+                return ExecutionStatus::SUCCESS;
+            }
+        }
 
         $pos = $runtime->memory()->offset();
 

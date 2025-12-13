@@ -58,8 +58,9 @@ class System implements InterruptInterface
     {
         $ma = $runtime->memoryAccessor();
 
-        // Build system configuration table in low memory
-        $tableAddr = 0x0000F000; // ROM BIOS area
+        // Build system configuration table in ROM BIOS area (F000:0000).
+        // Some DOS code checks for a ROM-based pointer and will retry if ES is not F000h.
+        $tableAddr = 0x000F0000;
 
         // Table structure:
         // Word: table length (in bytes, not including this word)
@@ -89,9 +90,9 @@ class System implements InterruptInterface
             $ma->writeBySize($tableAddr + $i, $table[$i], 8);
         }
 
-        // Return ES:BX pointing to the table
-        $ma->write16Bit(RegisterType::ES, ($tableAddr >> 4) & 0xF000);
-        $ma->write16Bit(RegisterType::EBX, $tableAddr & 0xFFFF);
+        // Return ES:BX pointing to the table (segment:offset).
+        $ma->write16Bit(RegisterType::ES, ($tableAddr >> 4) & 0xFFFF);
+        $ma->write16Bit(RegisterType::EBX, $tableAddr & 0xF);
         $ma->writeToHighBit(RegisterType::EAX, 0x00); // AH = 0 (success)
         $ma->setCarryFlag(false);
     }

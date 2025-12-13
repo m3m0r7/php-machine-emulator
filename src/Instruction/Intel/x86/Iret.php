@@ -25,6 +25,29 @@ class Iret implements InstructionInterface
         $opSize = $runtime->context()->cpu()->operandSize();
         $ma = $runtime->memoryAccessor();
 
+        // Real-mode BIOS trampolines sometimes return via IRET even when
+        // chained through a far CALL without a preceding PUSHF.
+        // In that case, the stack does not contain a flags word for this IRET.
+        // Detect it heuristically and fall back to a far return (RETF).
+        if (!$runtime->context()->cpu()->isProtectedMode()) {
+            $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($opSize);
+            $bytesIp = intdiv($opSize, 8);
+            $flagsSp = ($sp + $bytesIp + 2) & 0xFFFF; // +CS(2)
+            $flagsLinear = $this->segmentOffsetAddress($runtime, RegisterType::SS, $flagsSp);
+            $flagsCandidate = $this->readMemory16($runtime, $flagsLinear);
+            if (($flagsCandidate & 0x2) === 0) {
+                // Treat as RETF: pop IP and CS only, leave flags on stack.
+                $ip = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+                $cs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+                $this->writeCodeSegment($runtime, $cs);
+                if ($runtime->option()->shouldChangeOffset()) {
+                    $linear = $this->linearCodeAddress($runtime, $cs & 0xFFFF, $ip, $opSize);
+                    $runtime->memory()->setOffset($linear);
+                }
+                return ExecutionStatus::SUCCESS;
+            }
+        }
+
         $ip = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
         // CS selectors are always 16-bit, even when operand size is 32-bit.
         $cs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);

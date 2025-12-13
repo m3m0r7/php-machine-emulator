@@ -34,7 +34,7 @@ class CmpJccPattern extends AbstractPatternedInstruction
             return null;
         }
 
-        // CMP opcodes: 0x39 (r/m32,r32), 0x3B (r32,r/m32) - only 32-bit supported
+        // CMP opcodes: 0x39 (r/m16/32,r16/32), 0x3B (r16/32,r/m16/32)
         $cmpOpcode = $bytes[0];
         if ($cmpOpcode !== 0x39 && $cmpOpcode !== 0x3B) {
             return null;
@@ -64,21 +64,36 @@ class CmpJccPattern extends AbstractPatternedInstruction
         // Decode Jcc condition
         $condition = $isShortJcc ? ($jccOpcode & 0x0F) : ($bytes[3] & 0x0F);
 
-        // Calculate target address
+        $rel8 = 0;
+        $rel16 = 0;
+        $rel32 = 0;
+
+        // Decode relative offsets (actual size depends on operand size at runtime for 0F 8x)
         if ($isShortJcc) {
             $rel = $bytes[3];
             if ($rel > 127) {
                 $rel = $rel - 256;
             }
-            $jccTarget = $ip + 4 + $rel;  // CMP(2) + Jcc(2)
-            $nextIp = $ip + 4;
+            $rel8 = $rel;
         } else {
-            $rel = $bytes[4] | ($bytes[5] << 8) | ($bytes[6] << 16) | ($bytes[7] << 24);
-            if ($rel > 0x7FFFFFFF) {
-                $rel = $rel - 0x100000000;
+            if (count($bytes) < 8) {
+                return null;
             }
-            $jccTarget = $ip + 8 + $rel;  // CMP(2) + Jcc(6)
-            $nextIp = $ip + 8;
+
+            $rel16 = ($bytes[4] | ($bytes[5] << 8)) & 0xFFFF;
+            if ($rel16 & 0x8000) {
+                $rel16 -= 0x10000;
+            }
+
+            $rel32 = (
+                $bytes[4]
+                | ($bytes[5] << 8)
+                | ($bytes[6] << 16)
+                | ($bytes[7] << 24)
+            ) & 0xFFFFFFFF;
+            if ($rel32 & 0x80000000) {
+                $rel32 -= 0x100000000;
+            }
         }
 
         $regMap = $this->getRegisterMap();
@@ -95,31 +110,57 @@ class CmpJccPattern extends AbstractPatternedInstruction
             return null;
         }
 
-        return function (RuntimeInterface $runtime) use ($ip, $dstReg, $srcReg, $condition, $jccTarget, $nextIp): PatternedInstructionResult {
+        return function (RuntimeInterface $runtime) use ($ip, $dstReg, $srcReg, $condition, $isShortJcc, $isLongJcc, $rel8, $rel16, $rel32): PatternedInstructionResult {
             $memoryAccessor = $runtime->memoryAccessor();
             $memory = $runtime->memory();
 
             // CMP: dst - src, set flags, discard result
-            $dst = $memoryAccessor->fetch($dstReg)->asBytesBySize(32);
-            $src = $memoryAccessor->fetch($srcReg)->asBytesBySize(32);
+            $opSize = $runtime->context()->cpu()->operandSize();
+            if ($opSize !== 16 && $opSize !== 32) {
+                return PatternedInstructionResult::skip($ip);
+            }
 
-            $result = ($dst - $src) & 0xFFFFFFFF;
+            $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $signMask = $opSize === 32 ? 0x80000000 : 0x8000;
+
+            $dst = $memoryAccessor->fetch($dstReg)->asBytesBySize($opSize) & $mask;
+            $src = $memoryAccessor->fetch($srcReg)->asBytesBySize($opSize) & $mask;
+
+            $result = ($dst - $src) & $mask;
 
             // Set flags
             $cf = $dst < $src;  // Unsigned borrow
             $zf = $result === 0;
-            $sf = ($result & 0x80000000) !== 0;
+            $sf = ($result & $signMask) !== 0;
+            $pf = $this->calculateParity($result & 0xFF);
 
             // Overflow detection for signed subtraction
-            $dstSign = ($dst & 0x80000000) !== 0;
-            $srcSign = ($src & 0x80000000) !== 0;
-            $resSign = ($result & 0x80000000) !== 0;
+            $dstSign = ($dst & $signMask) !== 0;
+            $srcSign = ($src & $signMask) !== 0;
+            $resSign = ($result & $signMask) !== 0;
             $of = ($dstSign !== $srcSign) && ($resSign === $srcSign);
 
             $memoryAccessor->setCarryFlag($cf);
             $memoryAccessor->setZeroFlag($zf);
             $memoryAccessor->setSignFlag($sf);
             $memoryAccessor->setOverflowFlag($of);
+            $memoryAccessor->setParityFlag($pf);
+
+            // Calculate target/next IP (Jcc size depends on operand size for 0F 8x)
+            if ($isShortJcc) {
+                $nextIp = $ip + 4; // CMP(2) + Jcc rel8(2)
+                $jccTarget = $nextIp + $rel8;
+            } elseif ($isLongJcc) {
+                if ($opSize === 16) {
+                    $nextIp = $ip + 6; // CMP(2) + 0F 8x rel16(4)
+                    $jccTarget = $nextIp + $rel16;
+                } else {
+                    $nextIp = $ip + 8; // CMP(2) + 0F 8x rel32(6)
+                    $jccTarget = $nextIp + $rel32;
+                }
+            } else {
+                return PatternedInstructionResult::skip($ip);
+            }
 
             // Evaluate Jcc condition
             $taken = match ($condition) {
@@ -133,8 +174,8 @@ class CmpJccPattern extends AbstractPatternedInstruction
                 0x7 => !$cf && !$zf,           // JA/JNBE: CF=0 AND ZF=0
                 0x8 => $sf,                    // JS: SF=1
                 0x9 => !$sf,                   // JNS: SF=0
-                0xA => true,                   // JP/JPE: PF=1 (simplified, assume taken)
-                0xB => true,                   // JNP/JPO: PF=0 (simplified)
+                0xA => $pf,                    // JP/JPE: PF=1
+                0xB => !$pf,                   // JNP/JPO: PF=0
                 0xC => $sf !== $of,            // JL/JNGE: SF≠OF
                 0xD => $sf === $of,            // JGE/JNL: SF=OF
                 0xE => $zf || ($sf !== $of),   // JLE/JNG: ZF=1 OR SF≠OF

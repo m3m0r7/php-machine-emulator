@@ -19,9 +19,66 @@ use PHPMachineEmulator\Stream\RustMemoryStream;
 class RustMemoryAccessor implements MemoryAccessorInterface
 {
     private static ?FFI $ffi = null;
+    private static ?bool $watchMsDosBoot = null;
 
     /** @var FFI\CData Pointer to the Rust MemoryAccessor */
     private FFI\CData $handle;
+
+    private static function shouldWatchMsDosBoot(): bool
+    {
+        if (self::$watchMsDosBoot === null) {
+            $env = getenv('PHPME_WATCH_MSDOS_BOOT');
+            self::$watchMsDosBoot = $env !== false && $env !== '' && $env !== '0';
+        }
+        return self::$watchMsDosBoot;
+    }
+
+    private function maybeLogMsDosBootWrite(string $kind, int $address, int $width, int $value): void
+    {
+        if (!self::shouldWatchMsDosBoot()) {
+            return;
+        }
+
+        // Focus on the failing MS-DOS boot path:
+        // - far pointer storage around 0000:06E2 (linear 0x006E2)
+        // - the uninitialized call target 2020:5449 (linear 0x25649)
+        $watch =
+            // Common scratch/parameter area used by boot loaders and IO.SYS
+            ($address >= 0x0004F0 && $address <= 0x000509) ||
+            ($address >= 0x0006E0 && $address <= 0x0006E7) ||
+            ($address >= 0x0025640 && $address <= 0x0025660);
+
+        if (!$watch) {
+            return;
+        }
+
+        $linearIp = $this->runtime->memory()->offset() & 0xFFFFFFFF;
+        $cs = $this->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+        $ds = $this->fetch(RegisterType::DS)->asByte() & 0xFFFF;
+        $es = $this->fetch(RegisterType::ES)->asByte() & 0xFFFF;
+        $ss = $this->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+        $sp = $this->fetch(RegisterType::ESP)->asBytesBySize(16) & 0xFFFF;
+        $ip = ($linearIp - (($cs << 4) & 0xFFFFF)) & 0xFFFF;
+
+        $this->runtime->option()->logger()->debug(sprintf(
+            'WATCH(MSDOS): %s write%d addr=0x%05X value=0x%X at CS:IP=%04X:%04X linearIP=0x%05X DS=%04X ES=%04X SS=%04X SP=%04X',
+            $kind,
+            $width,
+            $address & 0xFFFFFFFF,
+            $value & match ($width) {
+                8 => 0xFF,
+                16 => 0xFFFF,
+                default => 0xFFFFFFFF,
+            },
+            $cs,
+            $ip,
+            $linearIp & 0xFFFFFFFF,
+            $ds,
+            $es,
+            $ss,
+            $sp
+        ));
+    }
 
     /**
      * Initialize the FFI interface.
@@ -321,6 +378,7 @@ C;
     public function write16Bit(int|RegisterType $registerType, int|null $value): self
     {
         $address = $this->asAddress($registerType);
+        $this->maybeLogMsDosBootWrite('bySize', $address, 16, $value ?? 0);
         $previousValue = self::$ffi->memory_accessor_fetch($this->handle, $address);
         self::$ffi->memory_accessor_write_16bit($this->handle, $address, $value ?? 0);
         $this->postProcessWhenWrote($address, $previousValue, $value);
@@ -330,6 +388,7 @@ C;
     public function writeBySize(int|RegisterType $registerType, int|null $value, int $size = 64): self
     {
         $address = $this->asAddress($registerType);
+        $this->maybeLogMsDosBootWrite('bySize', $address, $size, $value ?? 0);
         $previousValue = self::$ffi->memory_accessor_fetch($this->handle, $address);
         self::$ffi->memory_accessor_write_by_size($this->handle, $address, $value ?? 0, $size);
         $this->postProcessWhenWrote($address, $previousValue, $value);
@@ -547,6 +606,7 @@ C;
      */
     public function writeRawByte(int $address, int $value): self
     {
+        $this->maybeLogMsDosBootWrite('raw', $address, 8, $value);
         $previousValue = self::$ffi->memory_accessor_read_raw_byte($this->handle, $address);
         self::$ffi->memory_accessor_write_raw_byte($this->handle, $address, $value & 0xFF);
         $this->postProcessWhenWrote($address, $previousValue, $value);
@@ -910,6 +970,7 @@ C;
      */
     public function writeMemory8(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
     {
+        $this->maybeLogMsDosBootWrite('linear', $linear, 8, $value);
         return self::$ffi->memory_accessor_write_memory_8(
             $this->handle,
             $linear,
@@ -926,6 +987,7 @@ C;
      */
     public function writeMemory16(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
     {
+        $this->maybeLogMsDosBootWrite('linear', $linear, 16, $value);
         return self::$ffi->memory_accessor_write_memory_16(
             $this->handle,
             $linear,
@@ -942,6 +1004,7 @@ C;
      */
     public function writeMemory32(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
     {
+        $this->maybeLogMsDosBootWrite('linear', $linear, 32, $value);
         return self::$ffi->memory_accessor_write_memory_32(
             $this->handle,
             $linear,
@@ -958,6 +1021,7 @@ C;
      */
     public function writeMemory64(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
     {
+        $this->maybeLogMsDosBootWrite('linear', $linear, 64, $value);
         return self::$ffi->memory_accessor_write_memory_64(
             $this->handle,
             $linear,
@@ -973,6 +1037,7 @@ C;
      */
     public function writePhysical16(int $address, int $value): void
     {
+        $this->maybeLogMsDosBootWrite('phys', $address, 16, $value);
         self::$ffi->memory_accessor_write_physical_16($this->handle, $address, $value & 0xFFFF);
     }
 }

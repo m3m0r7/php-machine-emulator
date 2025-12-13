@@ -70,7 +70,7 @@ class InterruptDeliveryHandler implements InterruptDeliveryHandlerInterface
     private function raiseInterruptWithErrorCode(RuntimeInterface $runtime, int $vector, int $ip, ?int $errorCode): bool
     {
         try {
-            [$handler, ] = $this
+            $handler = $this
                 ->architectureProvider
                 ->instructionList()
                 ->findInstruction(self::INT_OPCODE);

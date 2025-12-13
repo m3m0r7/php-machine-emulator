@@ -283,6 +283,18 @@ trait SegmentTrait
         } else {
             // Real mode always defaults to 16-bit code; ignore cached descriptor size
             $descriptor = null;
+            // In real mode, loading CS (via far jump/call/ret/iret) resets its hidden cache
+            // to real-mode base/limit, disabling Unreal Mode for CS.
+            $ctx->cacheSegmentDescriptor(RegisterType::CS, [
+                'base' => (($normalized << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
         }
         $defaultSize = $descriptor['default'] ?? ($ctx->isProtectedMode() ? 32 : 16);
         $ctx->setDefaultOperandSize($defaultSize);

@@ -173,9 +173,10 @@ class BIOS
         // Bit 6-7: Number of floppy drives - 1
         // Bit 9-11: Number of serial ports
         // Bit 14-15: Number of parallel ports
-        $equipmentFlags = 0x0021;  // Floppy present, 80x25 color, 1 floppy
-        $equipmentFlags |= (2 << 9);   // 2 serial ports (COM1, COM2)
-        $equipmentFlags |= (1 << 14);  // 1 parallel port (LPT1)
+        // Report minimal hardware during early boot.
+        // DOS uses these counts to probe INT 14h/17h; we currently don't emulate UART/LPT,
+        // so advertise none to avoid calling into uninitialized device vectors.
+        $equipmentFlags = 0x0021;  // Floppy present, 80x25 color, 1 floppy, no serial/LPT
         $mem->writeBySize(0x410, $equipmentFlags, 16);
 
         // 0x412: Reserved (manufacturing test)
@@ -471,13 +472,15 @@ class BIOS
         $defaultSegment = 0xF000;
         $defaultOffset = 0xFF53;
 
-        // Initialize all 256 interrupt vectors to point to default handler
+        // Initialize all 256 interrupt vectors to point to default handler.
+        // Use physical writes here because low IVT addresses (0x0000-0x000D)
+        // overlap with the internal register address space.
         for ($vector = 0; $vector < 256; $vector++) {
             $address = $vector * 4;
             // Store offset (low word)
-            $mem->writeBySize($address, $defaultOffset, 16);
+            $mem->writePhysical16($address, $defaultOffset);
             // Store segment (high word)
-            $mem->writeBySize($address + 2, $defaultSegment, 16);
+            $mem->writePhysical16($address + 2, $defaultSegment);
         }
 
         $this->machine->option()->logger()->debug(

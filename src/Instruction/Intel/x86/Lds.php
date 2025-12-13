@@ -38,8 +38,9 @@ class Lds implements InstructionInterface
             throw new ExecutionException('LDS/LES does not support register-direct addressing');
         }
 
-        // Get the memory address
-        [$address] = $this->effectiveAddressInfo($runtime, $memory, $modRegRM);
+        // Get the linear address of the far pointer operand.
+        // LDS/LES use normal ModR/M addressing rules including segment overrides.
+        $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
 
         $size = $runtime->context()->cpu()->operandSize();
         $ma = $runtime->memoryAccessor();

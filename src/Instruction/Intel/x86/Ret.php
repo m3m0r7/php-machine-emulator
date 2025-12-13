@@ -78,6 +78,15 @@ class Ret implements InstructionInterface
             // Always use linearCodeAddress for both near and far returns
             // This properly handles protected mode by resolving segment base from descriptor
             $cs = ($opcode === 0xCB || $opcode === 0xCA) ? ($targetCs & 0xFFFF) : $ma->fetch(RegisterType::CS)->asByte();
+            if (!$runtime->context()->cpu()->isProtectedMode() && ($opcode === 0xC3 || $opcode === 0xC2)) {
+                $dbgLinear = $this->linearCodeAddress($runtime, $cs, $returnIp, $size);
+                $runtime->option()->logger()->debug(sprintf(
+                    'RET NEAR: returnIp=0x%04X CS=0x%04X linearTarget=0x%05X',
+                    $returnIp,
+                    $cs,
+                    $dbgLinear
+                ));
+            }
             if ($opcode === 0xC3 || $opcode === 0xC2) {
                 if ($returnIp < 0x0800 && !$runtime->context()->cpu()->isProtectedMode()) {
                     $stackAddr = $this->segmentOffsetAddress($runtime, RegisterType::SS, $espBefore);
