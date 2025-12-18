@@ -300,6 +300,14 @@ impl MemoryStream {
     /// Write a byte at a specific address without changing offset.
     #[inline(always)]
     pub fn write_byte_at(&mut self, address: usize, value: u8) {
+        if address >= self.logical_max_memory_size() {
+            return;
+        }
+
+        if address >= self.size {
+            let _ = self.ensure_capacity(address);
+        }
+
         if address < self.data.len() {
             self.data[address] = value;
         }
@@ -740,5 +748,15 @@ mod tests {
 
         // Should have expanded
         assert!(stream.size() > 1024);
+    }
+
+    #[test]
+    fn test_random_access_write_expands_and_persists() {
+        let mut stream = MemoryStream::new(1024, 8192, 0);
+
+        stream.write_byte_at(4096, 0xAA);
+
+        assert_eq!(stream.read_byte_at(4096), 0xAA);
+        assert!(stream.size() >= 4097);
     }
 }

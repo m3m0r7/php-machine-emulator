@@ -34,6 +34,18 @@ trait Instructable64
     }
 
     /**
+     * Return the active instruction stream reader.
+     *
+     * The x86-64 instruction implementations historically used an `enhanceReader()`
+     * helper to mirror the x86 code style. In this project the runtime's memory
+     * stream already implements the needed read helpers (ModR/M, SIB, imm*).
+     */
+    protected function enhanceReader(RuntimeInterface $runtime): MemoryStreamInterface
+    {
+        return $runtime->memory();
+    }
+
+    /**
      * Read value from a register by size with 64-bit support.
      * Handles REX prefix for extended registers.
      */
@@ -41,17 +53,19 @@ trait Instructable64
     {
         $cpu = $runtime->context()->cpu();
 
-        // In 64-bit mode with REX, handle extended registers
+        // In 64-bit mode, treat integer register operands as GPR codes (0-15),
+        // extended by REX.B when present.
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
-            if ($size === 64) {
-                $regCode = $cpu->rexB() ? ($register | 0b1000) : $register;
-                $regType = $this->getRegisterType64($regCode);
-                return $runtime->memoryAccessor()->fetch($regType)->asBytesBySize(64);
+            if ($size === 8 && $cpu->hasRex()) {
+                return $this->read8BitRegister64($runtime, $register, true, $cpu->rexB());
             }
 
-            if ($size === 8 && $cpu->hasRex()) {
-                return $this->read8BitRegister64($runtime, $register, $cpu->hasRex(), $cpu->rexB());
+            $regCode = ($register & 0b111) | (($register & 0b1000) !== 0 ? 0b1000 : 0);
+            if ($cpu->rexB()) {
+                $regCode |= 0b1000;
             }
+            $regType = $this->getRegisterType64($regCode);
+            return $runtime->memoryAccessor()->fetch($regType)->asBytesBySize($size);
         }
 
         return $this->baseReadRegisterBySize($runtime, $register, $size);
@@ -65,28 +79,21 @@ trait Instructable64
     {
         $cpu = $runtime->context()->cpu();
 
-        // In 64-bit mode with REX, handle extended registers
+        // In 64-bit mode, treat integer register operands as GPR codes (0-15),
+        // extended by REX.B when present.
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
-            if ($size === 64) {
-                $regCode = $cpu->rexB() ? ($register | 0b1000) : $register;
-                $regType = $this->getRegisterType64($regCode);
-                $runtime->memoryAccessor()->writeBySize($regType, $value, 64);
-                return;
-            }
-
-            // 32-bit writes in 64-bit mode zero-extend to 64-bit
-            if ($size === 32) {
-                $regCode = $cpu->rexB() ? ($register | 0b1000) : $register;
-                $regType = $this->getRegisterType64($regCode);
-                // Zero-extend: clear upper 32 bits
-                $runtime->memoryAccessor()->writeBySize($regType, $value & 0xFFFFFFFF, 64);
-                return;
-            }
-
             if ($size === 8 && $cpu->hasRex()) {
-                $this->write8BitRegister64($runtime, $register, $value, $cpu->hasRex(), $cpu->rexB());
+                $this->write8BitRegister64($runtime, $register, $value, true, $cpu->rexB());
                 return;
             }
+
+            $regCode = ($register & 0b111) | (($register & 0b1000) !== 0 ? 0b1000 : 0);
+            if ($cpu->rexB()) {
+                $regCode |= 0b1000;
+            }
+            $regType = $this->getRegisterType64($regCode);
+            $runtime->memoryAccessor()->writeBySize($regType, $value, $size);
+            return;
         }
 
         $this->baseWriteRegisterBySize($runtime, $register, $value, $size);
@@ -170,15 +177,18 @@ trait Instructable64
     protected function readRegFromModRM(RuntimeInterface $runtime, ModRegRMInterface $modRegRM, int $size): int
     {
         $cpu = $runtime->context()->cpu();
-        $regCode = $modRegRM->register();
+        $regCode = $modRegRM->registerOrOPCode();
 
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexR()) {
             $regCode |= 0b1000;
         }
 
-        if ($size === 64) {
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            if ($size === 8 && $cpu->hasRex()) {
+                return $this->read8BitRegister64($runtime, $modRegRM->registerOrOPCode(), true, $cpu->rexR());
+            }
             $regType = $this->getRegisterType64($regCode);
-            return $runtime->memoryAccessor()->fetch($regType)->asBytesBySize(64);
+            return $runtime->memoryAccessor()->fetch($regType)->asBytesBySize($size);
         }
 
         return $this->readRegisterBySize($runtime, $regCode, $size);
@@ -190,22 +200,20 @@ trait Instructable64
     protected function writeRegFromModRM(RuntimeInterface $runtime, ModRegRMInterface $modRegRM, int $value, int $size): void
     {
         $cpu = $runtime->context()->cpu();
-        $regCode = $modRegRM->register();
+        $regCode = $modRegRM->registerOrOPCode();
 
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexR()) {
             $regCode |= 0b1000;
         }
 
-        if ($size === 64) {
-            $regType = $this->getRegisterType64($regCode);
-            $runtime->memoryAccessor()->writeBySize($regType, $value, 64);
-            return;
-        }
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            if ($size === 8 && $cpu->hasRex()) {
+                $this->write8BitRegister64($runtime, $modRegRM->registerOrOPCode(), $value, true, $cpu->rexR());
+                return;
+            }
 
-        // In 64-bit mode, 32-bit writes zero-extend
-        if ($size === 32 && $cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             $regType = $this->getRegisterType64($regCode);
-            $runtime->memoryAccessor()->writeBySize($regType, $value & 0xFFFFFFFF, 64);
+            $runtime->memoryAccessor()->writeBySize($regType, $value, $size);
             return;
         }
 

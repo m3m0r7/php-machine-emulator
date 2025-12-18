@@ -6,10 +6,14 @@ namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
 
+use Brick\Math\BigInteger;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
+use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * IMUL r16/32, r/m16/32 (0x0F 0xAF)
@@ -29,19 +33,55 @@ class ImulRegRm implements InstructionInterface
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $memory = $runtime->memory();
         $modrm = $memory->byteAsModRegRM();
-        $opSize = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+        $opSize = $cpu->operandSize();
 
-        $src = $this->readRm($runtime, $memory, $modrm, $opSize);
-        $dst = $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), $opSize);
+        $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+        if ($isRegister) {
+            $rmCode = $modrm->registerOrMemoryAddress();
+            $rmReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+                ? Register::findGprByCode($rmCode, $cpu->rexB())
+                : $rmCode;
+            $src = $this->readRegisterBySize($runtime, $rmReg, $opSize);
+        } else {
+            $addr = $this->rmLinearAddress($runtime, $memory, $modrm);
+            $src = match ($opSize) {
+                16 => $this->readMemory16($runtime, $addr),
+                32 => $this->readMemory32($runtime, $addr),
+                64 => $this->readMemory64($runtime, $addr),
+                default => $this->readMemory32($runtime, $addr),
+            };
+        }
 
-        $sSrc = $this->signExtend($src, $opSize);
+        $regCode = $modrm->registerOrOPCode();
+        $destReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+            ? Register::findGprByCode($regCode, $cpu->rexR())
+            : $regCode;
+        $dst = $this->readRegisterBySize($runtime, $destReg, $opSize);
+
+        if ($opSize === 64) {
+            $sSrc = $src instanceof UInt64 ? BigInteger::of($src->toInt()) : BigInteger::of($src);
+            $sDst = BigInteger::of($dst);
+            $product = $sSrc->multipliedBy($sDst);
+
+            $resultU = UInt64::of($product);
+            $this->writeRegisterBySize($runtime, $destReg, $resultU->toInt(), 64);
+
+            $min = BigInteger::of('-9223372036854775808');
+            $max = BigInteger::of('9223372036854775807');
+            $overflow = $product->isLessThan($min) || $product->isGreaterThan($max);
+            $runtime->memoryAccessor()->setCarryFlag($overflow)->setOverflowFlag($overflow);
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $srcInt = $src instanceof UInt64 ? $src->toInt() : $src;
+        $sSrc = $this->signExtend($srcInt, $opSize);
         $sDst = $this->signExtend($dst, $opSize);
         $product = $sSrc * $sDst;
 
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = $product & $mask;
-
-        $this->writeRegisterBySize($runtime, $modrm->registerOrOPCode(), $result, $opSize);
+        $this->writeRegisterBySize($runtime, $destReg, $result, $opSize);
 
         $min = -(1 << ($opSize - 1));
         $max = (1 << ($opSize - 1)) - 1;

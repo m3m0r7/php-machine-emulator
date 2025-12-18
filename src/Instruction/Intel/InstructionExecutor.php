@@ -30,6 +30,12 @@ class InstructionExecutor implements InstructionExecutorInterface
     private array $decodeCache = [];
 
     /**
+     * Pages that have been executed (for best-effort self-modifying code handling).
+     * @var array<int,true>
+     */
+    private array $executedPages = [];
+
+    /**
      * Execution hit count per IP for hotspot detection
      * @var array<int, int>
      */
@@ -57,6 +63,7 @@ class InstructionExecutor implements InstructionExecutorInterface
     {
         $ip = $runtime->memory()->offset();
         $this->lastInstructionPointer = $ip;
+        $this->executedPages[($ip & 0xFFFFFFFF) >> 12] = true;
 
         // REP/iteration handler active? Fall back to single-step to keep lastInstruction accurate.
         if ($runtime->context()->cpu()->iteration()->isActive()) {
@@ -174,6 +181,7 @@ class InstructionExecutor implements InstructionExecutorInterface
             $this->lastInstructionPointer = $ipBefore;
             $this->lastInstruction = $instruction;
             $this->lastOpcodes = $opcodes;
+            $this->executedPages[($ipBefore & 0xFFFFFFFF) >> 12] = true;
 
             if ($opcodes === [0x00]) {
                 $this->zeroOpcodeCount++;
@@ -216,14 +224,14 @@ class InstructionExecutor implements InstructionExecutorInterface
                     $candidateBlock = $this->translationBlocks[$exitIp];
 
 
-                    $runtime->option()->logger()->info(
+                    $runtime->option()->logger()->debug(
                         "PATTERN (OP): " . implode(" ", array_map(
                             fn ($ins) => implode(" ", array_map(fn ($v) => sprintf("0x%02X", $v), $ins[1])),
                             $candidateBlock->instructions(),
                         )),
                     );
 
-                    $runtime->option()->logger()->info(
+                    $runtime->option()->logger()->debug(
                         "PATTERN (MN): " . implode(" ", array_map(
                             fn ($ins) => preg_replace("/^.+\\\\(.+?)$/", '$1', get_class($ins[0])),
                             $candidateBlock->instructions(),
@@ -472,6 +480,37 @@ class InstructionExecutor implements InstructionExecutorInterface
         $this->hitCount = [];
         $this->translationBlocks = [];
         $this->patternedInstructionsList->invalidateCaches();
+    }
+
+    /**
+     * Best-effort cache invalidation when code is written into an already-executed page.
+     *
+     * This protects against stale decode/translation caches when boot loaders relocate
+     * or load modules into memory regions that previously contained executed code.
+     */
+    public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
+    {
+        if ($length <= 0 || $this->executedPages === []) {
+            return;
+        }
+
+        $s = $start & 0xFFFFFFFF;
+        $e = ($s + ($length - 1)) & 0xFFFFFFFF;
+        $startPage = $s >> 12;
+        $endPage = $e >> 12;
+
+        // Handle wrap-around conservatively.
+        if ($endPage < $startPage) {
+            $this->invalidateCaches();
+            return;
+        }
+
+        for ($page = $startPage; $page <= $endPage; $page++) {
+            if (isset($this->executedPages[$page])) {
+                $this->invalidateCaches();
+                return;
+            }
+        }
     }
 
     /**

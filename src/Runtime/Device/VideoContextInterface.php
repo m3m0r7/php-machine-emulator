@@ -39,4 +39,30 @@ interface VideoContextInterface extends DeviceContextInterface
      * Get the ANSI escape sequence parser.
      */
     public function ansiParser(): AnsiParserInterface;
+
+    /**
+     * Enable a linear framebuffer backed by an internal buffer.
+     */
+    public function enableLinearFramebuffer(
+        int $baseAddress,
+        int $width,
+        int $height,
+        int $bytesPerScanLine,
+        int $bitsPerPixel,
+    ): void;
+
+    public function disableLinearFramebuffer(): void;
+
+    /**
+     * @return array{base:int,width:int,height:int,bytesPerScanLine:int,bitsPerPixel:int,size:int}|null
+     */
+    public function linearFramebufferInfo(): ?array;
+
+    public function linearFramebufferRead(int $address, int $width): ?int;
+
+    /**
+     * @param int $width Bit width (8/16/32/64)
+     * @return bool True if handled
+     */
+    public function linearFramebufferWrite(int $address, int $value, int $width): bool;
 }

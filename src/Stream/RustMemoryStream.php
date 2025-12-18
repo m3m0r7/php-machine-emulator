@@ -424,6 +424,23 @@ C;
         }
     }
 
+    /**
+     * Fast bulk copy from a PHP string into this memory stream.
+     *
+     * This avoids per-byte PHP loops when loading disk sectors or binaries.
+     */
+    public function copyFromString(string $data, int $destOffset): void
+    {
+        $len = strlen($data);
+        if ($len === 0) {
+            return;
+        }
+
+        $buffer = self::$ffi->new("uint8_t[$len]");
+        FFI::memcpy($buffer, $data, $len);
+        self::$ffi->memory_stream_copy_from_external($this->handle, $buffer, $len, $destOffset);
+    }
+
     // ========================================
     // StreamIsProxyableInterface implementation
     // ========================================

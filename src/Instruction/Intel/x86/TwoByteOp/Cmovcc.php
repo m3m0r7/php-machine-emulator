@@ -8,9 +8,11 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * CMOVcc (0x0F 0x40-0x4F)
@@ -35,7 +37,8 @@ class Cmovcc implements InstructionInterface
         $opcode = $opcodes[array_key_last($opcodes)];
         $memory = $runtime->memory();
         $modrm = $memory->byteAsModRegRM();
-        $opSize = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+        $opSize = $cpu->operandSize();
 
         $cc = ($opcode & 0xFF) & 0x0F;
         if ($opcode > 0xFF) {
@@ -50,8 +53,32 @@ class Cmovcc implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $value = $this->readRm($runtime, $memory, $modrm, $opSize);
-        $this->writeRegisterBySize($runtime, $modrm->registerOrOPCode(), $value, $opSize);
+        $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+        if ($isRegister) {
+            $rmCode = $modrm->registerOrMemoryAddress();
+            $rmReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+                ? Register::findGprByCode($rmCode, $cpu->rexB())
+                : $rmCode;
+            $value = $this->readRegisterBySize($runtime, $rmReg, $opSize);
+        } else {
+            $addr = $this->rmLinearAddress($runtime, $memory, $modrm);
+            $value = match ($opSize) {
+                16 => $this->readMemory16($runtime, $addr),
+                32 => $this->readMemory32($runtime, $addr),
+                64 => $this->readMemory64($runtime, $addr),
+                default => $this->readMemory32($runtime, $addr),
+            };
+        }
+
+        if ($value instanceof UInt64) {
+            $value = $value->toInt();
+        }
+
+        $destRegCode = $modrm->registerOrOPCode();
+        $destReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+            ? Register::findGprByCode($destRegCode, $cpu->rexR())
+            : $destRegCode;
+        $this->writeRegisterBySize($runtime, $destReg, $value, $opSize);
 
         return ExecutionStatus::SUCCESS;
     }

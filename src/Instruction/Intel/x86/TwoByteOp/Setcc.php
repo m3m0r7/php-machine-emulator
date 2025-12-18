@@ -35,6 +35,7 @@ class Setcc implements InstructionInterface
         $opcode = $opcodes[array_key_last($opcodes)];
         $memory = $runtime->memory();
         $modrm = $memory->byteAsModRegRM();
+        $cpu = $runtime->context()->cpu();
 
         $cc = ($opcode & 0xFF) & 0x0F;
         if ($opcode > 0xFF) {
@@ -44,7 +45,12 @@ class Setcc implements InstructionInterface
         $val = $this->conditionMet($runtime, $cc) ? 1 : 0;
 
         if (ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER) {
-            $this->write8BitRegister($runtime, $modrm->registerOrMemoryAddress(), $val);
+            $rm = $modrm->registerOrMemoryAddress();
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
+                $this->write8BitRegister64($runtime, $rm, $val, true, $cpu->rexB());
+            } else {
+                $this->write8BitRegister($runtime, $rm, $val);
+            }
         } else {
             $addr = $this->rmLinearAddress($runtime, $memory, $modrm);
             $this->writeMemory8($runtime, $addr, $val);

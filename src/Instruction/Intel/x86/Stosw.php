@@ -23,15 +23,31 @@ class Stosw implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opSize = $runtime->context()->cpu()->operandSize();
-        $width = $opSize === 32 ? 4 : 2;
+        $width = match ($opSize) {
+            16 => 2,
+            32 => 4,
+            64 => 8,
+            default => 2,
+        };
         $value = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
 
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
-        $address = $this->translateLinearWithMmio($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
+        $linear = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
+        // Linear framebuffer writes (e.g. VBE LFB at 0xE0000000) must go through MMIO handling.
+        if ($linear >= 0xE0000000 && $linear < 0xE1000000) {
+            match ($opSize) {
+                16 => $this->writeMemory16($runtime, $linear, $value),
+                32 => $this->writeMemory32($runtime, $linear, $value),
+                64 => $this->writeMemory64($runtime, $linear, $value),
+                default => $this->writeMemory16($runtime, $linear, $value),
+            };
+        } else {
+            $address = $this->translateLinearWithMmio($runtime, $linear, true);
 
-        $runtime->memoryAccessor()->allocate($address, safe: false);
-        $runtime->memoryAccessor()->writeBySize($address, $value, $opSize);
+            $runtime->memoryAccessor()->allocate($address, safe: false);
+            $runtime->memoryAccessor()->writeBySize($address, $value, $opSize);
+        }
 
         $step = $this->stepForElement($runtime, $width);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $step);

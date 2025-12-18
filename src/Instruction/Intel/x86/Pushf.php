@@ -21,8 +21,13 @@ class Pushf implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $hasOperandSizeOverridePrefix = in_array(self::PREFIX_OPERAND_SIZE, $opcodes, true);
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $size = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+        $size = $cpu->operandSize();
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $size = $hasOperandSizeOverridePrefix ? 16 : 64;
+        }
         $ma = $runtime->memoryAccessor();
         $flags =
             ($ma->shouldCarryFlag() ? 1 : 0) |
@@ -35,9 +40,9 @@ class Pushf implements InstructionInterface
             ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
             ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
 
-        if ($runtime->context()->cpu()->isProtectedMode()) {
-            $flags |= ($runtime->context()->cpu()->iopl() & 0x3) << 12;
-            if ($runtime->context()->cpu()->nt()) {
+        if ($cpu->isProtectedMode()) {
+            $flags |= ($cpu->iopl() & 0x3) << 12;
+            if ($cpu->nt()) {
                 $flags |= (1 << 14);
             }
         }

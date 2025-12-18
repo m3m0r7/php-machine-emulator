@@ -41,7 +41,7 @@ class Cpuid implements InstructionInterface
                 break;
 
             case 0x1:
-                // Basic feature bits: report PSE + CMPXCHG8B + TSC + PAE + FPU present + APIC
+                // Basic feature bits: keep x86_64 baseline features present.
                 $this->writeRegisterBySize($runtime, RegisterType::EAX, 0x00000601, 32);
                 $this->writeRegisterBySize($runtime, RegisterType::EBX, 0, 32);
                 $this->writeRegisterBySize($runtime, RegisterType::ECX, 0, 32);
@@ -62,7 +62,6 @@ class Cpuid implements InstructionInterface
                     | (1 << 13) // PGE
                     | (1 << 15) // CMOV
                     | (1 << 17) // PSE-36
-                    | (1 << 23) // MMX
                     | (1 << 24) // FXSR
                     | (1 << 25) // SSE
                     | (1 << 26); // SSE2
@@ -103,9 +102,14 @@ class Cpuid implements InstructionInterface
             case 0x80000001:
                 $this->writeRegisterBySize($runtime, RegisterType::EAX, 0, 32);
                 $this->writeRegisterBySize($runtime, RegisterType::EBX, 0, 32);
-                $this->writeRegisterBySize($runtime, RegisterType::ECX, 0, 32);
-                // Advertise NX (bit 20) and PAT (bit 16) in extended features.
-                $this->writeRegisterBySize($runtime, RegisterType::EDX, (1 << 20) | (1 << 16), 32);
+                // LAHF/SAHF in long mode
+                $this->writeRegisterBySize($runtime, RegisterType::ECX, (1 << 0), 32);
+                // Extended feature bits for x86_64 baseline.
+                $extFeatures = (1 << 11) // SYSCALL/SYSRET
+                    | (1 << 16) // PAT
+                    | (1 << 20) // NX
+                    | (1 << 29); // LM (long mode)
+                $this->writeRegisterBySize($runtime, RegisterType::EDX, $extFeatures, 32);
                 break;
 
             case 0x80000002:
@@ -124,8 +128,8 @@ class Cpuid implements InstructionInterface
                 break;
 
             case 0x80000008:
-                // Physical address bits 36, virtual 32, no extra cores
-                $this->writeRegisterBySize($runtime, RegisterType::EAX, 0x00002420, 32);
+                // Physical address bits 36, linear address bits 48, no extra cores
+                $this->writeRegisterBySize($runtime, RegisterType::EAX, 0x00003024, 32);
                 $this->writeRegisterBySize($runtime, RegisterType::EBX, 0, 32);
                 $this->writeRegisterBySize($runtime, RegisterType::ECX, 0, 32);
                 $this->writeRegisterBySize($runtime, RegisterType::EDX, 0, 32);

@@ -30,16 +30,21 @@ class Stosb implements InstructionInterface
 
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
-        $address = $this->translateLinearWithMmio($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
+        $linear = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
+        // Linear framebuffer writes (e.g. VBE LFB at 0xE0000000) must go through MMIO handling.
+        if ($linear >= 0xE0000000 && $linear < 0xE1000000) {
+            $this->writeMemory8($runtime, $linear, $byte);
+        } else {
+            $address = $this->translateLinearWithMmio($runtime, $linear, true);
 
+            $runtime
+                ->memoryAccessor()
+                ->allocate($address, safe: false);
 
-        $runtime
-            ->memoryAccessor()
-            ->allocate($address, safe: false);
-
-        $runtime
-            ->memoryAccessor()
-            ->writeRawByte($address, $byte);
+            $runtime
+                ->memoryAccessor()
+                ->writeRawByte($address, $byte);
+        }
 
         $step = $this->stepForElement($runtime, 1);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $step);

@@ -51,7 +51,7 @@ class Movsxd implements InstructionInterface
             }
 
             // Write to 64-bit register (with REX.R extension)
-            $regCode = $modRegRM->register();
+            $regCode = $modRegRM->registerOrOPCode();
             if ($cpu->rexR()) {
                 $regCode |= 0b1000;  // R8-R15
             }
@@ -59,7 +59,7 @@ class Movsxd implements InstructionInterface
         } else {
             // Without REX.W: acts as 32-bit MOV
             $value32 = $this->readRm($runtime, $memory, $modRegRM, 32);
-            $regCode = $modRegRM->register();
+            $regCode = $modRegRM->registerOrOPCode();
             $this->writeRegisterBySize($runtime, $regCode, $value32, 32);
         }
 

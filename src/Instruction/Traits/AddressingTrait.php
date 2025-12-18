@@ -271,7 +271,8 @@ trait AddressingTrait
                 $disp = $memory->signedDword();
                 // RIP-relative: address = RIP + disp32
                 $rip = $memory->offset();
-                $offset = ($rip + $disp) & 0xFFFFFFFFFFFFFFFF;
+                // Masking with 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit wrap.
+                $offset = ($rip + $disp) & -1;
                 return [$offset, RegisterType::DS];
             } else {
                 $baseVal = $regVal64($runtime, $rm, $rexB);
@@ -279,7 +280,8 @@ trait AddressingTrait
             }
         }
 
-        $offset = ($baseVal + $indexVal * $scale + $disp) & 0xFFFFFFFFFFFFFFFF;
+        // Masking with 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit wrap.
+        $offset = ($baseVal + $indexVal * $scale + $disp) & -1;
 
         return [$offset, $defaultSegment];
     }

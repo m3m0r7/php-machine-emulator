@@ -73,7 +73,8 @@ class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
                 8 => $this->value & 0xFF,
                 16 => $this->value & 0xFFFF,
                 32 => $this->value & 0xFFFFFFFF,
-                default => $this->value & ((1 << $size) - 1),
+                64 => $this->value,
+                default => $size >= 63 ? $this->value : ($this->value & ((1 << $size) - 1)),
             };
         }
 
@@ -82,7 +83,8 @@ class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
             8 => $this->value & 0xFF,
             16 => $this->value & 0xFFFF,
             32 => $this->value & 0xFFFFFFFF,
-            default => $this->value & ((1 << $size) - 1),
+            64 => $this->value,
+            default => $size >= 63 ? $this->value : ($this->value & ((1 << $size) - 1)),
         };
     }
 

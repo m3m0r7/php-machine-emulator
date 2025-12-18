@@ -43,6 +43,7 @@ class CmpRegRm implements InstructionInterface
                 : $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
             $calc = $dest - $src;
             $maskedResult = $calc & 0xFF;
+            $af = (($dest & 0x0F) < ($src & 0x0F));
             // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
             $signA = ($dest >> 7) & 1;
             $signB = ($src >> 7) & 1;
@@ -51,7 +52,8 @@ class CmpRegRm implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
             $runtime->option()->logger()->debug(sprintf('CMP r/m8, r8: dest=0x%02X src=0x%02X ZF=%d', $dest, $src, $dest === $src ? 1 : 0));
         } else {
             $dest = $destIsRm
@@ -66,6 +68,7 @@ class CmpRegRm implements InstructionInterface
             $calc = $destU - $srcU;
             $maskedResult = $calc & $mask;
             $cf = $calc < 0;
+            $af = (($destU & 0x0F) < ($srcU & 0x0F));
 
             // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
             $signA = ($destU >> $signBit) & 1;
@@ -75,7 +78,8 @@ class CmpRegRm implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, $opSize)
                 ->setCarryFlag($cf)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         }
 
         return ExecutionStatus::SUCCESS;

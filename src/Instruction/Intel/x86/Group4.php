@@ -37,13 +37,26 @@ class Group4 implements InstructionInterface
 
     protected function inc(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
+        $cpu = $runtime->context()->cpu();
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $ma = $runtime->memoryAccessor();
 
+        // Preserve CF - INC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+
         if ($isRegister) {
-            $value = $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
+            $rm = $modRegRM->registerOrMemoryAddress();
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
+                $value = $this->read8BitRegister64($runtime, $rm, true, $cpu->rexB());
+            } else {
+                $value = $this->read8BitRegister($runtime, $rm);
+            }
             $result = ($value + 1) & 0xFF;
-            $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
+                $this->write8BitRegister64($runtime, $rm, $result, true, $cpu->rexB());
+            } else {
+                $this->write8BitRegister($runtime, $rm, $result);
+            }
         } else {
             // Calculate address once to avoid consuming displacement bytes twice
             $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
@@ -52,9 +65,9 @@ class Group4 implements InstructionInterface
             $this->writeMemory8($runtime, $address, $result);
         }
 
-        // Preserve CF - INC does not affect carry flag
-        $savedCf = $ma->shouldCarryFlag();
+        $af = (($value & 0x0F) + 1) > 0x0F;
         $ma->updateFlags($result, 8);
+        $ma->setAuxiliaryCarryFlag($af);
         $ma->setCarryFlag($savedCf);
 
         // OF for INC: set when result is 0x80 (incrementing 0x7F to 0x80)
@@ -66,13 +79,26 @@ class Group4 implements InstructionInterface
 
     protected function dec(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
+        $cpu = $runtime->context()->cpu();
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $ma = $runtime->memoryAccessor();
 
+        // Preserve CF - DEC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+
         if ($isRegister) {
-            $value = $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
+            $rm = $modRegRM->registerOrMemoryAddress();
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
+                $value = $this->read8BitRegister64($runtime, $rm, true, $cpu->rexB());
+            } else {
+                $value = $this->read8BitRegister($runtime, $rm);
+            }
             $result = ($value - 1) & 0xFF;
-            $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
+                $this->write8BitRegister64($runtime, $rm, $result, true, $cpu->rexB());
+            } else {
+                $this->write8BitRegister($runtime, $rm, $result);
+            }
         } else {
             // Calculate address once to avoid consuming displacement bytes twice
             $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
@@ -81,9 +107,9 @@ class Group4 implements InstructionInterface
             $this->writeMemory8($runtime, $address, $result);
         }
 
-        // Preserve CF - DEC does not affect carry flag
-        $savedCf = $ma->shouldCarryFlag();
+        $af = (($value & 0x0F) === 0);
         $ma->updateFlags($result, 8);
+        $ma->setAuxiliaryCarryFlag($af);
         $ma->setCarryFlag($savedCf);
 
         // OF for DEC: set when result is 0x7F (decrementing 0x80 to 0x7F)

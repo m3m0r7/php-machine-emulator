@@ -8,10 +8,12 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * SHLD (0x0F 0xA4 / 0x0F 0xA5)
@@ -37,8 +39,9 @@ class Shld implements InstructionInterface
         $opcode = $opcodes[array_key_last($opcodes)];
         $memory = $runtime->memory();
         $modrm = $memory->byteAsModRegRM();
-        $opSize = $runtime->context()->cpu()->operandSize();
-        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $cpu = $runtime->context()->cpu();
+        $opSize = $cpu->operandSize();
+        $countMask = $opSize === 64 ? 0x3F : 0x1F;
 
         $isImm = ($opcode & 0xFF) === 0xA4 || ($opcode === 0x0FA4);
 
@@ -47,35 +50,76 @@ class Shld implements InstructionInterface
 
         // Read count after displacement is consumed
         $count = $isImm
-            ? ($memory->byte() & 0x1F)
-            : ($runtime->memoryAccessor()->fetch(RegisterType::ECX)->asLowBit() & 0x1F);
+            ? ($memory->byte() & $countMask)
+            : ($runtime->memoryAccessor()->fetch(RegisterType::ECX)->asLowBit() & $countMask);
 
         if ($count === 0) {
             return ExecutionStatus::SUCCESS;
         }
 
+        $destRegCode = $modrm->registerOrMemoryAddress();
+        $destReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+            ? Register::findGprByCode($destRegCode, $cpu->rexB())
+            : $destRegCode;
+        $srcRegCode = $modrm->registerOrOPCode();
+        $srcReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+            ? Register::findGprByCode($srcRegCode, $cpu->rexR())
+            : $srcRegCode;
+
+        if ($opSize === 64) {
+            $destU = $isRegister
+                ? UInt64::of($this->readRegisterBySize($runtime, $destReg, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $srcU = UInt64::of($this->readRegisterBySize($runtime, $srcReg, 64));
+
+            $resultU = $destU->shl($count)->or($srcU->shr(64 - $count));
+            $cfBit = ($destU->shr(64 - $count)->low32() & 0x1) !== 0;
+
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $destReg, $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $resultInt = $resultU->toInt();
+            $ma = $runtime->memoryAccessor();
+            $ma->setCarryFlag($cfBit)->updateFlags($resultInt, 64);
+            if ($count === 1) {
+                $msb = $resultU->isNegativeSigned();
+                $ma->setOverflowFlag($msb !== $cfBit);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+
         $dest = $isRegister
-            ? $this->readRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $destReg, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
         $dest &= $mask;
 
-        $src = $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), $opSize) & $mask;
-        $result = (($dest << $count) | ($src >> ($opSize - $count))) & $mask;
-        $cf = ($dest >> ($opSize - $count)) & 0x1;
+        $src = $this->readRegisterBySize($runtime, $srcReg, $opSize) & $mask;
 
-        $of = false;
-        if ($count === 1) {
-            $msb = ($result >> ($opSize - 1)) & 1;
-            $next = ($result >> ($opSize - 2)) & 1;
-            $of = ($msb ^ $next) === 1;
+        if ($opSize === 16) {
+            // Intel-defined behaviour for count > 16 uses A:B:A.
+            $triple = (($dest & 0xFFFF) << 32) | (($src & 0xFFFF) << 16) | ($dest & 0xFFFF);
+            $result = ((($triple << $count) >> 32) & 0xFFFF);
+            $cf = (($triple >> (48 - $count)) & 0x1) !== 0;
+        } else {
+            $result = (($dest << $count) | ($src >> (32 - $count))) & $mask;
+            $cf = (($dest >> (32 - $count)) & 0x1) !== 0;
         }
 
         $ma = $runtime->memoryAccessor();
-        $ma->setCarryFlag($cf === 1)->updateFlags($result, $opSize);
-        $ma->setOverflowFlag($of);
+        $ma->setCarryFlag($cf)->updateFlags($result, $opSize);
+        if ($count === 1) {
+            $msb = ($result >> ($opSize - 1)) & 1;
+            $ma->setOverflowFlag($msb !== ($cf ? 1 : 0));
+        }
 
         if ($isRegister) {
-            $this->writeRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $result, $opSize);
+            $this->writeRegisterBySize($runtime, $destReg, $result, $opSize);
         } else {
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearAddr, $result);

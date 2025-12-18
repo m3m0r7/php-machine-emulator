@@ -5,6 +5,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
 
+use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -21,13 +22,38 @@ class Ret implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
-        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
+        $cpu = $runtime->context()->cpu();
+
+        // In 64-bit mode, near RET pops a 64-bit RIP regardless of operand-size override.
+        // Far returns are not valid in 64-bit mode.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            if ($opcode === 0xCA || $opcode === 0xCB) {
+                throw new ExecutionException('RETF is not supported in 64-bit mode');
+            }
+
+            $popBytes = ($opcode === 0xC2) ? $runtime->memory()->short() : 0;
+            $ma = $runtime->memoryAccessor();
+            $returnRip = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
+
+            if ($popBytes > 0) {
+                $rsp = $ma->fetch(RegisterType::ESP)->asBytesBySize(64);
+                $ma->writeBySize(RegisterType::ESP, $rsp + $popBytes, 64);
+            }
+
+            if ($runtime->option()->shouldChangeOffset()) {
+                $runtime->memory()->setOffset($returnRip);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $popBytes = ($opcode === 0xC2 || $opcode === 0xCA)
             ? $runtime->memory()->short()
             : 0;
 
-        $size = $runtime->context()->cpu()->operandSize();
+        $size = $cpu->operandSize();
 
         $ma = $runtime->memoryAccessor();
         $espBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize($size);

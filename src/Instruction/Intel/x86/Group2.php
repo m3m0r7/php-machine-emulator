@@ -13,6 +13,7 @@ use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class Group2 implements InstructionInterface
 {
@@ -61,11 +62,22 @@ class Group2 implements InstructionInterface
         return in_array($opcode, [0xC0, 0xD0, 0xD2], true);
     }
 
+    private function countMask(int $size): int
+    {
+        // In 64-bit mode with 64-bit operand, shift/rotate counts are masked to 6 bits (0-63).
+        return $size === 64 ? 0x3F : 0x1F;
+    }
+
     protected function rotateLeft(RuntimeInterface $runtime, int $opcode, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): ExecutionStatus
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & $this->countMask($size);
+
+        // x86 semantics: count==0 leaves operand and flags unchanged (and does not write memory).
+        if ($operand === 0) {
+            return ExecutionStatus::SUCCESS;
+        }
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
@@ -87,6 +99,34 @@ class Group2 implements InstructionInterface
                 if ($operand === 1) {
                     $msb = ($result >> 7) & 1;
                     $runtime->memoryAccessor()->setOverflowFlag($msb !== ($cf ? 1 : 0));
+                }
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($size === 64) {
+            $valueU = $isRegister
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $address);
+
+            $count = $operand % 64;
+            $resultU = $count === 0
+                ? $valueU
+                : $valueU->shl($count)->or($valueU->shr(64 - $count));
+
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $address, $resultU);
+            }
+
+            // ROL only affects CF and OF, not SF/ZF/PF/AF
+            if ($count > 0) {
+                $cf = ($resultU->low32() & 0x1) !== 0;
+                $runtime->memoryAccessor()->setCarryFlag($cf);
+                if ($operand === 1) {
+                    $runtime->memoryAccessor()->setOverflowFlag($resultU->isNegativeSigned() !== $cf);
                 }
             }
 
@@ -127,7 +167,12 @@ class Group2 implements InstructionInterface
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & $this->countMask($size);
+
+        // x86 semantics: count==0 leaves operand and flags unchanged (and does not write memory).
+        if ($operand === 0) {
+            return ExecutionStatus::SUCCESS;
+        }
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
@@ -150,6 +195,35 @@ class Group2 implements InstructionInterface
                     $msb = ($result >> 7) & 1;
                     $msb1 = ($result >> 6) & 1;
                     $runtime->memoryAccessor()->setOverflowFlag($msb !== $msb1);
+                }
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($size === 64) {
+            $valueU = $isRegister
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $address);
+
+            $count = $operand % 64;
+            $resultU = $count === 0
+                ? $valueU
+                : $valueU->shr($count)->or($valueU->shl(64 - $count));
+
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $address, $resultU);
+            }
+
+            // ROR only affects CF and OF, not SF/ZF/PF/AF
+            if ($count > 0) {
+                $cf = $resultU->isNegativeSigned();
+                $runtime->memoryAccessor()->setCarryFlag($cf);
+                if ($operand === 1) {
+                    $msb1 = ($resultU->shr(62)->low32() & 0x1) !== 0;
+                    $runtime->memoryAccessor()->setOverflowFlag($cf !== $msb1);
                 }
             }
 
@@ -191,7 +265,13 @@ class Group2 implements InstructionInterface
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & $this->countMask($size);
+
+        // x86 semantics: count==0 leaves operand and flags unchanged (and does not write memory).
+        if ($operand === 0) {
+            return ExecutionStatus::SUCCESS;
+        }
+
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
         if ($this->isByteOp($opcode)) {
@@ -218,6 +298,39 @@ class Group2 implements InstructionInterface
             if ($operand === 1) {
                 $msb = ($result >> 7) & 1;
                 $runtime->memoryAccessor()->setOverflowFlag($msb !== $cf);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($size === 64) {
+            $valueU = $isRegister
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $address);
+
+            $count = $operand % 65; // 64 bits + carry
+            $resultU = $valueU;
+            $cf = $carry;
+            for ($i = 0; $i < $count; $i++) {
+                $newCf = ($resultU->shr(63)->low32() & 0x1);
+                $resultU = $resultU->shl(1);
+                if ($cf !== 0) {
+                    $resultU = $resultU->or(1);
+                }
+                $cf = $newCf;
+            }
+
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $address, $resultU);
+            }
+
+            // RCL only affects CF and OF, not SF/ZF/PF/AF
+            $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
+            // OF is only defined for count=1: OF = MSB XOR CF
+            if ($operand === 1) {
+                $runtime->memoryAccessor()->setOverflowFlag($resultU->isNegativeSigned() !== ($cf !== 0));
             }
 
             return ExecutionStatus::SUCCESS;
@@ -261,7 +374,13 @@ class Group2 implements InstructionInterface
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & $this->countMask($size);
+
+        // x86 semantics: count==0 leaves operand and flags unchanged (and does not write memory).
+        if ($operand === 0) {
+            return ExecutionStatus::SUCCESS;
+        }
+
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
         if ($this->isByteOp($opcode)) {
@@ -288,6 +407,42 @@ class Group2 implements InstructionInterface
             if ($operand === 1) {
                 $msb = ($result >> 7) & 1;
                 $msb1 = ($result >> 6) & 1;
+                $runtime->memoryAccessor()->setOverflowFlag($msb !== $msb1);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($size === 64) {
+            $valueU = $isRegister
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $address);
+
+            $count = $operand % 65; // 64 bits + carry
+            $resultU = $valueU;
+            $cf = $carry;
+            $msbMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            for ($i = 0; $i < $count; $i++) {
+                $newCf = $resultU->low32() & 0x1;
+                $resultU = $resultU->shr(1);
+                if ($cf !== 0) {
+                    $resultU = $resultU->or($msbMask);
+                }
+                $cf = $newCf;
+            }
+
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $address, $resultU);
+            }
+
+            // RCR only affects CF and OF, not SF/ZF/PF/AF
+            $runtime->memoryAccessor()->setCarryFlag($cf !== 0);
+            // OF is only defined for count=1: OF = MSB XOR (MSB-1) of result
+            if ($operand === 1) {
+                $msb = $resultU->isNegativeSigned();
+                $msb1 = ($resultU->shr(62)->low32() & 0x1) !== 0;
                 $runtime->memoryAccessor()->setOverflowFlag($msb !== $msb1);
             }
 
@@ -333,21 +488,32 @@ class Group2 implements InstructionInterface
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & $this->countMask($size);
+
+        // x86 semantics: count==0 leaves operand and flags unchanged.
+        if ($operand === 0) {
+            return ExecutionStatus::SUCCESS;
+        }
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
                 : $this->readMemory8($runtime, $address);
-            $result = ($value << $operand) & 0xFF;
+            if ($operand >= 8) {
+                // Count >= width: result becomes 0 (flags are architecturally undefined, but must not crash).
+                $result = 0;
+                $cfBit = $operand === 8 ? (($value & 0x1) !== 0) : false;
+            } else {
+                $result = ($value << $operand) & 0xFF;
+                // CF is the last bit shifted out
+                $cfBit = (($value >> (8 - $operand)) & 0x1) !== 0;
+            }
 
             if ($isRegister) {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
             } else {
                 $this->writeMemory8($runtime, $address, $result);
             }
-            // CF is set to the last bit shifted out (bit 7 for 8-bit SHL by 1)
-            $cfBit = $operand > 0 ? (($value >> (8 - $operand)) & 0x1) !== 0 : false;
             $runtime->memoryAccessor()->setCarryFlag($cfBit);
             $runtime->memoryAccessor()->updateFlags($result, 8);
             // OF for SHL by 1: set if MSB changed (MSB XOR CF) - must be after updateFlags
@@ -359,11 +525,49 @@ class Group2 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($size === 64) {
+            $ma = $runtime->memoryAccessor();
+            $valueU = $isRegister
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $address);
+
+            $resultU = $valueU->shl($operand);
+            $cfBit = ($valueU->shr(64 - $operand)->low32() & 0x1) !== 0;
+
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $address, $resultU);
+            }
+
+            $ma->setCarryFlag($cfBit);
+            $ma->setZeroFlag($resultU->isZero());
+            $ma->setSignFlag($resultU->isNegativeSigned());
+            $lowByte = $resultU->low32() & 0xFF;
+            $ones = 0;
+            for ($i = 0; $i < 8; $i++) {
+                $ones += ($lowByte >> $i) & 1;
+            }
+            $ma->setParityFlag(($ones % 2) === 0);
+            if ($operand === 1) {
+                $ma->setOverflowFlag($resultU->isNegativeSigned() !== $cfBit);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $value = $isRegister
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size)
             : ($size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address));
-        $result = ($value << $operand) & $mask;
+
+        if ($operand >= $size) {
+            $result = 0;
+            $cfBit = $operand === $size ? (($value & 0x1) !== 0) : false;
+        } else {
+            $result = ($value << $operand) & $mask;
+            $cfBit = (($value >> ($size - $operand)) & 0x1) !== 0;
+        }
 
         if ($isRegister) {
             $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
@@ -374,9 +578,6 @@ class Group2 implements InstructionInterface
                 $this->writeMemory16($runtime, $address, $result);
             }
         }
-        // CF is set to the last bit shifted out (bit at position size-1 after shifting by operand-1)
-        // For SHL by 1, CF = original bit 31 (for 32-bit) or bit 15 (for 16-bit)
-        $cfBit = $operand > 0 ? (($value >> ($size - $operand)) & 0x1) !== 0 : false;
 
         $runtime->memoryAccessor()->setCarryFlag($cfBit);
         $runtime->memoryAccessor()->updateFlags($result, $size);
@@ -393,7 +594,12 @@ class Group2 implements InstructionInterface
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & $this->countMask($size);
+
+        // x86 semantics: count==0 leaves operand and flags unchanged.
+        if ($operand === 0) {
+            return ExecutionStatus::SUCCESS;
+        }
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
@@ -411,6 +617,38 @@ class Group2 implements InstructionInterface
             // OF for SHR by 1: set to the original MSB - must be after updateFlags
             if ($operand === 1) {
                 $runtime->memoryAccessor()->setOverflowFlag((($value >> 7) & 1) !== 0);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($size === 64) {
+            $ma = $runtime->memoryAccessor();
+            $valueU = $isRegister
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $address);
+
+            $resultU = $valueU->shr($operand);
+            $cfBit = ($valueU->shr($operand - 1)->low32() & 0x1) !== 0;
+
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $address, $resultU);
+            }
+
+            $ma->setCarryFlag($cfBit);
+            $ma->setZeroFlag($resultU->isZero());
+            $ma->setSignFlag($resultU->isNegativeSigned());
+            $lowByte = $resultU->low32() & 0xFF;
+            $ones = 0;
+            for ($i = 0; $i < 8; $i++) {
+                $ones += ($lowByte >> $i) & 1;
+            }
+            $ma->setParityFlag(($ones % 2) === 0);
+
+            if ($operand === 1) {
+                $ma->setOverflowFlag($valueU->isNegativeSigned());
             }
 
             return ExecutionStatus::SUCCESS;
@@ -445,7 +683,12 @@ class Group2 implements InstructionInterface
     {
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $address = $isRegister ? null : $this->rmLinearAddress($runtime, $memory, $modRegRM);
-        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & 0x1F;
+        $operand = $this->count($runtime, $opcode, $memory, $modRegRM) & $this->countMask($size);
+
+        // x86 semantics: count==0 leaves operand and flags unchanged.
+        if ($operand === 0) {
+            return ExecutionStatus::SUCCESS;
+        }
 
         if ($this->isByteOp($opcode)) {
             $value = $isRegister
@@ -476,6 +719,37 @@ class Group2 implements InstructionInterface
             // OF for SAR by 1: always 0 (sign is always preserved) - must be after updateFlags
             if ($operand === 1) {
                 $runtime->memoryAccessor()->setOverflowFlag(false);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($size === 64) {
+            $ma = $runtime->memoryAccessor();
+            $valueInt = $isRegister
+                ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64)
+                : $this->readMemory64($runtime, $address)->toInt();
+
+            $resultInt = $valueInt >> $operand;
+
+            if ($isRegister) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultInt, 64);
+            } else {
+                $this->writeMemory64($runtime, $address, $resultInt);
+            }
+
+            $ma->setCarryFlag((($valueInt >> ($operand - 1)) & 0x1) !== 0);
+            $ma->setZeroFlag($resultInt === 0);
+            $ma->setSignFlag($resultInt < 0);
+            $lowByte = $resultInt & 0xFF;
+            $ones = 0;
+            for ($i = 0; $i < 8; $i++) {
+                $ones += ($lowByte >> $i) & 1;
+            }
+            $ma->setParityFlag(($ones % 2) === 0);
+            // OF for SAR by 1: always 0 (sign is always preserved)
+            if ($operand === 1) {
+                $ma->setOverflowFlag(false);
             }
 
             return ExecutionStatus::SUCCESS;

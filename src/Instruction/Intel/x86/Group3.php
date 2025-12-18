@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
+use Brick\Math\BigInteger;
+use Brick\Math\RoundingMode;
 use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Exception\ExecutionException;
@@ -62,13 +64,28 @@ class Group3 implements InstructionInterface
         // x86 encoding order: ModR/M -> displacement -> immediate
         // readRm consumes displacement, so must be called BEFORE reading immediate
         $value = $this->readRm($runtime, $memory, $modRegRM, $size);
-        $immediate = $isByte
-            ? $memory->byte()
-            : ($opSize === 32 ? $memory->dword() : $memory->short());
+        $immediate = match (true) {
+            $isByte => $memory->byte(),
+            $opSize === 16 => $memory->short(),
+            default => $memory->dword(), // 32-bit immediate; in 64-bit mode it is sign-extended
+        };
 
+        if ($size === 64) {
+            $valueU = $value instanceof UInt64 ? $value : UInt64::of($value);
+            $immInt = $this->signExtend($immediate, 32);
+            $resultU = $valueU->and(UInt64::of($immInt));
+            $runtime
+                ->memoryAccessor()
+                ->updateFlags($resultU->toInt(), 64)
+                ->setCarryFlag(false)
+                ->setOverflowFlag(false);
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $valueInt = $value instanceof UInt64 ? $value->toInt() : $value;
         $runtime
             ->memoryAccessor()
-            ->updateFlags($value & $immediate, $size)
+            ->updateFlags($valueInt & $immediate, $size)
             ->setCarryFlag(false)
             ->setOverflowFlag(false);
 
@@ -78,6 +95,22 @@ class Group3 implements InstructionInterface
     protected function not(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         $size = $isByte ? 8 : $opSize;
+        if ($size === 64) {
+            $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+            if ($isRegister) {
+                $valueInt = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64);
+                $resultU = UInt64::of($valueInt)->not();
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+                return ExecutionStatus::SUCCESS;
+            }
+
+            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+            $valueU = $this->readMemory64($runtime, $address);
+            $this->writeMemory64($runtime, $address, $valueU->not());
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $this->maskForSize($size);
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
 
@@ -116,6 +149,29 @@ class Group3 implements InstructionInterface
     protected function neg(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $isByte, int $opSize): ExecutionStatus
     {
         $size = $isByte ? 8 : $opSize;
+        if ($size === 64) {
+            $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+            if ($isRegister) {
+                $valueInt = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64);
+                $valueU = UInt64::of($valueInt);
+                $resultU = UInt64::zero()->sub($valueU);
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+                $valueU = $this->readMemory64($runtime, $address);
+                $resultU = UInt64::zero()->sub($valueU);
+                $this->writeMemory64($runtime, $address, $resultU);
+            }
+
+            $runtime->memoryAccessor()
+                ->updateFlags($resultU->toInt(), 64)
+                ->setCarryFlag(!$valueU->isZero())
+                ->setOverflowFlag($valueU->eq('9223372036854775808')); // 0x8000000000000000
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $this->maskForSize($size);
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
 
@@ -125,12 +181,6 @@ class Group3 implements InstructionInterface
                 : $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
             $value &= $mask;
             $result = (-$value) & $mask;
-
-            // Debug NEG for LZMA distance
-            $runtime->option()->logger()->debug(sprintf(
-                'NEG r%d: value=0x%X result=0x%X (reg=%d)',
-                $size, $value & 0xFFFFFFFF, $result & 0xFFFFFFFF, $modRegRM->registerOrMemoryAddress()
-            ));
 
             if ($isByte) {
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
@@ -201,6 +251,21 @@ class Group3 implements InstructionInterface
             }
 
             $flag = ($product >> 16) !== 0;
+        } elseif ($opSize === 64) {
+            $mask64 = BigInteger::of('18446744073709551615'); // 0xFFFFFFFFFFFFFFFF
+
+            $accU = UInt64::of($acc);
+            $operandU = $operand instanceof UInt64 ? $operand : UInt64::of($operand);
+
+            $product = $accU->toBigInteger()->multipliedBy($operandU->toBigInteger());
+            $lowU = UInt64::of($product->and($mask64));
+            $highU = UInt64::of($product->shiftedRight(64)->and($mask64));
+
+            $ma
+                ->writeBySize(RegisterType::EAX, $lowU->toInt(), 64)
+                ->writeBySize(RegisterType::EDX, $highU->toInt(), 64);
+
+            $flag = !$highU->isZero();
         } else {
             // Use UInt64 for 32-bit × 32-bit = 64-bit result
             $product = UInt64::of($acc & 0xFFFFFFFF)->mul($operand & 0xFFFFFFFF);
@@ -240,6 +305,34 @@ class Group3 implements InstructionInterface
 
         $operand = $this->readRm($runtime, $memory, $modRegRM, $opSize);
         $acc = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);
+
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $mask64 = BigInteger::of('18446744073709551615'); // 0xFFFFFFFFFFFFFFFF
+            $twoPow128 = BigInteger::of(1)->shiftedLeft(128);
+
+            $operandSigned = $operand instanceof UInt64 ? $operand->toInt() : $operand;
+            $productSigned = BigInteger::of($acc)->multipliedBy(BigInteger::of($operandSigned));
+
+            $productUnsigned = $productSigned->isNegative()
+                ? $productSigned->plus($twoPow128)
+                : $productSigned;
+
+            $lowU = UInt64::of($productUnsigned->and($mask64));
+            $highU = UInt64::of($productUnsigned->shiftedRight(64)->and($mask64));
+
+            $ma
+                ->writeBySize(RegisterType::EAX, $lowU->toInt(), 64)
+                ->writeBySize(RegisterType::EDX, $highU->toInt(), 64);
+
+            $expectedHighU = $lowU->isNegativeSigned()
+                ? UInt64::of('18446744073709551615')
+                : UInt64::zero();
+            $flag = !$highU->eq($expectedHighU);
+            $ma->setCarryFlag($flag)->setOverflowFlag($flag);
+
+            return ExecutionStatus::SUCCESS;
+        }
 
         $sOperand = $this->signExtend($operand, $opSize);
         $sAcc = $this->signExtend($acc, $opSize);
@@ -298,7 +391,36 @@ class Group3 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $divider = $this->readRm($runtime, $memory, $modRegRM, $opSize);
+        $dividerVal = $this->readRm($runtime, $memory, $modRegRM, $opSize);
+
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $mask64 = BigInteger::of('18446744073709551615'); // 0xFFFFFFFFFFFFFFFF
+            $dividerU = $dividerVal instanceof UInt64 ? $dividerVal : UInt64::of($dividerVal);
+            if ($dividerU->isZero()) {
+                throw new FaultException(0x00, 0, 'Divide by zero');
+            }
+
+            $raxU = UInt64::of($ma->fetch(RegisterType::EAX)->asBytesBySize(64));
+            $rdxU = UInt64::of($ma->fetch(RegisterType::EDX)->asBytesBySize(64));
+            $dividend = $rdxU->toBigInteger()->shiftedLeft(64)->or($raxU->toBigInteger());
+
+            $quotient = $dividend->dividedBy($dividerU->toBigInteger(), RoundingMode::DOWN);
+            if ($quotient->isGreaterThan($mask64)) {
+                throw new FaultException(0x00, 0, 'Divide overflow');
+            }
+            $remainder = $dividend->mod($dividerU->toBigInteger());
+
+            $qU = UInt64::of($quotient->and($mask64));
+            $rU = UInt64::of($remainder->and($mask64));
+            $ma
+                ->writeBySize(RegisterType::EAX, $qU->toInt(), 64)
+                ->writeBySize(RegisterType::EDX, $rU->toInt(), 64);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $divider = $dividerVal;
         if ($divider === 0) {
             throw new FaultException(0x00, 0, 'Divide by zero');
         }
@@ -379,6 +501,41 @@ class Group3 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         } else {
             $dividerRaw = $this->readRm($runtime, $memory, $modRegRM, $opSize);
+
+            if ($opSize === 64) {
+                $divider = $dividerRaw instanceof UInt64 ? $dividerRaw->toInt() : $dividerRaw;
+                if ($divider === 0) {
+                    throw new FaultException(0x00, 0, 'Divide by zero');
+                }
+
+                $ma = $runtime->memoryAccessor();
+                $raxU = UInt64::of($ma->fetch(RegisterType::EAX)->asBytesBySize(64));
+                $rdxU = UInt64::of($ma->fetch(RegisterType::EDX)->asBytesBySize(64));
+                $dividendUnsigned = $rdxU->toBigInteger()->shiftedLeft(64)->or($raxU->toBigInteger());
+
+                $dividend = $dividendUnsigned;
+                if ($rdxU->isNegativeSigned()) {
+                    $dividend = $dividend->minus(BigInteger::of(1)->shiftedLeft(128));
+                }
+
+                $dividerBig = BigInteger::of($divider);
+                $quotientBig = $dividend->dividedBy($dividerBig, RoundingMode::DOWN);
+                $remainderBig = $dividend->minus($quotientBig->multipliedBy($dividerBig));
+
+                $min64 = BigInteger::of((string) PHP_INT_MIN);
+                $max64 = BigInteger::of((string) PHP_INT_MAX);
+                if ($quotientBig->isLessThan($min64) || $quotientBig->isGreaterThan($max64)) {
+                    throw new FaultException(0x00, 0, 'Divide overflow');
+                }
+
+                $ma
+                    ->writeBySize(RegisterType::EAX, $quotientBig->toInt(), 64)
+                    ->writeBySize(RegisterType::EDX, $remainderBig->toInt(), 64);
+
+                $runtime->memoryAccessor()->setCarryFlag(false)->setOverflowFlag(false);
+                return ExecutionStatus::SUCCESS;
+            }
+
             $divider = $this->signExtend($dividerRaw, $opSize);
             if ($divider === 0) {
                 throw new FaultException(0x00, 0, 'Divide by zero');
@@ -433,6 +590,7 @@ class Group3 implements InstructionInterface
         return match ($size) {
             8 => 0xFF,
             16 => 0xFFFF,
+            64 => -1,
             default => 0xFFFFFFFF,
         };
     }

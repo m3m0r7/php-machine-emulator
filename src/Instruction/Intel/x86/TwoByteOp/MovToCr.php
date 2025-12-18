@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -36,24 +37,34 @@ class MovToCr implements InstructionInterface
             throw new ExecutionException('MOV to CR requires register addressing');
         }
 
-        $cr = $modrm->registerOrOPCode() & 0b111;
+        $cpu = $runtime->context()->cpu();
+
+        // In 64-bit mode, REX.R extends the control register number (e.g., CR8).
+        $cr = ($modrm->registerOrOPCode() & 0b111) |
+            (($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexR()) ? 0b1000 : 0);
+
         // MOV to/from control registers always uses r32 (or r64 in long mode),
         // independent of the current operand-size attribute.
-        $cpu = $runtime->context()->cpu();
         $size = ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) ? 64 : 32;
-        $val = $runtime->memoryAccessor()->fetch($modrm->registerOrMemoryAddress())->asBytesBySize($size);
+        $gpr = Register::findGprByCode(
+            $modrm->registerOrMemoryAddress(),
+            $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexB(),
+        );
+        $val = $runtime->memoryAccessor()->fetch($gpr)->asBytesBySize($size);
         $wasProtected = $runtime->context()->cpu()->isProtectedMode();
 
         if ($cr === 0) {
             $val |= 0x22; // MP + NE set so kernel assumes FPU present
         }
 
-        $runtime->option()->logger()->debug(sprintf(
-            'MOV to CR%d: value=0x%08X (size=%d)',
-            $cr,
-            $val & 0xFFFFFFFF,
-            $size
-        ));
+        $runtime->option()->logger()->debug(
+            sprintf(
+                'MOV to CR%d: value=0x%016X (size=%d)',
+                $cr,
+                $val,
+                $size,
+            )
+        );
 
         $runtime->memoryAccessor()->writeControlRegister($cr, $val);
 
@@ -70,6 +81,9 @@ class MovToCr implements InstructionInterface
         if ($cr === 4 && $runtime->context()->cpu()->isPagingEnabled()) {
             $runtime->context()->cpu()->setPagingEnabled(true);
         }
+
+        // IA-32e activation depends on CR0/CR4/EFER; keep CPUContext in sync.
+        $this->updateIa32eMode($runtime);
 
         return ExecutionStatus::SUCCESS;
     }

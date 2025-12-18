@@ -23,6 +23,7 @@ class PopRm implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $hasOperandSizeOverridePrefix = in_array(self::PREFIX_OPERAND_SIZE, $opcodes, true);
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $memory = $runtime->memory();
         $modRegRM = $memory->byteAsModRegRM();
@@ -31,14 +32,18 @@ class PopRm implements InstructionInterface
             throw new ExecutionException('POP r/m16 with invalid digit');
         }
 
-        $opSize = $runtime->context()->cpu()->operandSize();
-        $value = $runtime->memoryAccessor()->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+        $cpu = $runtime->context()->cpu();
 
-        if ($opSize === 32) {
-            $this->writeRm($runtime, $memory, $modRegRM, $value, 32);
-        } else {
-            $this->writeRm16($runtime, $memory, $modRegRM, $value);
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $popSize = $hasOperandSizeOverridePrefix ? 16 : 64;
+            $value = $runtime->memoryAccessor()->pop(RegisterType::ESP, $popSize)->asBytesBySize($popSize);
+            $this->writeRm($runtime, $memory, $modRegRM, $value, $popSize);
+            return ExecutionStatus::SUCCESS;
         }
+
+        $opSize = $cpu->operandSize();
+        $value = $runtime->memoryAccessor()->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+        $this->writeRm($runtime, $memory, $modRegRM, $value, $opSize);
 
         return ExecutionStatus::SUCCESS;
     }

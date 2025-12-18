@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -41,15 +42,21 @@ class Lea implements InstructionInterface
         if (!$cpu->isProtectedMode() && !$cpu->isA20Enabled()) {
             $mask = 0xFFFFF; // 20-bit mask for real mode
         } else {
-            $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $mask = match ($size) {
+                64 => -1, // PHP int is signed; -1 acts as a 64-bit all-ones mask
+                32 => 0xFFFFFFFF,
+                default => 0xFFFF,
+            };
         }
 
         $regCode = $modRegRM->registerOrOPCode();
+        $rexR = $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexR();
+        $dest = Register::findGprByCode($regCode, $rexR);
 
         $runtime
             ->memoryAccessor()
             ->writeBySize(
-                $regCode,
+                $dest,
                 $address & $mask,
                 $size,
             );

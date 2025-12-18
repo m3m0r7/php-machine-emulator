@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Traits;
 
+use PHPMachineEmulator\Display\Pixel\Color;
+use PHPMachineEmulator\Display\Writer\TerminalScreenWriter;
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Util\UInt64;
@@ -274,7 +276,20 @@ trait MemoryAccessTrait
     {
         $vector = ($error >> 16) & 0xFF;
         $errorCode = $error & 0xFFFF;
-        $runtime->memoryAccessor()->writeControlRegister(2, $linear & 0xFFFFFFFF);
+        $cpu = $runtime->context()->cpu();
+
+        // CR2 holds the faulting linear address.
+        // In IA-32e (64-bit mode), it is a canonical 64-bit address (sign-extended from bit 47).
+        // In legacy modes, CR2 is effectively 32-bit.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $masked = $linear & 0x0000FFFFFFFFFFFF;
+            $canonical = ($masked & 0x0000800000000000) !== 0
+                ? ($masked | (-1 << 48))
+                : $masked;
+            $runtime->memoryAccessor()->writeControlRegister(2, $canonical);
+        } else {
+            $runtime->memoryAccessor()->writeControlRegister(2, $linear & 0xFFFFFFFF);
+        }
         throw new FaultException($vector, $errorCode, 'Page fault');
     }
 
@@ -356,6 +371,12 @@ trait MemoryAccessTrait
      */
     private function readMmio(RuntimeInterface $runtime, int $address, int $width): ?int
     {
+        $video = $runtime->context()->devices()->video();
+        $lfb = $video->linearFramebufferInfo();
+        if ($lfb !== null && $address >= $lfb['base'] && $address < ($lfb['base'] + $lfb['size'])) {
+            return $video->linearFramebufferRead($address, $width);
+        }
+
         $apic = $runtime->context()->cpu()->apicState();
         if ($address >= 0xFEE00000 && $address < 0xFEE01000) {
             $offset = $address - 0xFEE00000;
@@ -380,6 +401,52 @@ trait MemoryAccessTrait
      */
     private function writeMmio(RuntimeInterface $runtime, int $address, int $value, int $width): bool
     {
+        $video = $runtime?->context()->devices()->video() ?? null;
+        if ($video !== null) {
+            $lfb = $video->linearFramebufferInfo();
+            if ($lfb !== null && $address >= $lfb['base'] && $address < ($lfb['base'] + $lfb['size'])) {
+                if (!$video->linearFramebufferWrite($address, $value, $width)) {
+                    return false;
+                }
+
+                // Render 32bpp pixels on aligned 32-bit writes.
+                if ($width === 32 && $lfb['bitsPerPixel'] === 32) {
+                    $offset = ($address - $lfb['base']) & 0xFFFFFFFF;
+                    if (($offset & 0x3) === 0) {
+                        $x = intdiv($offset % $lfb['bytesPerScanLine'], 4);
+                        $y = intdiv($offset, $lfb['bytesPerScanLine']);
+
+                        if ($x >= 0 && $x < $lfb['width'] && $y >= 0 && $y < $lfb['height']) {
+                            $writer = $runtime->context()->screen()->screenWriter();
+                            $renderTerminal = getenv('PHPME_RENDER_LFB_TERMINAL');
+                            $shouldRender = !($writer instanceof TerminalScreenWriter)
+                                || ($renderTerminal !== false && $renderTerminal !== '' && $renderTerminal !== '0');
+
+                            if ($shouldRender) {
+                                $b = $value & 0xFF;
+                                $g = ($value >> 8) & 0xFF;
+                                $r = ($value >> 16) & 0xFF;
+                                $writer->dot($x, $y, new Color($r, $g, $b));
+
+                                // Prevent unbounded dot buffering during long REP fills.
+                                if (($offset & 0xFFF) === 0) {
+                                    $writer->flushIfNeeded();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                $stopEnv = getenv('PHPME_STOP_ON_LFB_WRITE');
+                if ($stopEnv !== false && $stopEnv !== '' && $stopEnv !== '0') {
+                    $runtime->option()->logger()->warning(sprintf('LFB: write%d addr=0x%08X value=0x%X', $width, $address & 0xFFFFFFFF, $value & 0xFFFFFFFF));
+                    throw new \PHPMachineEmulator\Exception\HaltException('Stopped by PHPME_STOP_ON_LFB_WRITE');
+                }
+
+                return true;
+            }
+        }
+
         $apic = $runtime?->context()->cpu()->apicState() ?? null;
         if ($apic === null) {
             return false;

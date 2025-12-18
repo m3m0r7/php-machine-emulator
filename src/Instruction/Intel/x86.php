@@ -119,6 +119,8 @@ use PHPMachineEmulator\Instruction\Intel\x86\Stosw;
 use PHPMachineEmulator\Instruction\Intel\x86\SubRegRm;
 use PHPMachineEmulator\Instruction\Intel\x86\TestImmAl;
 use PHPMachineEmulator\Instruction\Intel\x86\TestRegRm;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Andnps;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Andps;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\BitOp;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bsf;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bsr;
@@ -137,10 +139,22 @@ use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\ImulRegRm;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\JccNear;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Lxs;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovFromCr;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movaps;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovdMovq;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movdqa;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movdqu;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movsx;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovToCr;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movups;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movzx;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\NopModrm;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Orps;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pand;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pandn;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Por;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pshufd;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PshiftDq;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pxor;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PopFsGs;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PushFsGs;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Rdmsr;
@@ -153,6 +167,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Sysexit;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Ud2;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Wrmsr;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Xadd;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Xorps;
 use PHPMachineEmulator\Instruction\Intel\x86\Xchg;
 use PHPMachineEmulator\Instruction\Intel\x86\Xlat;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
@@ -376,6 +391,21 @@ class x86 implements InstructionListInterface
             Ud2::class,
             CacheOp::class,
             Emms::class,
+            Andps::class,
+            Andnps::class,
+            Orps::class,
+            Xorps::class,
+            Pand::class,
+            Pandn::class,
+            Por::class,
+            Pshufd::class,
+            PshiftDq::class,
+            Pxor::class,
+            Movaps::class,
+            Movups::class,
+            MovdMovq::class,
+            Movdqa::class,
+            Movdqu::class,
             Fxsave::class,
         ];
     }

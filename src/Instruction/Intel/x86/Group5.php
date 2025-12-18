@@ -9,6 +9,7 @@ use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Exception\NullPointerException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\Intel\BIOSInterrupt;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Disk;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Keyboard;
@@ -22,6 +23,7 @@ use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class Group5 implements InstructionInterface
 {
@@ -34,6 +36,7 @@ class Group5 implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $hasOperandSizeOverridePrefix = in_array(self::PREFIX_OPERAND_SIZE, $opcodes, true);
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $memory = $runtime->memory();
         $modRegRM = $memory->byteAsModRegRM();
@@ -45,7 +48,7 @@ class Group5 implements InstructionInterface
             0x3 => $this->callFarRm($runtime, $memory, $modRegRM),
             0x4 => $this->jmpNearRm($runtime, $memory, $modRegRM),
             0x5 => $this->jmpFarRm($runtime, $memory, $modRegRM),
-            0x6 => $this->push($runtime, $memory, $modRegRM),
+            0x6 => $this->push($runtime, $memory, $modRegRM, $hasOperandSizeOverridePrefix),
             0x7 => $this->handleDigit7($runtime, $memory, $modRegRM),
             default => $this->handleUnimplementedDigit($runtime, $modRegRM),
         };
@@ -53,15 +56,53 @@ class Group5 implements InstructionInterface
 
     protected function inc(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->context()->cpu()->operandSize();
-        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $cpu = $runtime->context()->cpu();
+        $size = $cpu->operandSize();
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $ma = $runtime->memoryAccessor();
 
+        // Preserve CF - INC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+
+        if ($size === 64) {
+            if ($isRegister) {
+                $regType = Register::findGprByCode(
+                    $modRegRM->registerOrMemoryAddress(),
+                    $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexB(),
+                );
+                $old = $ma->fetch($regType)->asBytesBySize(64);
+                $resultU = UInt64::of($old)->add(1);
+                $result = $resultU->toInt();
+                $ma->writeBySize($regType, $result, 64);
+            } else {
+                $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+                $oldU = $this->readMemory64($runtime, $address);
+                $resultU = $oldU->add(1);
+                $result = $resultU->toInt();
+                $this->writeMemory64($runtime, $address, $resultU);
+                $old = $oldU->toInt();
+            }
+
+            $ma->updateFlags($result, 64);
+            $ma->setAuxiliaryCarryFlag((($old & 0x0F) + 1) > 0x0F);
+            $ma->setOverflowFlag($result === PHP_INT_MIN);
+            $ma->setCarryFlag($savedCf);
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+
         if ($isRegister) {
-            $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
-            $result = ($value + 1) & $mask;
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+                $regType = Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
+                $value = $ma->fetch($regType)->asBytesBySize($size);
+                $result = ($value + 1) & $mask;
+                $ma->writeBySize($regType, $result, $size);
+            } else {
+                $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
+                $result = ($value + 1) & $mask;
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+            }
         } else {
             // Calculate address once to avoid consuming displacement bytes twice
             $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
@@ -74,9 +115,9 @@ class Group5 implements InstructionInterface
             }
         }
 
-        // Preserve CF - INC does not affect carry flag
-        $savedCf = $ma->shouldCarryFlag();
+        $af = (($value & 0x0F) + 1) > 0x0F;
         $ma->updateFlags($result, $size);
+        $ma->setAuxiliaryCarryFlag($af);
         $ma->setCarryFlag($savedCf);
 
         // OF for INC: set when result is SIGN_MASK (0x8000, 0x80000000)
@@ -88,15 +129,53 @@ class Group5 implements InstructionInterface
 
     protected function dec(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->context()->cpu()->operandSize();
-        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $cpu = $runtime->context()->cpu();
+        $size = $cpu->operandSize();
         $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
         $ma = $runtime->memoryAccessor();
 
+        // Preserve CF - DEC does not affect carry flag
+        $savedCf = $ma->shouldCarryFlag();
+
+        if ($size === 64) {
+            if ($isRegister) {
+                $regType = Register::findGprByCode(
+                    $modRegRM->registerOrMemoryAddress(),
+                    $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexB(),
+                );
+                $old = $ma->fetch($regType)->asBytesBySize(64);
+                $resultU = UInt64::of($old)->sub(1);
+                $result = $resultU->toInt();
+                $ma->writeBySize($regType, $result, 64);
+            } else {
+                $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+                $oldU = $this->readMemory64($runtime, $address);
+                $resultU = $oldU->sub(1);
+                $result = $resultU->toInt();
+                $this->writeMemory64($runtime, $address, $resultU);
+                $old = $oldU->toInt();
+            }
+
+            $ma->updateFlags($result, 64);
+            $ma->setAuxiliaryCarryFlag(($old & 0x0F) === 0);
+            $ma->setOverflowFlag($result === PHP_INT_MAX);
+            $ma->setCarryFlag($savedCf);
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+
         if ($isRegister) {
-            $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
-            $result = ($value - 1) & $mask;
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+                $regType = Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
+                $value = $ma->fetch($regType)->asBytesBySize($size);
+                $result = ($value - 1) & $mask;
+                $ma->writeBySize($regType, $result, $size);
+            } else {
+                $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
+                $result = ($value - 1) & $mask;
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
+            }
         } else {
             // Calculate address once to avoid consuming displacement bytes twice
             $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
@@ -109,9 +188,9 @@ class Group5 implements InstructionInterface
             }
         }
 
-        // Preserve CF - DEC does not affect carry flag
-        $savedCf = $ma->shouldCarryFlag();
+        $af = (($value & 0x0F) === 0);
         $ma->updateFlags($result, $size);
+        $ma->setAuxiliaryCarryFlag($af);
         $ma->setCarryFlag($savedCf);
 
         // OF for DEC: set when result is SIGN_MASK - 1 (0x7FFF, 0x7FFFFFFF)
@@ -123,7 +202,39 @@ class Group5 implements InstructionInterface
 
     protected function callNearRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+
+        // In 64-bit mode, CALL r/m always uses a 64-bit target and pushes 64-bit RIP.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+            if ($isRegister) {
+                $regType = Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
+                $target = $runtime->memoryAccessor()->fetch($regType)->asBytesBySize(64);
+            } else {
+                $addr = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+                $target = $this->readMemory64($runtime, $addr)->toInt();
+            }
+
+            $returnRip = $runtime->memory()->offset();
+
+            if ($target === 0) {
+                throw new NullPointerException(sprintf(
+                    'CALL to NULL pointer (0x0000000000000000) at IP=0x%05X',
+                    $returnRip - 2
+                ));
+            }
+
+            $runtime->memoryAccessor()->push(RegisterType::ESP, $returnRip, 64);
+
+            if ($runtime->option()->shouldChangeOffset()) {
+                $runtime->memory()->setOffset($target);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $size = $cpu->operandSize();
 
         // Indirect near call uses an offset relative to current CS.
         $targetOffset = $this->readRm($runtime, $memory, $modRegRM, $size);
@@ -151,7 +262,42 @@ class Group5 implements InstructionInterface
 
     protected function jmpNearRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $size = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+
+        // In 64-bit mode, JMP r/m always uses a 64-bit target.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+            if ($isRegister) {
+                $regType = Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
+                $target = $runtime->memoryAccessor()->fetch($regType)->asBytesBySize(64);
+            } else {
+                $addr = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+                $target = $this->readMemory64($runtime, $addr)->toInt();
+            }
+
+            $runtime->option()->logger()->debug(sprintf(
+                'JMP [r/m] (Group5 64-bit): target=0x%016X mode=%d rm=%d',
+                $target,
+                $modRegRM->mode(),
+                $modRegRM->registerOrMemoryAddress()
+            ));
+
+            if ($target === 0) {
+                throw new NullPointerException(sprintf(
+                    'JMP to NULL pointer (0x0000000000000000) at IP=0x%05X',
+                    $runtime->memory()->offset() - 2
+                ));
+            }
+
+            if ($runtime->option()->shouldChangeOffset()) {
+                $runtime->memory()->setOffset($target);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $size = $cpu->operandSize();
         // Indirect near jump uses an offset relative to current CS.
         $targetOffset = $this->readRm($runtime, $memory, $modRegRM, $size);
         $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
@@ -352,11 +498,33 @@ class Group5 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function push(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
+    protected function push(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, bool $hasOperandSizeOverridePrefix = false): ExecutionStatus
     {
-        $size = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+
+        // In 64-bit mode, PUSH r/m defaults to 64-bit (pushq). 0x66 prefix selects 16-bit (pushw).
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $pushSize = $hasOperandSizeOverridePrefix ? 16 : 64;
+            $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
+
+            if ($isRegister) {
+                $regType = Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
+                $value = $runtime->memoryAccessor()->fetch($regType)->asBytesBySize($pushSize);
+            } else {
+                $addr = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+                $value = match ($pushSize) {
+                    16 => $this->readMemory16($runtime, $addr),
+                    default => $this->readMemory64($runtime, $addr)->toInt(),
+                };
+            }
+
+            $runtime->memoryAccessor()->push(RegisterType::ESP, $value, $pushSize);
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $size = $cpu->operandSize();
         $value = $this->readRm($runtime, $memory, $modRegRM, $size);
-        $runtime->memoryAccessor()->push(RegisterType::ESP, $value, $size);
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $value instanceof UInt64 ? $value->toInt() : $value, $size);
         return ExecutionStatus::SUCCESS;
     }
 

@@ -22,6 +22,7 @@ use PHPMachineEmulator\LogicBoard\Network\NetworkContextInterface;
 use PHPMachineEmulator\LogicBoard\Storage\StorageContext;
 use PHPMachineEmulator\LogicBoard\Storage\StorageContextInterface;
 use PHPMachineEmulator\LogicBoard\Storage\StorageInfo;
+use PHPMachineEmulator\Stream\BootableStreamInterface;
 
 class TestLogicBoard implements LogicBoardInterface
 {
@@ -33,14 +34,14 @@ class TestLogicBoard implements LogicBoardInterface
     private MediaContextInterface $mediaContext;
     private ExternalDeviceContextInterface $externalDeviceContext;
 
-    public function __construct()
+    public function __construct(?BootableStreamInterface $bootStream = null)
     {
         $this->memoryContext = new MemoryContext();
         $this->cpuContext = new CPUContext();
         $this->networkContext = new NetworkContext();
         $this->displayContext = new DisplayContext(new WindowScreenWriterFactory());
         $this->storageContext = new StorageContext(new StorageInfo(0x10000));
-        $this->mediaContext = new MediaContext(new MediaInfo(new TestBootableStream()));
+        $this->mediaContext = new MediaContext(new MediaInfo($bootStream ?? new TestBootableStream()));
         $this->externalDeviceContext = new ExternalDeviceContext();
     }
 

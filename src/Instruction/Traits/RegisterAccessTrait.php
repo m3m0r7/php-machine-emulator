@@ -216,7 +216,8 @@ trait RegisterAccessTrait
     {
         $addressSize = $runtime->context()->cpu()->addressSize();
         $mask = match ($addressSize) {
-            64 => 0xFFFFFFFFFFFFFFFF,
+            // 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit mask.
+            64 => -1,
             32 => 0xFFFFFFFF,
             default => 0xFFFF,
         };

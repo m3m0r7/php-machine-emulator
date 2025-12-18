@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
 use PHPMachineEmulator\Display\Writer\WindowScreenWriter;
+use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\Device\KeyboardContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -147,6 +148,12 @@ class Keyboard implements InterruptInterface
         }
 
         // Set waiting state for async completion by DeviceManagerTicker
+        $stopEnv = getenv('PHPME_STOP_ON_INT16_WAIT');
+        if ($stopEnv !== false && $stopEnv !== '' && $stopEnv !== '0') {
+            $runtime->option()->logger()->warning(sprintf('INT 16h: waiting for key (AH=0x%02X)', $function));
+            throw new HaltException('Stopped by PHPME_STOP_ON_INT16_WAIT');
+        }
+
         $keyboard->setWaitingForKey(true, $function);
 
         $runtime->option()->logger()->debug('INT 16h: waiting for key (async)');

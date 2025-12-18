@@ -22,6 +22,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Video;
 use PHPMachineEmulator\Instruction\Intel\x86\DOSInterrupt\Dos;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class Int_ implements InstructionInterface
 {
@@ -41,15 +42,41 @@ class Int_ implements InstructionInterface
      */
     public function raise(RuntimeInterface $runtime, int $vector, int $returnIp, ?int $errorCode = null): void
     {
-        $opSize = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+        $opSize = ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) ? 64 : $cpu->operandSize();
         $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
-        $isProtected = $runtime->context()->cpu()->isProtectedMode();
+        $isProtected = $cpu->isProtectedMode();
         // $returnIp is a linear address (the code stream offset). Convert to an offset
         // relative to the current CS before pushing it for IRET/IRETD.
-        $returnOffset = $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
+        $returnOffset = ($cpu->isLongMode() && !$cpu->isCompatibilityMode())
+            ? $returnIp
+            : $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
 
         if ($isProtected) {
             $this->protectedModeInterrupt($runtime, $vector, $returnOffset, $errorCode, false);
+            return;
+        }
+
+        $this->vectorInterrupt($runtime, $vector, $returnOffset);
+    }
+
+    /**
+     * Raise a software interrupt/exception vector (INT n, INT3, INTO, ICEBP).
+     *
+     * In protected mode, software interrupt delivery is subject to DPL checks.
+     */
+    public function raiseSoftware(RuntimeInterface $runtime, int $vector, int $returnIp, ?int $errorCode = null): void
+    {
+        $cpu = $runtime->context()->cpu();
+        $opSize = ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) ? 64 : $cpu->operandSize();
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+        $isProtected = $cpu->isProtectedMode();
+        $returnOffset = ($cpu->isLongMode() && !$cpu->isCompatibilityMode())
+            ? $returnIp
+            : $this->codeOffsetFromLinear($runtime, $cs, $returnIp, $opSize);
+
+        if ($isProtected) {
+            $this->protectedModeInterrupt($runtime, $vector, $returnOffset, $errorCode, true);
             return;
         }
 
@@ -111,10 +138,25 @@ class Int_ implements InstructionInterface
             && $operand !== BIOSInterrupt::DOS_TERMINATE_INTERRUPT
             && $operand !== BIOSInterrupt::DOS_INTERRUPT
         ) {
-            $vectorAddress = ($vector * 4) & 0xFFFF;
-            $ivtSegment = $this->readMemory16($runtime, $vectorAddress + 2);
-            if ($ivtSegment !== 0xF000) {
-                return $this->handleUnknownInterrupt($runtime, $vector);
+            // In some test/program modes we load code at physical 0x0000. That overlaps
+            // the IVT region (0x0000-0x03FF), so the IVT bytes can contain program code
+            // rather than interrupt vectors. In that situation, do NOT treat the IVT as
+            // authoritative for BIOS interrupt hooking; always use the built-in BIOS
+            // service implementation.
+            $bootLoadAddress = $runtime->logicBoard()->media()->primary()->stream()->loadAddress();
+            if ($bootLoadAddress > 0x03FF) {
+                $vectorAddress = ($vector * 4) & 0xFFFF;
+                $ivtOffset = $this->readMemory16($runtime, $vectorAddress);
+                $ivtSegment = $this->readMemory16($runtime, $vectorAddress + 2);
+                $ivtIsNull = ($ivtSegment === 0 && $ivtOffset === 0);
+
+                // When running without BIOS initialization (e.g., unit/integration tests),
+                // the IVT may still be all zeros. Treat 0000:0000 as "uninitialized" and
+                // fall back to the built-in BIOS service implementation instead of
+                // delegating to a null vector.
+                if (!$ivtIsNull && $ivtSegment !== 0xF000) {
+                    return $this->handleUnknownInterrupt($runtime, $vector);
+                }
             }
         }
 
@@ -168,10 +210,13 @@ class Int_ implements InstructionInterface
      */
     private function handleUnknownInterrupt(RuntimeInterface $runtime, int $vector): ExecutionStatus
     {
-        $opSize = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+        $opSize = ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) ? 64 : $cpu->operandSize();
         $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
         $returnLinear = $runtime->memory()->offset();
-        $returnOffset = $this->codeOffsetFromLinear($runtime, $cs, $returnLinear, $opSize);
+        $returnOffset = ($cpu->isLongMode() && !$cpu->isCompatibilityMode())
+            ? $returnLinear
+            : $this->codeOffsetFromLinear($runtime, $cs, $returnLinear, $opSize);
         $runtime->option()->logger()->debug(sprintf(
             'INT 0x%02X: Not implemented as BIOS service, delegating to IVT-based interrupt handling (return_linear=0x%05X return_offset=0x%04X CS=0x%04X)',
             $vector,
@@ -324,101 +369,234 @@ class Int_ implements InstructionInterface
             $this->nestedCount[$key]--;
             return;
         }
-        $idtr = $runtime->context()->cpu()->idtr();
+        try {
+            $cpu = $runtime->context()->cpu();
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+                $this->protectedModeInterrupt64($runtime, $vector, $returnIp, $errorCode, $isSoftware);
+                return;
+            }
+
+            $idtr = $runtime->context()->cpu()->idtr();
+            $base = $idtr['base'] ?? 0;
+            $limit = $idtr['limit'] ?? 0;
+            $entryOffset = $vector * 8;
+
+            if ($entryOffset + 7 > $limit) {
+                return;
+            }
+
+            $descAddr = $base + $entryOffset;
+            $offsetLow = $this->readMemory16($runtime, $descAddr);
+            $selector = $this->readMemory16($runtime, $descAddr + 2);
+            $typeAttr = $this->readMemory16($runtime, $descAddr + 4);
+            $offsetHigh = $this->readMemory16($runtime, $descAddr + 6);
+
+            // Present bit check (bit 15 of typeAttr byte high)
+            if (($typeAttr & 0x8000) === 0) {
+                return;
+            }
+
+            // Gate type must be interrupt/trap gate (0xE/0xF)
+            $gateType = ($typeAttr >> 8) & 0x1F;
+            $isInterruptGate = $gateType === 0xE;
+            $isTrapGate = $gateType === 0xF;
+            $isTaskGate = $gateType === 0x5;
+            if (!($isInterruptGate || $isTrapGate || $isTaskGate)) {
+                return;
+            }
+
+            $gateDpl = ($typeAttr >> 13) & 0x3;
+            if ($isSoftware && $runtime->context()->cpu()->cpl() > $gateDpl) {
+                throw new FaultException(0x0D, $selector, sprintf('INT %02X DPL check failed', $vector));
+            }
+
+            if ($isTaskGate) {
+                $this->taskSwitch($runtime, $selector, true, $selector);
+                return;
+            }
+
+            $offset = (($offsetHigh & 0xFFFF) << 16) | ($offsetLow & 0xFFFF);
+
+            // Validate target code segment descriptor
+            $targetDesc = $this->readSegmentDescriptor($runtime, $selector);
+            if ($targetDesc === null || !$targetDesc['present']) {
+                throw new FaultException(0x0B, $selector, sprintf('IDT target selector 0x%04X not present', $selector));
+            }
+            if (!($targetDesc['executable'] ?? false)) {
+                throw new FaultException(0x0D, $selector, sprintf('IDT target selector 0x%04X is not executable', $selector));
+            }
+
+            $operandSize = $runtime->context()->cpu()->operandSize();
+            $currentCpl = $runtime->context()->cpu()->cpl();
+            $targetCpl = $targetDesc['dpl'];
+            $privilegeChange = $targetCpl < $currentCpl;
+
+            $oldSs = $runtime->memoryAccessor()->fetch(RegisterType::SS)->asByte();
+            $oldEsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize($operandSize);
+            $mask = $operandSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+
+            if ($privilegeChange) {
+                $tss = $runtime->context()->cpu()->taskRegister();
+                $tssSelector = $tss['selector'] ?? 0;
+                $tssBase = $tss['base'] ?? 0;
+                $tssLimit = $tss['limit'] ?? 0;
+                if ($tssSelector === 0) {
+                    throw new FaultException(0x0A, 0, 'Task register not loaded for privilege change');
+                }
+
+                $espOffset = 4 + ($targetCpl * 8);
+                $ssOffset = 8 + ($targetCpl * 8);
+                if ($tssLimit < $ssOffset + 3) {
+                    throw new FaultException(0x0A, $tssSelector, sprintf('TSS too small for ring %d stack', $targetCpl));
+                }
+
+                // Use target privilege for paging checks
+                $runtime->context()->cpu()->setCpl($targetCpl);
+                $runtime->context()->cpu()->setUserMode($targetCpl === 3);
+
+                $newEsp = $this->readMemory32($runtime, $tssBase + $espOffset);
+                $newSs = $this->readMemory16($runtime, $tssBase + $ssOffset);
+
+                $ma = $runtime->memoryAccessor();
+                $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
+                $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $operandSize);
+            }
+
+            // Push EFLAGS, CS, EIP
+            $ma = $runtime->memoryAccessor();
+            $flags =
+                ($ma->shouldCarryFlag() ? 1 : 0) |
+                0x2 | // reserved bit always set
+                ($ma->shouldParityFlag() ? (1 << 2) : 0) |
+                ($ma->shouldAuxiliaryCarryFlag() ? (1 << 4) : 0) |
+                ($ma->shouldZeroFlag() ? (1 << 6) : 0) |
+                ($ma->shouldSignFlag() ? (1 << 7) : 0) |
+                ($ma->shouldInterruptFlag() ? (1 << 9) : 0) |
+                ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
+                ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
+
+            if ($privilegeChange) {
+                // On privilege change, old SS/ESP are pushed after loading the new stack.
+                $ma->push(RegisterType::ESP, $oldSs, 16);
+                $ma->push(RegisterType::ESP, $oldEsp, $operandSize);
+            }
+
+            $ma->push(RegisterType::ESP, $flags, $operandSize);
+            // CS selector is always 16-bit.
+            $ma->push(RegisterType::ESP, $ma->fetch(RegisterType::CS)->asByte(), 16);
+            $ma->push(RegisterType::ESP, $returnIp, $operandSize);
+            if ($errorCode !== null) {
+                $ma->push(RegisterType::ESP, $errorCode & 0xFFFF, $operandSize);
+            }
+
+            if ($gateType === 0xE) {
+                $runtime->memoryAccessor()->setInterruptFlag(false);
+            }
+
+            if (!$runtime->option()->shouldChangeOffset()) {
+                return;
+            }
+
+            $linear = $this->linearCodeAddress($runtime, $selector, $offset, $operandSize);
+            $this->writeCodeSegment($runtime, $selector);
+            $runtime->memory()->setOffset($linear);
+        } finally {
+            $this->nestedCount[$key]--;
+        }
+    }
+
+    /**
+     * IA-32e 64-bit mode interrupt delivery (IDT gate size = 16 bytes, pushq frame).
+     *
+     * Implements the architectural core needed for kernel entry/return:
+     * - Interrupt/trap gate (types 0xE/0xF)
+     * - 64-bit handler offset
+     * - Stack switching via IST/TSS (TSS.RSPx, TSS.ISTn)
+     * - Pushes SS/RSP/RFLAGS/CS/RIP as 64-bit values (IRETQ-compatible)
+     * - Clears IF for interrupt gates
+     */
+    private function protectedModeInterrupt64(RuntimeInterface $runtime, int $vector, int $returnRip, ?int $errorCode, bool $isSoftware): void
+    {
+        $cpu = $runtime->context()->cpu();
+        $idtr = $cpu->idtr();
         $base = $idtr['base'] ?? 0;
         $limit = $idtr['limit'] ?? 0;
-        $entryOffset = $vector * 8;
+        $entryOffset = $vector * 16;
 
-        if ($entryOffset + 7 > $limit) {
-            $this->nestedCount[$key]--;
+        if ($entryOffset + 15 > $limit) {
             return;
         }
 
         $descAddr = $base + $entryOffset;
         $offsetLow = $this->readMemory16($runtime, $descAddr);
         $selector = $this->readMemory16($runtime, $descAddr + 2);
-        $typeAttr = $this->readMemory16($runtime, $descAddr + 4);
-        $offsetHigh = $this->readMemory16($runtime, $descAddr + 6);
+        $ist = $this->readMemory8($runtime, $descAddr + 4) & 0x7;
+        $typeAttr = $this->readMemory8($runtime, $descAddr + 5);
+        $offsetMid = $this->readMemory16($runtime, $descAddr + 6);
+        $offsetHigh = $this->readMemory32($runtime, $descAddr + 8);
 
-        // Present bit check (bit 15 of typeAttr byte high)
-        if (($typeAttr & 0x8000) === 0) {
+        if (($selector & 0xFFFC) === 0) {
+            throw new FaultException(0x0D, 0, sprintf('IDT target selector is null for vector %02X', $vector));
+        }
+
+        // Present bit
+        if (($typeAttr & 0x80) === 0) {
             return;
         }
 
-        // Gate type must be interrupt/trap gate (0xE/0xF)
-        $gateType = ($typeAttr >> 8) & 0x1F;
+        $gateType = $typeAttr & 0x1F;
         $isInterruptGate = $gateType === 0xE;
         $isTrapGate = $gateType === 0xF;
-        $isTaskGate = $gateType === 0x5;
-        if (!($isInterruptGate || $isTrapGate || $isTaskGate)) {
-            $this->nestedCount[$key]--;
+        if (!($isInterruptGate || $isTrapGate)) {
             return;
         }
 
-        $gateDpl = ($typeAttr >> 13) & 0x3;
-        if ($isSoftware && $runtime->context()->cpu()->cpl() > $gateDpl) {
+        $gateDpl = ($typeAttr >> 5) & 0x3;
+        if ($isSoftware && $cpu->cpl() > $gateDpl) {
             throw new FaultException(0x0D, $selector, sprintf('INT %02X DPL check failed', $vector));
         }
 
-        if ($isTaskGate) {
-            $this->taskSwitch($runtime, $selector, true, $selector);
-            $this->nestedCount[$key]--;
-            return;
-        }
-
-        $offset = (($offsetHigh & 0xFFFF) << 16) | ($offsetLow & 0xFFFF);
+        $offsetLow32 = (($offsetLow & 0xFFFF) | (($offsetMid & 0xFFFF) << 16)) & 0xFFFFFFFF;
+        $targetRip = UInt64::fromParts($offsetLow32, $offsetHigh)->toInt();
 
         // Validate target code segment descriptor
         $targetDesc = $this->readSegmentDescriptor($runtime, $selector);
-        if ($targetDesc === null || !$targetDesc['present']) {
-            $this->nestedCount[$key]--;
+        if ($targetDesc === null || !($targetDesc['present'] ?? false)) {
             throw new FaultException(0x0B, $selector, sprintf('IDT target selector 0x%04X not present', $selector));
         }
         if (!($targetDesc['executable'] ?? false)) {
-            $this->nestedCount[$key]--;
             throw new FaultException(0x0D, $selector, sprintf('IDT target selector 0x%04X is not executable', $selector));
         }
-
-        $operandSize = $runtime->context()->cpu()->operandSize();
-        $currentCpl = $runtime->context()->cpu()->cpl();
-        $targetCpl = $targetDesc['dpl'];
-        $privilegeChange = $targetCpl < $currentCpl;
-
-        $oldSs = $runtime->memoryAccessor()->fetch(RegisterType::SS)->asByte();
-        $oldEsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize($operandSize);
-        $mask = $operandSize === 32 ? 0xFFFFFFFF : 0xFFFF;
-
-        if ($privilegeChange) {
-            $tss = $runtime->context()->cpu()->taskRegister();
-            $tssSelector = $tss['selector'] ?? 0;
-            $tssBase = $tss['base'] ?? 0;
-            $tssLimit = $tss['limit'] ?? 0;
-            if ($tssSelector === 0) {
-                $this->nestedCount[$key]--;
-                throw new FaultException(0x0A, 0, 'Task register not loaded for privilege change');
-            }
-
-            $espOffset = 4 + ($targetCpl * 8);
-            $ssOffset = 8 + ($targetCpl * 8);
-            if ($tssLimit < $ssOffset + 3) {
-                $this->nestedCount[$key]--;
-                throw new FaultException(0x0A, $tssSelector, sprintf('TSS too small for ring %d stack', $targetCpl));
-            }
-
-            // Use target privilege for paging checks
-            $runtime->context()->cpu()->setCpl($targetCpl);
-            $runtime->context()->cpu()->setUserMode($targetCpl === 3);
-
-            $newEsp = $this->readMemory32($runtime, $tssBase + $espOffset);
-            $newSs = $this->readMemory16($runtime, $tssBase + $ssOffset);
-
-            $ma = $runtime->memoryAccessor();
-            $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
-            $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $operandSize);
+        if (!($targetDesc['long'] ?? false) || (($targetDesc['default'] ?? 16) !== 16)) {
+            throw new FaultException(0x0D, $selector, sprintf('IDT target selector 0x%04X is not a 64-bit code segment', $selector));
         }
 
-        // Push EFLAGS, CS, EIP
+        $currentCpl = $cpu->cpl();
+        $targetDpl = $targetDesc['dpl'] ?? ($selector & 0x3);
+        if ($targetDpl > $currentCpl) {
+            throw new FaultException(0x0D, $selector, sprintf('IDT target selector 0x%04X privilege check failed', $selector));
+        }
+        $isConforming = (($targetDesc['type'] ?? 0) & 0x4) !== 0;
+        $newCpl = $isConforming ? $currentCpl : $targetDpl;
+        $newStack = ($newCpl < $currentCpl) || ($ist !== 0);
+
         $ma = $runtime->memoryAccessor();
+        $oldSs = $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+        $oldRsp = $ma->fetch(RegisterType::ESP)->asBytesBySize(64);
+        $oldCs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+
+        if ($newStack) {
+            $tssLevel = $ist !== 0 ? ($ist + 3) : $newCpl;
+            $cpu->setCpl($newCpl);
+            $cpu->setUserMode($newCpl === 3);
+            $newRsp = $this->readRspFromTss64($runtime, $tssLevel);
+            $newRsp &= ~0xF;
+            $ma->writeBySize(RegisterType::ESP, $newRsp, 64);
+            // IA-32e interrupt stack switch loads SS as NULL selector with RPL=new CPL.
+            $ma->write16Bit(RegisterType::SS, $newCpl & 0x3);
+        }
+
+        // Push SS, RSP, RFLAGS, CS, RIP (as 64-bit values)
         $flags =
             ($ma->shouldCarryFlag() ? 1 : 0) |
             0x2 | // reserved bit always set
@@ -430,32 +608,44 @@ class Int_ implements InstructionInterface
             ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
             ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
 
-        if ($privilegeChange) {
-            // On privilege change, old SS/ESP are pushed after loading the new stack.
-            $ma->push(RegisterType::ESP, $oldSs, 16);
-            $ma->push(RegisterType::ESP, $oldEsp, $operandSize);
-        }
-
-        $ma->push(RegisterType::ESP, $flags, $operandSize);
-        // CS selector is always 16-bit.
-        $ma->push(RegisterType::ESP, $ma->fetch(RegisterType::CS)->asByte(), 16);
-        $ma->push(RegisterType::ESP, $returnIp, $operandSize);
+        $ma->push(RegisterType::ESP, $oldSs, 64);
+        $ma->push(RegisterType::ESP, $oldRsp, 64);
+        $ma->push(RegisterType::ESP, $flags, 64);
+        $ma->push(RegisterType::ESP, $oldCs, 64);
+        $ma->push(RegisterType::ESP, $returnRip, 64);
         if ($errorCode !== null) {
-            $ma->push(RegisterType::ESP, $errorCode & 0xFFFF, $operandSize);
+            $ma->push(RegisterType::ESP, $errorCode & 0xFFFFFFFF, 64);
         }
 
-        if ($gateType === 0xE) {
-            $runtime->memoryAccessor()->setInterruptFlag(false);
+        if ($isInterruptGate) {
+            $ma->setInterruptFlag(false);
         }
 
         if (!$runtime->option()->shouldChangeOffset()) {
-            $this->nestedCount[$key]--;
             return;
         }
 
-        $linear = $this->linearCodeAddress($runtime, $selector, $offset, $operandSize);
-        $this->writeCodeSegment($runtime, $selector);
-        $runtime->memory()->setOffset($linear);
-        $this->nestedCount[$key]--;
+        $newCs = ($selector & 0xFFFC) | ($newCpl & 0x3);
+        $this->writeCodeSegment($runtime, $newCs, $newCpl, $targetDesc);
+        $runtime->memory()->setOffset($targetRip);
+    }
+
+    private function readRspFromTss64(RuntimeInterface $runtime, int $level): int
+    {
+        $tr = $runtime->context()->cpu()->taskRegister();
+        $tssSelector = $tr['selector'] ?? 0;
+        $tssBase = $tr['base'] ?? 0;
+        $tssLimit = $tr['limit'] ?? 0;
+
+        if ($tssSelector === 0) {
+            throw new FaultException(0x0A, 0, 'Task register not loaded for stack switching');
+        }
+
+        $offset = 4 + ($level * 8);
+        if (($offset + 7) > $tssLimit) {
+            throw new FaultException(0x0A, $tssSelector, sprintf('TSS too small for stack pointer level %d', $level));
+        }
+
+        return $this->readMemory64($runtime, $tssBase + $offset)->toInt();
     }
 }

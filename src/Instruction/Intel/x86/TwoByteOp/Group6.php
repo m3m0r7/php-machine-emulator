@@ -28,7 +28,7 @@ class Group6 implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
-        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $memory = $runtime->memory();
         $modrm = $memory->byteAsModRegRM();
 
@@ -46,31 +46,50 @@ class Group6 implements InstructionInterface
     private function sgdt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
+        $cpu = $runtime->context()->cpu();
         $gdtr = $runtime->context()->cpu()->gdtr();
         $this->writeMemory16($runtime, $address, $gdtr['limit'] ?? 0);
         $base = $gdtr['base'] ?? 0;
-        $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
-        $this->writeMemory16($runtime, $address + 4, ($base >> 16) & 0xFFFF);
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            // 10-byte pseudo-descriptor: 2-byte limit + 8-byte base
+            $this->writeMemory64($runtime, $address + 2, $base);
+        } else {
+            // 6-byte pseudo-descriptor: 2-byte limit + 4-byte base
+            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
+            $this->writeMemory16($runtime, $address + 4, ($base >> 16) & 0xFFFF);
+        }
         return ExecutionStatus::SUCCESS;
     }
 
     private function sidt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
+        $cpu = $runtime->context()->cpu();
         $idtr = $runtime->context()->cpu()->idtr();
         $this->writeMemory16($runtime, $address, $idtr['limit'] ?? 0);
         $base = $idtr['base'] ?? 0;
-        $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
-        $this->writeMemory16($runtime, $address + 4, ($base >> 16) & 0xFFFF);
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            // 10-byte pseudo-descriptor: 2-byte limit + 8-byte base
+            $this->writeMemory64($runtime, $address + 2, $base);
+        } else {
+            // 6-byte pseudo-descriptor: 2-byte limit + 4-byte base
+            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
+            $this->writeMemory16($runtime, $address + 4, ($base >> 16) & 0xFFFF);
+        }
         return ExecutionStatus::SUCCESS;
     }
 
     private function lgdt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
+        $cpu = $runtime->context()->cpu();
         $limit = $this->readMemory16($runtime, $address);
-        $base = $this->readMemory16($runtime, $address + 2);
-        $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $base = $this->readMemory64($runtime, $address + 2)->toInt();
+        } else {
+            $base = $this->readMemory16($runtime, $address + 2);
+            $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
+        }
         $runtime->context()->cpu()->setGdtr($base, $limit);
 
         $runtime->option()->logger()->debug(sprintf(
@@ -81,18 +100,28 @@ class Group6 implements InstructionInterface
         ));
 
         // Dump first 8 GDT entries for debugging
-        for ($i = 0; $i < 8 && ($i * 8) <= $limit; $i++) {
-            $descAddr = $base + ($i * 8);
-            $bytes = [];
-            for ($j = 0; $j < 8; $j++) {
-                $bytes[] = sprintf('%02X', $this->readMemory8($runtime, $descAddr + $j));
+        $maxAddr = $runtime->memory()->logicalMaxMemorySize();
+        if ($base >= 0 && $base + 8 <= $maxAddr) {
+            for ($i = 0; $i < 8 && ($i * 8) <= $limit; $i++) {
+                $descAddr = $base + ($i * 8);
+                if ($descAddr < 0 || $descAddr + 8 > $maxAddr) {
+                    break;
+                }
+                $bytes = [];
+                for ($j = 0; $j < 8; $j++) {
+                    try {
+                        $bytes[] = sprintf('%02X', $this->readMemory8($runtime, $descAddr + $j));
+                    } catch (\Throwable) {
+                        break 2;
+                    }
+                }
+                $runtime->option()->logger()->debug(sprintf(
+                    'GDT[%d] at 0x%08X: %s',
+                    $i,
+                    $descAddr,
+                    implode(' ', $bytes)
+                ));
             }
-            $runtime->option()->logger()->debug(sprintf(
-                'GDT[%d] at 0x%08X: %s',
-                $i,
-                $descAddr,
-                implode(' ', $bytes)
-            ));
         }
 
         return ExecutionStatus::SUCCESS;
@@ -101,9 +130,14 @@ class Group6 implements InstructionInterface
     private function lidt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
+        $cpu = $runtime->context()->cpu();
         $limit = $this->readMemory16($runtime, $address);
-        $base = $this->readMemory16($runtime, $address + 2);
-        $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $base = $this->readMemory64($runtime, $address + 2)->toInt();
+        } else {
+            $base = $this->readMemory16($runtime, $address + 2);
+            $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
+        }
         $runtime->context()->cpu()->setIdtr($base, $limit);
         return ExecutionStatus::SUCCESS;
     }

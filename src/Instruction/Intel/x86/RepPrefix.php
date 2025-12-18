@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\InstructionExecutorInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class RepPrefix implements InstructionInterface
 {
@@ -39,9 +40,23 @@ class RepPrefix implements InstructionInterface
         Nop::class,
     ];
 
+    private static ?bool $traceGrubCfgCopy = null;
+    private static bool $tracedGrubCfgCopy = false;
+
     public function opcodes(): array
     {
         return [0xF3, 0xF2];
+    }
+
+    private static function shouldTraceGrubCfgCopy(): bool
+    {
+        if (self::$traceGrubCfgCopy !== null) {
+            return self::$traceGrubCfgCopy;
+        }
+
+        $env = getenv('PHPME_TRACE_GRUBCFG_COPY');
+        self::$traceGrubCfgCopy = $env !== false && trim($env) !== '' && trim($env) !== '0';
+        return self::$traceGrubCfgCopy;
     }
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
@@ -307,9 +322,13 @@ class RepPrefix implements InstructionInterface
 
             // Write using writeRawByte after allocate (same as Movsb.php line 32-34)
             $dstAddr = $dstSegOff + ($step * $i);
-            $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
-            $ma->allocate($destAddress, safe: false);
-            $ma->writeRawByte($destAddress, $value);
+            if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
+                $this->writeMemory8($runtime, $dstAddr, $value);
+            } else {
+                $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
+                $ma->allocate($destAddress, safe: false);
+                $ma->writeRawByte($destAddress, $value);
+            }
 
             // Debug: track writes to 0x0700-0x0710
             if ($dstAddr >= 0x0700 && $dstAddr <= 0x0710) {
@@ -328,11 +347,66 @@ class RepPrefix implements InstructionInterface
             }
         }
 
+        if (!self::$tracedGrubCfgCopy && self::shouldTraceGrubCfgCopy()) {
+            $fullCount = $count + 1;
+            $firstSrc = ($srcSegOff - $step) & 0xFFFFFFFF;
+            $firstDst = ($dstSegOff - $step) & 0xFFFFFFFF;
+
+            if ($step > 0) {
+                $srcMin = $firstSrc;
+                $srcMax = ($firstSrc + ($fullCount - 1)) & 0xFFFFFFFF;
+                $dstMin = $firstDst;
+                $dstMax = ($firstDst + ($fullCount - 1)) & 0xFFFFFFFF;
+            } else {
+                $srcMax = $firstSrc;
+                $srcMin = ($firstSrc - ($fullCount - 1)) & 0xFFFFFFFF;
+                $dstMax = $firstDst;
+                $dstMin = ($firstDst - ($fullCount - 1)) & 0xFFFFFFFF;
+            }
+
+            $grubCfgMin = 0x0006A800;
+            $grubCfgMax = 0x0006AFFF;
+            if ($srcMax >= $grubCfgMin && $srcMin <= $grubCfgMax && $fullCount <= 0x4000) {
+                $bytes = '';
+                for ($i = 0; $i < $fullCount; $i++) {
+                    $bytes .= chr($this->readMemory8($runtime, ($dstMin + $i) & 0xFFFFFFFF));
+                }
+                $sha1 = sha1($bytes);
+                $ascii = preg_replace('/[^\\x20-\\x7E]/', '.', substr($bytes, 0, min(256, strlen($bytes)))) ?? '';
+                $path = sprintf('debug/grubcfg_copy_%08X_%d.bin', $dstMin, $fullCount);
+                @file_put_contents($path, $bytes);
+
+                $runtime->option()->logger()->warning(sprintf(
+                    'GRUBCFG COPY (MOVSB): src=0x%08X..0x%08X dst=0x%08X..0x%08X len=%d sha1=%s saved=%s ascii="%s"',
+                    $srcMin,
+                    $srcMax,
+                    $dstMin,
+                    $dstMax,
+                    $fullCount,
+                    $sha1,
+                    $path,
+                    $ascii,
+                ));
+
+                self::$tracedGrubCfgCopy = true;
+            }
+        }
+
         // Update registers
         $totalStep = $step * $count;
         $this->writeIndex($runtime, RegisterType::ESI, $si + $totalStep);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $totalStep);
         $this->writeIndex($runtime, RegisterType::ECX, 0);
+
+        // If this copy overwrote a previously executed page, invalidate instruction caches.
+        // GRUB loads/relocates modules via REP MOVS and may reuse memory regions.
+        // Note: bulkMovs handles the remaining iterations; include the already-executed first iteration too.
+        $totalCount = $count + 1;
+        $destStart = $step > 0 ? ($dstSegOff - 1) : ($dstSegOff - ($count - 1));
+        $runtime->architectureProvider()->instructionExecutor()->invalidateCachesIfExecutedPageOverlaps(
+            $destStart,
+            $totalCount,
+        );
 
         // Check after copy
         if ($checkAfterCopy) {
@@ -356,7 +430,12 @@ class RepPrefix implements InstructionInterface
         $step = $ma->shouldDirectionFlag() ? -1 : 1;
 
         $opSize = $runtime->context()->cpu()->operandSize();
-        $width = $opSize === 32 ? 4 : 2;
+        $width = match ($opSize) {
+            16 => 2,
+            32 => 4,
+            64 => 8,
+            default => 2,
+        };
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $di = $this->readIndex($runtime, RegisterType::EDI);
         $sourceSegment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
@@ -369,15 +448,74 @@ class RepPrefix implements InstructionInterface
         for ($i = 0; $i < $count; $i++) {
             $offset = $step * $width * $i;
 
-            // Read using readMemory16/32 (same as Movsw.php line 30-32)
-            $value = $opSize === 32
-                ? $this->readMemory32($runtime, $srcSegOff + $offset)
-                : $this->readMemory16($runtime, $srcSegOff + $offset);
+            $value = match ($opSize) {
+                16 => $this->readMemory16($runtime, $srcSegOff + $offset),
+                32 => $this->readMemory32($runtime, $srcSegOff + $offset),
+                64 => $this->readMemory64($runtime, $srcSegOff + $offset),
+                default => $this->readMemory16($runtime, $srcSegOff + $offset),
+            };
 
             // Write using writeBySize after allocate (same as Movsw.php line 34-36)
-            $destAddress = $this->translateLinearWithMmio($runtime, $dstSegOff + $offset, true);
-            $ma->allocate($destAddress, $width, safe: false);
-            $ma->writeBySize($destAddress, $value, $opSize);
+            $dstAddr = $dstSegOff + $offset;
+            if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
+                match ($opSize) {
+                    16 => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                    32 => $this->writeMemory32($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                    64 => $this->writeMemory64($runtime, $dstAddr, $value),
+                    default => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                };
+            } else {
+                $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
+                $ma->allocate($destAddress, $width, safe: false);
+                $ma->writeBySize($destAddress, $value instanceof UInt64 ? $value->toInt() : $value, $opSize);
+            }
+        }
+
+        if (!self::$tracedGrubCfgCopy && self::shouldTraceGrubCfgCopy()) {
+            $fullElems = $count + 1;
+            $fullBytes = $fullElems * $width;
+            $firstSrc = ($srcSegOff - ($step * $width)) & 0xFFFFFFFF;
+            $firstDst = ($dstSegOff - ($step * $width)) & 0xFFFFFFFF;
+
+            if ($step > 0) {
+                $srcMin = $firstSrc;
+                $srcMax = ($firstSrc + ($fullBytes - 1)) & 0xFFFFFFFF;
+                $dstMin = $firstDst;
+                $dstMax = ($firstDst + ($fullBytes - 1)) & 0xFFFFFFFF;
+            } else {
+                $srcMax = $firstSrc;
+                $srcMin = ($firstSrc - ($fullBytes - 1)) & 0xFFFFFFFF;
+                $dstMax = $firstDst;
+                $dstMin = ($firstDst - ($fullBytes - 1)) & 0xFFFFFFFF;
+            }
+
+            $grubCfgMin = 0x0006A800;
+            $grubCfgMax = 0x0006AFFF;
+            if ($srcMax >= $grubCfgMin && $srcMin <= $grubCfgMax && $fullBytes <= 0x4000) {
+                $bytes = '';
+                for ($i = 0; $i < $fullBytes; $i++) {
+                    $bytes .= chr($this->readMemory8($runtime, ($dstMin + $i) & 0xFFFFFFFF));
+                }
+                $sha1 = sha1($bytes);
+                $ascii = preg_replace('/[^\\x20-\\x7E]/', '.', substr($bytes, 0, min(256, strlen($bytes)))) ?? '';
+                $path = sprintf('debug/grubcfg_copy_%08X_%d.bin', $dstMin, $fullBytes);
+                @file_put_contents($path, $bytes);
+
+                $runtime->option()->logger()->warning(sprintf(
+                    'GRUBCFG COPY (MOVS width=%d): src=0x%08X..0x%08X dst=0x%08X..0x%08X len=%d sha1=%s saved=%s ascii="%s"',
+                    $width,
+                    $srcMin,
+                    $srcMax,
+                    $dstMin,
+                    $dstMax,
+                    $fullBytes,
+                    $sha1,
+                    $path,
+                    $ascii,
+                ));
+
+                self::$tracedGrubCfgCopy = true;
+            }
         }
 
         // Update registers
@@ -385,6 +523,15 @@ class RepPrefix implements InstructionInterface
         $this->writeIndex($runtime, RegisterType::ESI, $si + $totalStep);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $totalStep);
         $this->writeIndex($runtime, RegisterType::ECX, 0);
+
+        // If this copy overwrote a previously executed page, invalidate instruction caches.
+        // Note: bulkMovs handles the remaining iterations; include the already-executed first iteration too.
+        $byteCount = ($count + 1) * $width;
+        $destStart = $step > 0 ? ($dstSegOff - $width) : ($dstSegOff - (($count - 1) * $width));
+        $runtime->architectureProvider()->instructionExecutor()->invalidateCachesIfExecutedPageOverlaps(
+            $destStart,
+            $byteCount,
+        );
 
         return ExecutionStatus::SUCCESS;
     }
@@ -407,9 +554,14 @@ class RepPrefix implements InstructionInterface
         // Process each byte using the same methods as Stosb.php
         for ($i = 0; $i < $count; $i++) {
             // Write using writeRawByte after allocate (same as Stosb.php line 33-39)
-            $address = $this->translateLinearWithMmio($runtime, $dstSegOff + ($step * $i), true);
-            $ma->allocate($address, safe: false);
-            $ma->writeRawByte($address, $byte);
+            $dstAddr = $dstSegOff + ($step * $i);
+            if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
+                $this->writeMemory8($runtime, $dstAddr, $byte);
+            } else {
+                $address = $this->translateLinearWithMmio($runtime, $dstAddr, true);
+                $ma->allocate($address, safe: false);
+                $ma->writeRawByte($address, $byte);
+            }
         }
 
         // Update registers
@@ -430,7 +582,12 @@ class RepPrefix implements InstructionInterface
         $step = $ma->shouldDirectionFlag() ? -1 : 1;
 
         $opSize = $runtime->context()->cpu()->operandSize();
-        $width = $opSize === 32 ? 4 : 2;
+        $width = match ($opSize) {
+            16 => 2,
+            32 => 4,
+            64 => 8,
+            default => 2,
+        };
         $value = $ma->fetch(RegisterType::EAX)->asBytesBySize($opSize);
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
@@ -442,9 +599,19 @@ class RepPrefix implements InstructionInterface
             $offset = $step * $width * $i;
 
             // Write using writeBySize after allocate (same as Stosw.php line 30-31)
-            $address = $this->translateLinearWithMmio($runtime, $dstSegOff + $offset, true);
-            $ma->allocate($address, safe: false);
-            $ma->writeBySize($address, $value, $opSize);
+            $dstAddr = $dstSegOff + $offset;
+            if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
+                match ($opSize) {
+                    16 => $this->writeMemory16($runtime, $dstAddr, $value),
+                    32 => $this->writeMemory32($runtime, $dstAddr, $value),
+                    64 => $this->writeMemory64($runtime, $dstAddr, $value),
+                    default => $this->writeMemory16($runtime, $dstAddr, $value),
+                };
+            } else {
+                $address = $this->translateLinearWithMmio($runtime, $dstAddr, true);
+                $ma->allocate($address, safe: false);
+                $ma->writeBySize($address, $value, $opSize);
+            }
         }
 
         // Update registers
@@ -498,13 +665,15 @@ class RepPrefix implements InstructionInterface
         // Update flags based on last comparison (same as Cmpsb.php line 36-46)
         $calc = $left - $right;
         $result = $calc & 0xFF;
+        $af = (($left & 0x0F) < ($right & 0x0F));
         $signA = ($left >> 7) & 1;
         $signB = ($right >> 7) & 1;
         $signR = ($result >> 7) & 1;
         $of = ($signA !== $signB) && ($signB === $signR);
         $ma->updateFlags($result, 8)
             ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
 
         // Update registers
         $totalStep = $step * $processed;
@@ -525,7 +694,12 @@ class RepPrefix implements InstructionInterface
         $step = $ma->shouldDirectionFlag() ? -1 : 1;
 
         $opSize = $runtime->context()->cpu()->operandSize();
-        $width = $opSize === 32 ? 4 : 2;
+        $width = match ($opSize) {
+            16 => 2,
+            32 => 4,
+            64 => 8,
+            default => 2,
+        };
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $di = $this->readIndex($runtime, RegisterType::EDI);
         $sourceSegment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
@@ -540,12 +714,18 @@ class RepPrefix implements InstructionInterface
         $right = 0;
         for ($i = 0; $i < $count; $i++) {
             $offset = $step * $width * $i;
-            $left = $opSize === 32
-                ? $this->readMemory32($runtime, $srcSegOff + $offset)
-                : $this->readMemory16($runtime, $srcSegOff + $offset);
-            $right = $opSize === 32
-                ? $this->readMemory32($runtime, $dstSegOff + $offset)
-                : $this->readMemory16($runtime, $dstSegOff + $offset);
+            $left = match ($opSize) {
+                16 => $this->readMemory16($runtime, $srcSegOff + $offset),
+                32 => $this->readMemory32($runtime, $srcSegOff + $offset),
+                64 => $this->readMemory64($runtime, $srcSegOff + $offset)->toInt(),
+                default => $this->readMemory16($runtime, $srcSegOff + $offset),
+            };
+            $right = match ($opSize) {
+                16 => $this->readMemory16($runtime, $dstSegOff + $offset),
+                32 => $this->readMemory32($runtime, $dstSegOff + $offset),
+                64 => $this->readMemory64($runtime, $dstSegOff + $offset)->toInt(),
+                default => $this->readMemory16($runtime, $dstSegOff + $offset),
+            };
             $processed++;
 
             $match = ($left === $right);
@@ -559,18 +739,41 @@ class RepPrefix implements InstructionInterface
             }
         }
 
-        // Update flags based on last comparison (same as Cmpsw.php line 39-51)
-        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $signBit = $opSize === 32 ? 31 : 15;
-        $calc = $left - $right;
-        $result = $calc & $mask;
-        $signA = ($left >> $signBit) & 1;
-        $signB = ($right >> $signBit) & 1;
-        $signR = ($result >> $signBit) & 1;
-        $of = ($signA !== $signB) && ($signB === $signR);
-        $ma->updateFlags($result, $opSize)
-            ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+        if ($opSize === 64) {
+            $leftU = UInt64::of($left);
+            $rightU = UInt64::of($right);
+            $resultU = $leftU->sub($rightU);
+            $resultInt = $resultU->toInt();
+
+            $cf = $leftU->lt($rightU);
+            $af = (($left & 0x0F) < ($right & 0x0F));
+            $of = (($left < 0) !== ($right < 0)) && (($resultInt < 0) === ($right < 0));
+
+            $ma->updateFlags($resultInt, 64)
+                ->setCarryFlag($cf)
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
+        } else {
+            $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $signBit = $opSize === 32 ? 31 : 15;
+            $leftU = $left & $mask;
+            $rightU = $right & $mask;
+
+            $calc = $leftU - $rightU;
+            $result = $calc & $mask;
+            $cf = $calc < 0;
+            $af = (($leftU & 0x0F) < ($rightU & 0x0F));
+
+            $signA = ($leftU >> $signBit) & 1;
+            $signB = ($rightU >> $signBit) & 1;
+            $signR = ($result >> $signBit) & 1;
+            $of = ($signA !== $signB) && ($signB === $signR);
+
+            $ma->updateFlags($result, $opSize)
+                ->setCarryFlag($cf)
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
+        }
 
         // Update registers
         $totalStep = $step * $width * $processed;
@@ -620,13 +823,15 @@ class RepPrefix implements InstructionInterface
         // Update flags based on last comparison (same as Scasb.php line 30-40)
         $calc = $al - $value;
         $result = $calc & 0xFF;
+        $af = (($al & 0x0F) < ($value & 0x0F));
         $signA = ($al >> 7) & 1;
         $signB = ($value >> 7) & 1;
         $signR = ($result >> 7) & 1;
         $of = ($signA !== $signB) && ($signB === $signR);
         $ma->updateFlags($result, 8)
             ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
 
         // Update registers
         $totalStep = $step * $processed;
@@ -646,7 +851,12 @@ class RepPrefix implements InstructionInterface
         $step = $ma->shouldDirectionFlag() ? -1 : 1;
 
         $opSize = $runtime->context()->cpu()->operandSize();
-        $width = $opSize === 32 ? 4 : 2;
+        $width = match ($opSize) {
+            16 => 2,
+            32 => 4,
+            64 => 8,
+            default => 2,
+        };
         $ax = $ma->fetch(RegisterType::EAX)->asBytesBySize($opSize);
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
@@ -658,9 +868,12 @@ class RepPrefix implements InstructionInterface
         $value = 0;
         for ($i = 0; $i < $count; $i++) {
             $offset = $step * $width * $i;
-            $value = $opSize === 32
-                ? $this->readMemory32($runtime, $dstSegOff + $offset)
-                : $this->readMemory16($runtime, $dstSegOff + $offset);
+            $value = match ($opSize) {
+                16 => $this->readMemory16($runtime, $dstSegOff + $offset),
+                32 => $this->readMemory32($runtime, $dstSegOff + $offset),
+                64 => $this->readMemory64($runtime, $dstSegOff + $offset)->toInt(),
+                default => $this->readMemory16($runtime, $dstSegOff + $offset),
+            };
             $processed++;
 
             $match = ($value === $ax);
@@ -674,18 +887,41 @@ class RepPrefix implements InstructionInterface
             }
         }
 
-        // Update flags based on last comparison (same as Scasw.php line 33-45)
-        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $signBit = $opSize === 32 ? 31 : 15;
-        $calc = $ax - $value;
-        $result = $calc & $mask;
-        $signA = ($ax >> $signBit) & 1;
-        $signB = ($value >> $signBit) & 1;
-        $signR = ($result >> $signBit) & 1;
-        $of = ($signA !== $signB) && ($signB === $signR);
-        $ma->updateFlags($result, $opSize)
-            ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+        if ($opSize === 64) {
+            $axU = UInt64::of($ax);
+            $valueU = UInt64::of($value);
+            $resultU = $axU->sub($valueU);
+            $resultInt = $resultU->toInt();
+
+            $cf = $axU->lt($valueU);
+            $af = (($ax & 0x0F) < ($value & 0x0F));
+            $of = (($ax < 0) !== ($value < 0)) && (($resultInt < 0) === ($value < 0));
+
+            $ma->updateFlags($resultInt, 64)
+                ->setCarryFlag($cf)
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
+        } else {
+            $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $signBit = $opSize === 32 ? 31 : 15;
+            $axU = $ax & $mask;
+            $valueU = $value & $mask;
+
+            $calc = $axU - $valueU;
+            $result = $calc & $mask;
+            $cf = $calc < 0;
+            $af = (($axU & 0x0F) < ($valueU & 0x0F));
+
+            $signA = ($axU >> $signBit) & 1;
+            $signB = ($valueU >> $signBit) & 1;
+            $signR = ($result >> $signBit) & 1;
+            $of = ($signA !== $signB) && ($signB === $signR);
+
+            $ma->updateFlags($result, $opSize)
+                ->setCarryFlag($cf)
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
+        }
 
         // Update registers
         $totalStep = $step * $width * $processed;

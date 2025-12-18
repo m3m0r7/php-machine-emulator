@@ -201,6 +201,53 @@ class BsfBsrTest extends TwoByteOpTestCase
     }
 
     // ========================================
+    // Long mode 64-bit Tests
+    // ========================================
+
+    public function testBsf64BitFindBit32(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::ECX, 0x0000000100000000, 64); // Bit 32 set
+
+        // BSF RAX, RCX
+        $this->executeBsf([0xC1]);
+
+        $this->assertSame(32, $this->getRegister(RegisterType::EAX, 64));
+        $this->assertFalse($this->getZeroFlag());
+    }
+
+    public function testBsr64BitFindBit63(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::ECX, PHP_INT_MIN, 64); // 0x8000000000000000
+
+        // BSR RAX, RCX
+        $this->executeBsr([0xC1]);
+
+        $this->assertSame(63, $this->getRegister(RegisterType::EAX, 64));
+        $this->assertFalse($this->getZeroFlag());
+    }
+
+    public function testBsf64BitWithRexRAndRexB(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x0D); // REX.W | REX.R | REX.B
+
+        // ModRM 0xC1: reg=0, r/m=1 => R8, R9 with REX.R/REX.B
+        $this->setRegister(RegisterType::R9, 0x0000000000000010, 64);
+        $this->setRegister(RegisterType::R8, 0, 64);
+
+        $this->executeBsf([0xC1]);
+
+        $this->assertSame(4, $this->getRegister(RegisterType::R8, 64));
+        $this->assertFalse($this->getZeroFlag());
+    }
+
+    // ========================================
     // Helper methods
     // ========================================
 

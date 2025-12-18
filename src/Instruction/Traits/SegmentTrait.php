@@ -51,7 +51,8 @@ trait SegmentTrait
     {
         $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = match ($addressSize) {
-            64 => 0xFFFFFFFFFFFFFFFF,
+            // 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit mask.
+            64 => -1,
             32 => 0xFFFFFFFF,
             default => 0xFFFF,
         };
@@ -92,8 +93,8 @@ trait SegmentTrait
      */
     protected function linearMask(RuntimeInterface $runtime): int
     {
-        // In 64-bit mode, linear addresses are 48 bits (canonical)
-        if ($runtime->context()->cpu()->isLongMode() && !$runtime->context()->cpu()->isCompatibilityMode()) {
+        // In IA-32e mode (long mode, including compatibility mode), linear addresses are 48 bits (canonical)
+        if ($runtime->context()->cpu()->isLongMode()) {
             return 0x0000FFFFFFFFFFFF;
         }
         return $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
@@ -105,7 +106,8 @@ trait SegmentTrait
     protected function linearCodeAddress(RuntimeInterface $runtime, int $selector, int $offset, int $opSize): int
     {
         $mask = match ($opSize) {
-            64 => 0xFFFFFFFFFFFFFFFF,
+            // 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit mask.
+            64 => -1,
             32 => 0xFFFFFFFF,
             default => 0xFFFF,
         };
@@ -152,7 +154,8 @@ trait SegmentTrait
     protected function codeOffsetFromLinear(RuntimeInterface $runtime, int $selector, int $linear, int $opSize): int
     {
         $mask = match ($opSize) {
-            64 => 0xFFFFFFFFFFFFFFFF,
+            // 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit mask.
+            64 => -1,
             32 => 0xFFFFFFFF,
             default => 0xFFFF,
         };
@@ -199,11 +202,14 @@ trait SegmentTrait
         $index = ($selector >> 3) & 0x1FFF;
         $offset = $base + ($index * 8);
 
-        if ($offset + 7 > $base + $limit) {
+        $end = $offset + 7;
+        // Some system descriptors are 16 bytes wide in IA-32e mode (e.g., 64-bit TSS/LDT).
+        // We conservatively fetch the upper 8 bytes when needed below.
+        if ($end > $base + $limit) {
             return null;
         }
 
-        // Read all 8 bytes at once using readMemory64
+        // Read all 8 bytes at once using readMemory64.
         $desc = $this->readMemory64($runtime, $offset);
         $descLow = $desc->low32();
         $descHigh = $desc->high32();
@@ -234,9 +240,26 @@ trait SegmentTrait
         $system = ($access & 0x10) === 0;
         $executable = ($access & 0x08) !== 0;
         $dpl = ($access >> 5) & 0x3;
+        $long = ($gran & 0x20) !== 0;
+
+        $baseOut = $baseAddr & 0xFFFFFFFF;
+        // In IA-32e mode, some system descriptors (TSS/LDT) have an additional base[63:32] in bytes 8..11.
+        if ($runtime->context()->cpu()->isLongMode() && $system) {
+            $systemType = $type & 0x0F;
+            $isWideSystemDescriptor = in_array($systemType, [0x2, 0x1, 0x3, 0x9, 0xB], true);
+            if ($isWideSystemDescriptor) {
+                $end16 = $offset + 15;
+                if ($end16 > $base + $limit) {
+                    return null;
+                }
+                $desc2 = $this->readMemory64($runtime, $offset + 8);
+                $baseUpper = $desc2->low32();
+                $baseOut = ($baseOut & 0xFFFFFFFF) | (($baseUpper & 0xFFFFFFFF) << 32);
+            }
+        }
 
         return [
-            'base' => $baseAddr & 0xFFFFFFFF,
+            'base' => $baseOut,
             'limit' => $fullLimit & 0xFFFFFFFF,
             'present' => $present,
             'type' => $type,
@@ -244,6 +267,7 @@ trait SegmentTrait
             'executable' => $executable,
             'dpl' => $dpl,
             'default' => ($gran & 0x40) !== 0 ? 32 : 16,
+            'long' => $long,
         ];
     }
 
@@ -296,10 +320,91 @@ trait SegmentTrait
                 'default' => 16,
             ]);
         }
-        $defaultSize = $descriptor['default'] ?? ($ctx->isProtectedMode() ? 32 : 16);
-        $ctx->setDefaultOperandSize($defaultSize);
-        $ctx->setDefaultAddressSize($defaultSize);
+        if ($ctx->isLongMode() && $ctx->isProtectedMode()) {
+            $is64bitCs = ($descriptor['long'] ?? false) && !($descriptor['system'] ?? false) && ($descriptor['executable'] ?? false);
+            if ($is64bitCs) {
+                $ctx->setCompatibilityMode(false);
+                $ctx->setDefaultOperandSize(32);
+                $ctx->setDefaultAddressSize(64);
+            } else {
+                // IA-32e compatibility mode uses legacy CS.D defaults (16/32).
+                $ctx->setCompatibilityMode(true);
+                $defaultSize = $descriptor['default'] ?? 32;
+                $ctx->setDefaultOperandSize($defaultSize);
+                $ctx->setDefaultAddressSize($defaultSize);
+            }
+        } else {
+            $defaultSize = $descriptor['default'] ?? ($ctx->isProtectedMode() ? 32 : 16);
+            $ctx->setDefaultOperandSize($defaultSize);
+            $ctx->setDefaultAddressSize($defaultSize);
+        }
         $this->updateCplFromSelector($runtime, $normalized, $overrideCpl, $descriptor);
+    }
+
+    /**
+     * Update IA-32e (long mode) state based on CR0/CR4/EFER.
+     *
+     * This keeps the CPUContext flags (longMode/compatibilityMode) in sync with the architectural
+     * activation rules:
+     * - IA-32e active when CR0.PE=1, CR0.PG=1, CR4.PAE=1, EFER.LME=1
+     * - EFER.LMA is set/cleared by hardware when IA-32e becomes active/inactive
+     */
+    protected function updateIa32eMode(RuntimeInterface $runtime): void
+    {
+        $ma = $runtime->memoryAccessor();
+        $cpu = $runtime->context()->cpu();
+
+        $cr0 = $ma->readControlRegister(0);
+        $cr4 = $ma->readControlRegister(4);
+        $efer = $ma->readEfer();
+
+        $pe = ($cr0 & 0x1) !== 0;
+        $pg = ($cr0 & 0x80000000) !== 0;
+        $pae = ($cr4 & (1 << 5)) !== 0;
+        $lme = ($efer & (1 << 8)) !== 0;
+
+        $ia32eActive = $pe && $pg && $pae && $lme;
+        $lmaBit = 1 << 10;
+
+        if ($ia32eActive) {
+            if (!$cpu->isLongMode()) {
+                // Long mode requires protected mode; keep defaults reasonable until CS is (re)loaded.
+                $cpu->setLongMode(true);
+            }
+
+            $cs = $ma->fetch(RegisterType::CS)->asByte();
+            $desc = $cpu->isProtectedMode() ? $this->readSegmentDescriptor($runtime, $cs) : null;
+            $is64bitCs = is_array($desc)
+                && ($desc['present'] ?? false)
+                && !($desc['system'] ?? false)
+                && ($desc['executable'] ?? false)
+                && ($desc['long'] ?? false);
+
+            if ($is64bitCs) {
+                $cpu->setCompatibilityMode(false);
+                $cpu->setDefaultOperandSize(32);
+                $cpu->setDefaultAddressSize(64);
+            } else {
+                $cpu->setCompatibilityMode(true);
+                $defaultSize = is_array($desc) ? ($desc['default'] ?? 32) : 32;
+                $cpu->setDefaultOperandSize((int) $defaultSize);
+                $cpu->setDefaultAddressSize((int) $defaultSize);
+            }
+
+            if (($efer & $lmaBit) === 0) {
+                $ma->writeEfer($efer | $lmaBit);
+            }
+            return;
+        }
+
+        // Leaving IA-32e mode (best-effort): clear flags and LMA.
+        if ($cpu->isLongMode()) {
+            $cpu->setCompatibilityMode(false);
+            $cpu->setLongMode(false);
+        }
+        if (($efer & $lmaBit) !== 0) {
+            $ma->writeEfer($efer & (~$lmaBit));
+        }
     }
 
     /**

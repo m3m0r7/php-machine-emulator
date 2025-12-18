@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Setcc;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Cmovcc;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Tests for SETcc and CMOVcc instructions.
@@ -271,6 +272,39 @@ class SetccCmovccTest extends TwoByteOpTestCase
         $this->executeCmovcc(0x44, [0xC1]);
 
         $this->assertSame(0x1234, $this->getRegister(RegisterType::EAX, 16));
+    }
+
+    // ========================================
+    // Long mode 64-bit Tests
+    // ========================================
+
+    public function testCmovzR64R64WhenZeroFlagSet(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setZeroFlag(true);
+        $this->setRegister(RegisterType::EAX, 0x0000000000000000, 64);
+        $this->setRegister(RegisterType::ECX, -1, 64);
+
+        // CMOVZ RAX, RCX
+        $this->executeCmovcc(0x44, [0xC1]);
+
+        $this->assertSame('0xffffffffffffffff', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+    }
+
+    public function testSetzWritesSplWhenRexPresent(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x00); // REX (no extensions), enables SPL/BPL/SIL/DIL
+
+        $this->setZeroFlag(true);
+        $this->setRegister(RegisterType::ESP, 0, 64);
+
+        // SETZ SPL (ModRM: 11 000 100 = 0xC4)
+        $this->executeSetcc(0x94, [0xC4]);
+
+        $this->assertSame(1, $this->getRegister(RegisterType::ESP, 64) & 0xFF);
     }
 
     // ========================================

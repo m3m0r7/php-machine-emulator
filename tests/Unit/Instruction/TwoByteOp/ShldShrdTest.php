@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Shld;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Shrd;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Tests for SHLD and SHRD instructions.
@@ -241,6 +242,51 @@ class ShldShrdTest extends TwoByteOpTestCase
         $this->executeShrdImm([0xD8, 0x01]);
 
         $this->assertTrue($this->getCarryFlag());
+    }
+
+    // ========================================
+    // Long mode 64-bit Tests
+    // ========================================
+
+    public function testShldR64R64Imm8(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::EAX, 0x123456789ABCDEF0, 64);
+        $this->setRegister(RegisterType::EBX, -1152921504606846976, 64); // 0xF000000000000000
+
+        $this->executeShldImm([0xD8, 0x04]);
+
+        $this->assertSame('0x23456789abcdef0f', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+    }
+
+    public function testShldSetsCarryFlag64(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::EAX, PHP_INT_MIN, 64);
+        $this->setRegister(RegisterType::EBX, 0, 64);
+
+        $this->executeShldImm([0xD8, 0x01]);
+
+        $this->assertTrue($this->getCarryFlag());
+        $this->assertSame(0, $this->getRegister(RegisterType::EAX, 64));
+    }
+
+    public function testShrdSetsCarryFlag64(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::EAX, 1, 64);
+        $this->setRegister(RegisterType::EBX, 0, 64);
+
+        $this->executeShrdImm([0xD8, 0x01]);
+
+        $this->assertTrue($this->getCarryFlag());
+        $this->assertSame(0, $this->getRegister(RegisterType::EAX, 64));
     }
 
     // ========================================

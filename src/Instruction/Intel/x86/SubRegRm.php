@@ -50,6 +50,7 @@ class SubRegRm implements InstructionInterface
                 : $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
             $calc = $dest - $src;
             $maskedResult = $calc & 0xFF;
+            $af = (($dest & 0x0F) < ($src & 0x0F));
             if ($destIsRm) {
                 if ($rmAddress !== null) {
                     $this->writeMemory8($runtime, $rmAddress, $maskedResult);
@@ -67,17 +68,21 @@ class SubRegRm implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         } else {
             $dest = $destIsRm
                 ? ($rmAddress !== null
                     ? ($opSize === 32 ? $this->readMemory32($runtime, $rmAddress) : $this->readMemory16($runtime, $rmAddress))
                     : $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize))
                 : $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
-            $calc = $dest - $src;
             $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $destU = $dest & $mask;
+            $srcU = $src & $mask;
+            $calc = $destU - $srcU;
             $signBit = $opSize === 32 ? 31 : 15;
             $maskedResult = $calc & $mask;
+            $af = (($destU & 0x0F) < ($srcU & 0x0F));
 
             // Debug SUB for LZMA distance calculation
             $runtime->option()->logger()->debug(sprintf(
@@ -103,14 +108,15 @@ class SubRegRm implements InstructionInterface
                 $this->writeRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $maskedResult, $opSize);
             }
             // OF for SUB: set if signs of operands differ and result sign equals subtrahend sign
-            $signA = ($dest >> $signBit) & 1;
-            $signB = ($src >> $signBit) & 1;
+            $signA = ($destU >> $signBit) & 1;
+            $signB = ($srcU >> $signBit) & 1;
             $signR = ($maskedResult >> $signBit) & 1;
             $of = ($signA !== $signB) && ($signB === $signR);
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, $opSize)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         }
 
         return ExecutionStatus::SUCCESS;

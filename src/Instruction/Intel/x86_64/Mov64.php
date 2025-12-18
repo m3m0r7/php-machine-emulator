@@ -70,7 +70,7 @@ class Mov64 implements InstructionInterface
         $size = $is64Bit ? 64 : 32;
 
         // Read from reg field (with REX.R)
-        $regCode = $modRegRM->register();
+        $regCode = $modRegRM->registerOrOPCode();
         if ($cpu->rexR()) {
             $regCode |= 0b1000;
         }
@@ -98,7 +98,7 @@ class Mov64 implements InstructionInterface
         $value = $this->readRm64($runtime, $memory, $modRegRM, $size);
 
         // Write to reg field (with REX.R)
-        $regCode = $modRegRM->register();
+        $regCode = $modRegRM->registerOrOPCode();
         if ($cpu->rexR()) {
             $regCode |= 0b1000;
         }

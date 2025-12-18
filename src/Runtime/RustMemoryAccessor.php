@@ -6,7 +6,9 @@ namespace PHPMachineEmulator\Runtime;
 
 use FFI;
 use PHPMachineEmulator\Collection\MemoryAccessorObserverCollectionInterface;
+use PHPMachineEmulator\Debug\DebugState;
 use PHPMachineEmulator\Exception\FaultException;
+use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Stream\RustMemoryStream;
 
@@ -20,6 +22,17 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 {
     private static ?FFI $ffi = null;
     private static ?bool $watchMsDosBoot = null;
+    private static bool $watchAccessConfigResolved = false;
+    /** @var array{start:int,end:int,limit:int,reads:bool,writes:bool,width:?int,excludeIpRanges?:array<int,array{start:int,end:int}>,source?:string,armAfterInt13Lba?:int}|null */
+    private static ?array $watchAccessConfig = null;
+    private static int $watchAccessHits = 0;
+    private static bool $watchAccessSuppressed = false;
+    private static bool $watchAccessAnnounced = false;
+    private static ?string $watchAccessConfigError = null;
+    private static bool $watchAccessConfigErrorAnnounced = false;
+    private static ?bool $stopOnWatchHit = null;
+    private static ?bool $dumpCallsiteOnWatchHit = null;
+    private static ?int $dumpCallsiteBytes = null;
 
     /** @var FFI\CData Pointer to the Rust MemoryAccessor */
     private FFI\CData $handle;
@@ -31,6 +44,606 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             self::$watchMsDosBoot = $env !== false && $env !== '' && $env !== '0';
         }
         return self::$watchMsDosBoot;
+    }
+
+    private static function parseEnvInt(string $value): ?int
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+        if (str_starts_with($trimmed, '0x') || str_starts_with($trimmed, '0X')) {
+            $hex = substr($trimmed, 2);
+            if ($hex === '' || preg_match('/[^0-9a-fA-F]/', $hex)) {
+                return null;
+            }
+            return (int) hexdec($hex);
+        }
+        if (preg_match('/^-?\\d+$/', $trimmed) !== 1) {
+            return null;
+        }
+        return (int) $trimmed;
+    }
+
+    private static function parseEnvBool(string $value): bool
+    {
+        $trimmed = strtolower(trim($value));
+        return !($trimmed === '' || $trimmed === '0' || $trimmed === 'false' || $trimmed === 'no' || $trimmed === 'off');
+    }
+
+    private static function stopOnWatchHitEnabled(): bool
+    {
+        if (self::$stopOnWatchHit !== null) {
+            return self::$stopOnWatchHit;
+        }
+        $env = getenv('PHPME_STOP_ON_WATCH_HIT');
+        self::$stopOnWatchHit = $env !== false && self::parseEnvBool($env);
+        return self::$stopOnWatchHit;
+    }
+
+    private static function dumpCallsiteOnWatchHitEnabled(): bool
+    {
+        if (self::$dumpCallsiteOnWatchHit !== null) {
+            return self::$dumpCallsiteOnWatchHit;
+        }
+        $env = getenv('PHPME_DUMP_CALLSITE_ON_WATCH_HIT');
+        self::$dumpCallsiteOnWatchHit = $env !== false && self::parseEnvBool($env);
+        return self::$dumpCallsiteOnWatchHit;
+    }
+
+    private static function dumpCallsiteBytes(): int
+    {
+        if (self::$dumpCallsiteBytes !== null) {
+            return self::$dumpCallsiteBytes;
+        }
+        $env = getenv('PHPME_DUMP_CALLSITE_BYTES');
+        $parsed = ($env !== false) ? (self::parseEnvInt($env) ?? 512) : 512;
+        self::$dumpCallsiteBytes = max(64, min(4096, $parsed));
+        return self::$dumpCallsiteBytes;
+    }
+
+    private function readLinear32NoLog(int $linear): ?int
+    {
+        $isUser = $this->runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
+        $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+
+        $resultValue = self::$ffi->new('uint32_t');
+        $resultError = self::$ffi->new('uint32_t');
+
+        self::$ffi->memory_accessor_read_memory_32(
+            $this->handle,
+            $linear & 0xFFFFFFFF,
+            $isUser,
+            $pagingEnabled,
+            $linearMask,
+            FFI::addr($resultValue),
+            FFI::addr($resultError)
+        );
+
+        if (($resultError->cdata ?? 1) !== 0) {
+            return null;
+        }
+        return (int) ($resultValue->cdata & 0xFFFFFFFF);
+    }
+
+    private function readLinearBytesNoLog(int $linear, int $length): string
+    {
+        $isUser = $this->runtime->context()->cpu()->cpl() === 3;
+        $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
+        $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+
+        $resultValue = self::$ffi->new('uint8_t');
+        $resultError = self::$ffi->new('uint32_t');
+
+        $bytes = '';
+        for ($i = 0; $i < $length; $i++) {
+            self::$ffi->memory_accessor_read_memory_8(
+                $this->handle,
+                ($linear + $i) & 0xFFFFFFFF,
+                $isUser,
+                $pagingEnabled,
+                $linearMask,
+                FFI::addr($resultValue),
+                FFI::addr($resultError)
+            );
+            $b = (($resultError->cdata ?? 1) === 0) ? ($resultValue->cdata & 0xFF) : 0;
+            $bytes .= chr($b);
+        }
+        return $bytes;
+    }
+
+    private function maybeDumpCallsiteOnWatchHit(): void
+    {
+        if (!self::dumpCallsiteOnWatchHitEnabled()) {
+            return;
+        }
+
+        $cpu = $this->runtime->context()->cpu();
+        $ssSelector = $this->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+
+        $ssBase = 0;
+        if ($cpu->isProtectedMode()) {
+            $desc = $this->segmentDescriptor($ssSelector);
+            if (is_array($desc)) {
+                $ssBase = (int) ($desc['base'] ?? 0);
+            }
+        } else {
+            $ssBase = (($ssSelector << 4) & 0xFFFFF);
+        }
+
+        $ebp = $this->fetch(RegisterType::EBP)->asBytesBySize(32) & 0xFFFFFFFF;
+        $retPtr = ($ssBase + (($ebp + 4) & 0xFFFFFFFF)) & 0xFFFFFFFF;
+        $ret = $this->readLinear32NoLog($retPtr);
+        if ($ret === null) {
+            $this->runtime->option()->logger()->warning(sprintf(
+                'WATCH: callsite: failed to read return address at 0x%08X (SS=0x%04X EBP=0x%08X)',
+                $retPtr,
+                $ssSelector,
+                $ebp,
+            ));
+            return;
+        }
+
+        $dumpLen = self::dumpCallsiteBytes();
+        $half = intdiv($dumpLen, 2);
+        $start = max(0, ($ret - $half) & 0xFFFFFFFF);
+        $bytes = $this->readLinearBytesNoLog($start, $dumpLen);
+        $sha1 = sha1($bytes);
+
+        $path = sprintf('debug/memdump_callsite_%08X_%d.bin', $ret & 0xFFFFFFFF, $dumpLen);
+        @file_put_contents($path, $bytes);
+
+        $this->runtime->option()->logger()->warning(sprintf(
+            'WATCH: callsite: ret=0x%08X dump=0x%08X..+%d sha1=%s saved=%s',
+            $ret & 0xFFFFFFFF,
+            $start & 0xFFFFFFFF,
+            $dumpLen,
+            $sha1,
+            $path,
+        ));
+    }
+
+    /**
+     * @return array{start:int,end:int}|null
+     */
+    private static function parseWatchExpr(string $expr, int $defaultLen = 1): ?array
+    {
+        $expr = trim($expr);
+        if ($expr === '') {
+            return null;
+        }
+
+        $sep = str_contains($expr, '-') ? '-' : (str_contains($expr, ':') ? ':' : null);
+        if ($sep !== null) {
+            [$a, $b] = array_map('trim', explode($sep, $expr, 2));
+            $aVal = self::parseEnvInt($a);
+            $bVal = self::parseEnvInt($b);
+            if ($aVal === null || $bVal === null) {
+                return null;
+            }
+            return [
+                'start' => min($aVal, $bVal),
+                'end' => max($aVal, $bVal),
+            ];
+        }
+
+        $aVal = self::parseEnvInt($expr);
+        if ($aVal === null) {
+            return null;
+        }
+        $len = max(1, $defaultLen);
+        return [
+            'start' => $aVal,
+            'end' => $aVal + ($len - 1),
+        ];
+    }
+
+    /**
+     * @return array<int,array{start:int,end:int}>
+     */
+    private static function parseWatchExprList(string $expr): array
+    {
+        $trimmed = trim($expr);
+        if ($trimmed === '' || $trimmed === '0') {
+            return [];
+        }
+
+        $parts = preg_split('/[\\s,]+/', $trimmed);
+        if (!is_array($parts)) {
+            return [];
+        }
+
+        $ranges = [];
+        foreach ($parts as $part) {
+            $p = trim((string) $part);
+            if ($p === '') {
+                continue;
+            }
+            $parsed = self::parseWatchExpr($p, 1);
+            if ($parsed === null) {
+                continue;
+            }
+            $ranges[] = [
+                'start' => $parsed['start'] & 0xFFFFFFFF,
+                'end' => $parsed['end'] & 0xFFFFFFFF,
+            ];
+        }
+        return $ranges;
+    }
+
+    /**
+     * @return array{addr:?string,len:?int,limit:?int,reads:?bool,writes:?bool,grub:?bool}|null
+     */
+    private static function watchAccessFileConfig(): ?array
+    {
+        $basePath = dirname(__DIR__, 2);
+        $path = $basePath . '/debug/watch_access.txt';
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $lines = @file($path, FILE_IGNORE_NEW_LINES);
+        if (!is_array($lines)) {
+            return null;
+        }
+
+        $addr = null;
+        $len = null;
+        $limit = null;
+        $reads = null;
+        $writes = null;
+        $width = null;
+        $grub = null;
+
+        foreach ($lines as $line) {
+            $line = trim((string) $line);
+            if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, '//')) {
+                continue;
+            }
+            if (str_contains($line, '=')) {
+                [$key, $value] = array_map('trim', explode('=', $line, 2));
+                $key = strtolower($key);
+                switch ($key) {
+                    case 'addr':
+                    case 'address':
+                    case 'range':
+                        $addr = $value !== '' ? $value : null;
+                        break;
+                    case 'len':
+                    case 'length':
+                        $parsed = self::parseEnvInt($value);
+                        if ($parsed !== null) {
+                            $len = max(1, $parsed);
+                        }
+                        break;
+                    case 'limit':
+                        $parsed = self::parseEnvInt($value);
+                        if ($parsed !== null) {
+                            $limit = max(1, $parsed);
+                        }
+                        break;
+                    case 'reads':
+                    case 'read':
+                        $reads = self::parseEnvBool($value);
+                        break;
+                    case 'writes':
+                    case 'write':
+                        $writes = self::parseEnvBool($value);
+                        break;
+                    case 'width':
+                        $parsed = self::parseEnvInt($value);
+                        if ($parsed !== null) {
+                            $width = $parsed;
+                        }
+                        break;
+                    case 'grub_free_magic':
+                    case 'grub':
+                        $grub = self::parseEnvBool($value);
+                        break;
+                }
+                continue;
+            }
+
+            if ($addr === null) {
+                $addr = $line;
+            }
+        }
+
+        return [
+            'addr' => $addr,
+            'len' => $len,
+            'limit' => $limit,
+            'reads' => $reads,
+            'writes' => $writes,
+            'width' => $width,
+            'grub' => $grub,
+        ];
+    }
+
+    /**
+     * Optional memory access watchpoint for debugging hard-to-reproduce corruption.
+     *
+     * Env vars:
+     * - PHPME_WATCH_GRUB_FREE_MAGIC=1  (default range around 0x7FFFE820)
+     * - PHPME_WATCH_ADDR=0xADDR or 0xSTART-0xEND / 0xSTART:0xEND
+     * - PHPME_WATCH_LEN=0xLEN (only for single address form)
+     * - PHPME_WATCH_LIMIT=64 (max logs)
+     * - PHPME_WATCH_READ=1 (also log reads)
+     * - PHPME_WATCH_WRITE=0 (suppress write logs)
+     * - PHPME_WATCH_WIDTH=32 (only log matching widths)
+     *
+     * File fallback (useful when env vars can't be passed to GUI launches):
+     * - debug/watch_access.txt (see watchAccessFileConfig for supported keys)
+     *
+     * @return array{start:int,end:int,limit:int,reads:bool,writes:bool,width:?int,source?:string}|null
+     */
+    private static function watchAccessConfig(): ?array
+    {
+        if (self::$watchAccessConfigResolved) {
+            return self::$watchAccessConfig;
+        }
+        self::$watchAccessConfigResolved = true;
+
+        self::$watchAccessConfigError = null;
+        self::$watchAccessConfigErrorAnnounced = false;
+
+        $fileCfg = self::watchAccessFileConfig();
+
+        $start = null;
+        $end = null;
+        $source = null;
+
+        $addrEnv = getenv('PHPME_WATCH_ADDR');
+        if ($addrEnv !== false && trim($addrEnv) !== '') {
+            $lenEnv = getenv('PHPME_WATCH_LEN');
+            $len = $lenEnv !== false ? (self::parseEnvInt($lenEnv) ?? 1) : 1;
+            $parsed = self::parseWatchExpr($addrEnv, $len);
+            if ($parsed !== null) {
+                $start = $parsed['start'];
+                $end = $parsed['end'];
+                $source = 'env';
+            } else {
+                self::$watchAccessConfigError = sprintf('PHPME_WATCH_ADDR is invalid: %s', trim($addrEnv));
+            }
+        }
+
+        if ($start === null || $end === null) {
+            $grubEnv = getenv('PHPME_WATCH_GRUB_FREE_MAGIC');
+            if ($grubEnv !== false && $grubEnv !== '' && $grubEnv !== '0') {
+                $start = 0x7FFFE820;
+                $end = $start + 0x1F;
+                $source = 'env(grub)';
+            }
+        }
+
+        if (($start === null || $end === null) && $fileCfg !== null) {
+            if (($fileCfg['grub'] ?? false) === true) {
+                $start = 0x7FFFE820;
+                $end = $start + 0x1F;
+                $source = 'file(grub)';
+            } elseif (($fileCfg['addr'] ?? null) !== null) {
+                $parsed = self::parseWatchExpr((string) $fileCfg['addr'], (int) ($fileCfg['len'] ?? 1));
+                if ($parsed !== null) {
+                    $start = $parsed['start'];
+                    $end = $parsed['end'];
+                    $source = 'file';
+                } else {
+                    self::$watchAccessConfigError = sprintf('debug/watch_access.txt addr is invalid: %s', (string) $fileCfg['addr']);
+                }
+            }
+        }
+
+        if ($start === null || $end === null) {
+            self::$watchAccessConfig = null;
+            return null;
+        }
+
+        $limitEnv = getenv('PHPME_WATCH_LIMIT');
+        if ($limitEnv !== false && trim($limitEnv) !== '') {
+            $limit = self::parseEnvInt($limitEnv) ?? 64;
+        } else {
+            $limit = (int) ($fileCfg['limit'] ?? 64);
+        }
+        $limit = max(1, $limit);
+
+        $readsEnv = getenv('PHPME_WATCH_READ');
+        if ($readsEnv !== false && trim($readsEnv) !== '') {
+            $reads = self::parseEnvBool($readsEnv);
+        } else {
+            $reads = (bool) ($fileCfg['reads'] ?? false);
+        }
+
+        $writesEnv = getenv('PHPME_WATCH_WRITE');
+        if ($writesEnv !== false && trim($writesEnv) !== '') {
+            $writes = self::parseEnvBool($writesEnv);
+        } else {
+            $writes = (bool) ($fileCfg['writes'] ?? true);
+        }
+
+        $widthEnv = getenv('PHPME_WATCH_WIDTH');
+        if ($widthEnv !== false && trim($widthEnv) !== '') {
+            $width = self::parseEnvInt($widthEnv);
+        } else {
+            $width = (int) ($fileCfg['width'] ?? 0);
+        }
+        if (!in_array($width, [8, 16, 32, 64], true)) {
+            $width = null;
+        }
+
+        $excludeIpRanges = [];
+        $excludeIpEnv = getenv('PHPME_WATCH_EXCLUDE_IP');
+        if ($excludeIpEnv !== false) {
+            $excludeIpRanges = self::parseWatchExprList($excludeIpEnv);
+        }
+
+        self::$watchAccessHits = 0;
+        self::$watchAccessSuppressed = false;
+        self::$watchAccessConfig = [
+            'start' => $start & 0xFFFFFFFF,
+            'end' => $end & 0xFFFFFFFF,
+            'limit' => $limit,
+            'reads' => $reads,
+            'writes' => $writes,
+            'width' => $width,
+        ];
+        if ($excludeIpRanges !== []) {
+            self::$watchAccessConfig['excludeIpRanges'] = $excludeIpRanges;
+        }
+        if ($source !== null) {
+            self::$watchAccessConfig['source'] = $source;
+        }
+
+        $armEnv = getenv('PHPME_WATCH_ARM_AFTER_INT13_LBA');
+        if ($armEnv !== false && trim($armEnv) !== '' && trim($armEnv) !== '0') {
+            $arm = self::parseEnvInt($armEnv);
+            if ($arm !== null) {
+                self::$watchAccessConfig['armAfterInt13Lba'] = $arm;
+                DebugState::setWatchArmAfterInt13Lba($arm);
+            }
+        }
+
+        return self::$watchAccessConfig;
+    }
+
+    private function watchAccessOverlaps(int $address, int $width): bool
+    {
+        $cfg = self::watchAccessConfig();
+        if ($cfg === null) {
+            return false;
+        }
+
+        $bytes = max(1, intdiv(max(8, $width), 8));
+        $start = $address & 0xFFFFFFFF;
+        $end = ($start + ($bytes - 1)) & 0xFFFFFFFF;
+
+        return !($end < $cfg['start'] || $start > $cfg['end']);
+    }
+
+    private function maybeLogWatchedAccess(string $action, string $kind, int $address, int $width, ?int $value = null): void
+    {
+        $cfg = self::watchAccessConfig();
+        if ($cfg === null) {
+            if (self::$watchAccessConfigError !== null && !self::$watchAccessConfigErrorAnnounced) {
+                self::$watchAccessConfigErrorAnnounced = true;
+                $this->runtime->option()->logger()->warning(sprintf('WATCH: disabled (%s)', self::$watchAccessConfigError));
+            }
+            return;
+        }
+
+        if (isset($cfg['excludeIpRanges']) && $cfg['excludeIpRanges'] !== []) {
+            $linearIp = $this->runtime->memory()->offset() & 0xFFFFFFFF;
+            foreach ($cfg['excludeIpRanges'] as $r) {
+                if ($linearIp >= $r['start'] && $linearIp <= $r['end']) {
+                    return;
+                }
+            }
+        }
+
+        if (isset($cfg['armAfterInt13Lba']) && !DebugState::isWatchArmed()) {
+            return;
+        }
+
+        if (!self::$watchAccessAnnounced) {
+            self::$watchAccessAnnounced = true;
+            $this->runtime->option()->logger()->warning(sprintf(
+                'WATCH: enabled range=0x%X..0x%X limit=%d reads=%d writes=%d source=%s',
+                $cfg['start'],
+                $cfg['end'],
+                $cfg['limit'],
+                $cfg['reads'] ? 1 : 0,
+                $cfg['writes'] ? 1 : 0,
+                $cfg['source'] ?? 'unknown',
+            ));
+        }
+        if ($action === 'READ' && !$cfg['reads']) {
+            return;
+        }
+        if ($action === 'WRITE' && !$cfg['writes']) {
+            return;
+        }
+        if (!$this->watchAccessOverlaps($address, $width)) {
+            return;
+        }
+        if (($cfg['width'] ?? null) !== null && $width !== $cfg['width']) {
+            return;
+        }
+
+        if (self::$watchAccessHits >= $cfg['limit']) {
+            if (!self::$watchAccessSuppressed) {
+                self::$watchAccessSuppressed = true;
+                $this->runtime->option()->logger()->warning(sprintf(
+                    'WATCH: suppressing further accesses (limit=%d) range=0x%X..0x%X',
+                    $cfg['limit'],
+                    $cfg['start'],
+                    $cfg['end'],
+                ));
+            }
+            return;
+        }
+        self::$watchAccessHits++;
+
+        $linearIp = $this->runtime->memory()->offset() & 0xFFFFFFFF;
+        $pm = $this->runtime->context()->cpu()->isProtectedMode() ? 1 : 0;
+        $cs = $this->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+        $ds = $this->fetch(RegisterType::DS)->asByte() & 0xFFFF;
+        $es = $this->fetch(RegisterType::ES)->asByte() & 0xFFFF;
+        $ss = $this->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+        $sp = $this->fetch(RegisterType::ESP)->asBytesBySize(16) & 0xFFFF;
+        $eax = $this->fetch(RegisterType::EAX)->asBytesBySize(32) & 0xFFFFFFFF;
+        $ebx = $this->fetch(RegisterType::EBX)->asBytesBySize(32) & 0xFFFFFFFF;
+        $ecx = $this->fetch(RegisterType::ECX)->asBytesBySize(32) & 0xFFFFFFFF;
+        $edx = $this->fetch(RegisterType::EDX)->asBytesBySize(32) & 0xFFFFFFFF;
+        $esi = $this->fetch(RegisterType::ESI)->asBytesBySize(32) & 0xFFFFFFFF;
+        $edi = $this->fetch(RegisterType::EDI)->asBytesBySize(32) & 0xFFFFFFFF;
+
+        $executor = $this->runtime->architectureProvider()->instructionExecutor();
+        $lastIp = $executor->lastInstructionPointer() & 0xFFFFFFFF;
+        $lastOpcodes = $executor->lastOpcodes();
+        $lastOpcodeStr = $lastOpcodes === null
+            ? 'n/a'
+            : implode(' ', array_map(static fn(int $b): string => sprintf('%02X', $b & 0xFF), $lastOpcodes));
+        $lastInstruction = $executor->lastInstruction();
+        $lastInstructionName = $lastInstruction === null
+            ? 'n/a'
+            : preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($lastInstruction));
+
+        $valueStr = $value === null ? 'n/a' : sprintf('0x%X', $value & match ($width) {
+            8 => 0xFF,
+            16 => 0xFFFF,
+            32 => 0xFFFFFFFF,
+            default => 0xFFFFFFFF,
+        });
+
+        $this->runtime->option()->logger()->warning(sprintf(
+            'WATCH: %s %s %d-bit addr=0x%08X value=%s CS=0x%04X DS=0x%04X ES=0x%04X SS=0x%04X SP=0x%04X EAX=0x%08X EBX=0x%08X ECX=0x%08X EDX=0x%08X ESI=0x%08X EDI=0x%08X linearIP=0x%08X PM=%d lastIP=0x%08X lastIns=%s lastOp=%s',
+            $action,
+            strtoupper($kind),
+            $width,
+            $address & 0xFFFFFFFF,
+            $valueStr,
+            $cs,
+            $ds,
+            $es,
+            $ss,
+            $sp,
+            $eax,
+            $ebx,
+            $ecx,
+            $edx,
+            $esi,
+            $edi,
+            $linearIp,
+            $pm,
+            $lastIp,
+            $lastInstructionName,
+            $lastOpcodeStr,
+        ));
+
+        if (self::stopOnWatchHitEnabled()) {
+            $this->maybeDumpCallsiteOnWatchHit();
+            throw new HaltException('Stopped by PHPME_STOP_ON_WATCH_HIT');
+        }
     }
 
     private function maybeLogMsDosBootWrite(string $kind, int $address, int $width, int $value): void
@@ -189,8 +802,8 @@ void memory_accessor_set_interrupt_flag(void* accessor, bool value);
 void memory_accessor_set_instruction_fetch(void* accessor, bool value);
 
 // Control registers
-uint32_t memory_accessor_read_control_register(const void* accessor, size_t index);
-void memory_accessor_write_control_register(void* accessor, size_t index, uint32_t value);
+int64_t memory_accessor_read_control_register(const void* accessor, size_t index);
+void memory_accessor_write_control_register(void* accessor, size_t index, int64_t value);
 
 // EFER
 uint64_t memory_accessor_read_efer(const void* accessor);
@@ -245,6 +858,58 @@ C;
 
         if ($this->handle === null) {
             throw new \RuntimeException('Failed to create Rust MemoryAccessor');
+        }
+
+        $this->announceWatchAccessConfigIfRequested();
+    }
+
+    private function announceWatchAccessConfigIfRequested(): void
+    {
+        if (self::$watchAccessAnnounced || self::$watchAccessConfigErrorAnnounced) {
+            return;
+        }
+
+        $requested = false;
+        $addrEnv = getenv('PHPME_WATCH_ADDR');
+        if ($addrEnv !== false && trim($addrEnv) !== '') {
+            $requested = true;
+        }
+        $grubEnv = getenv('PHPME_WATCH_GRUB_FREE_MAGIC');
+        if ($grubEnv !== false && $grubEnv !== '' && $grubEnv !== '0') {
+            $requested = true;
+        }
+        if (!$requested) {
+            $basePath = dirname(__DIR__, 2);
+            $requested = is_file($basePath . '/debug/watch_access.txt');
+        }
+
+        if (!$requested) {
+            return;
+        }
+
+        $cfg = self::watchAccessConfig();
+        if ($cfg !== null) {
+            self::$watchAccessAnnounced = true;
+            $this->runtime->option()->logger()->warning(sprintf(
+                'WATCH: enabled range=0x%X..0x%X limit=%d reads=%d source=%s',
+                $cfg['start'],
+                $cfg['end'],
+                $cfg['limit'],
+                $cfg['reads'] ? 1 : 0,
+                $cfg['source'] ?? 'unknown',
+            ));
+            return;
+        }
+
+        if (self::$watchAccessConfigError !== null && !self::$watchAccessConfigErrorAnnounced) {
+            self::$watchAccessConfigErrorAnnounced = true;
+            $this->runtime->option()->logger()->warning(sprintf('WATCH: disabled (%s)', self::$watchAccessConfigError));
+            return;
+        }
+
+        if (!self::$watchAccessConfigErrorAnnounced) {
+            self::$watchAccessConfigErrorAnnounced = true;
+            $this->runtime->option()->logger()->warning('WATCH: disabled (no valid range configured)');
         }
     }
 
@@ -378,6 +1043,7 @@ C;
     public function write16Bit(int|RegisterType $registerType, int|null $value): self
     {
         $address = $this->asAddress($registerType);
+        $this->maybeLogWatchedAccess('WRITE', 'bySize', $address, 16, $value ?? 0);
         $this->maybeLogMsDosBootWrite('bySize', $address, 16, $value ?? 0);
         $previousValue = self::$ffi->memory_accessor_fetch($this->handle, $address);
         self::$ffi->memory_accessor_write_16bit($this->handle, $address, $value ?? 0);
@@ -388,6 +1054,7 @@ C;
     public function writeBySize(int|RegisterType $registerType, int|null $value, int $size = 64): self
     {
         $address = $this->asAddress($registerType);
+        $this->maybeLogWatchedAccess('WRITE', 'bySize', $address, $size, $value ?? 0);
         $this->maybeLogMsDosBootWrite('bySize', $address, $size, $value ?? 0);
         $previousValue = self::$ffi->memory_accessor_fetch($this->handle, $address);
         self::$ffi->memory_accessor_write_by_size($this->handle, $address, $value ?? 0, $size);
@@ -436,9 +1103,10 @@ C;
         $address = $this->asAddress($registerType);
 
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
-            $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($size);
+            $stackAddrSize = $this->stackAddressSize();
+            $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($stackAddrSize);
             $bytes = intdiv($size, 8);
-            $address = $this->stackLinearAddress($sp, $size, false);
+            $address = $this->stackLinearAddress($sp, $stackAddrSize, false);
 
             // Read value from stack
             $value = 0;
@@ -447,9 +1115,9 @@ C;
             }
 
             // Update SP
-            $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $mask = $this->stackPointerMask($stackAddrSize);
             $newSp = ($sp + $bytes) & $mask;
-            $this->writeBySize(RegisterType::ESP, $newSp, $size);
+            $this->writeBySize(RegisterType::ESP, $newSp, $stackAddrSize);
 
             return new MemoryAccessorFetchResult($value, $size, alreadyDecoded: true);
         }
@@ -465,16 +1133,17 @@ C;
     public function push(int|RegisterType $registerType, int|null $value, int $size = 16): self
     {
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
-            $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($size) & ((1 << $size) - 1);
+            $stackAddrSize = $this->stackAddressSize();
+            $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($stackAddrSize);
             $bytes = intdiv($size, 8);
-            $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $mask = $this->stackPointerMask($stackAddrSize);
             $newSp = ($sp - $bytes) & $mask;
-            $address = $this->stackLinearAddress($newSp, $size, true);
+            $address = $this->stackLinearAddress($newSp, $stackAddrSize, true);
 
-            $this->writeBySize(RegisterType::ESP, $newSp, $size);
+            $this->writeBySize(RegisterType::ESP, $newSp, $stackAddrSize);
             $this->allocate($address, $bytes, safe: false);
 
-            $masked = $value & ((1 << $size) - 1);
+            $masked = $value & $this->valueMask($size);
             for ($i = 0; $i < $bytes; $i++) {
                 $this->writeBySize($address + $i, ($masked >> ($i * 8)) & 0xFF, 8);
             }
@@ -606,6 +1275,7 @@ C;
      */
     public function writeRawByte(int $address, int $value): self
     {
+        $this->maybeLogWatchedAccess('WRITE', 'raw', $address, 8, $value);
         $this->maybeLogMsDosBootWrite('raw', $address, 8, $value);
         $previousValue = self::$ffi->memory_accessor_read_raw_byte($this->handle, $address);
         self::$ffi->memory_accessor_write_raw_byte($this->handle, $address, $value & 0xFF);
@@ -618,7 +1288,9 @@ C;
      */
     public function readRawByte(int $address): ?int
     {
-        return self::$ffi->memory_accessor_read_raw_byte($this->handle, $address);
+        $value = self::$ffi->memory_accessor_read_raw_byte($this->handle, $address);
+        $this->maybeLogWatchedAccess('READ', 'raw', $address, 8, $value);
+        return $value;
     }
 
     /**
@@ -692,6 +1364,7 @@ C;
      */
     public function writePhysical32(int $address, int $value): void
     {
+        $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 32, $value);
         self::$ffi->memory_accessor_write_physical_32($this->handle, $address, $value);
     }
 
@@ -700,6 +1373,7 @@ C;
      */
     public function writePhysical64(int $address, int $value): void
     {
+        $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 64, $value);
         self::$ffi->memory_accessor_write_physical_64($this->handle, $address, $value);
     }
 
@@ -730,18 +1404,19 @@ C;
     /**
      * Compute stack linear address honoring segment base/limit and cached descriptors.
      */
-    private function stackLinearAddress(int $sp, int $size, bool $isWrite = false): int
+    private function stackLinearAddress(int $sp, int $stackAddrSize, bool $isWrite = false): int
     {
+        $cpu = $this->runtime->context()->cpu();
         $ssSelector = $this->fetch(RegisterType::SS)->asByte();
-        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
-        $isUser = $this->runtime->context()->cpu()->cpl() === 3;
-        $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
+        $mask = $this->stackPointerMask($stackAddrSize);
+        $linearMask = $cpu->isLongMode() ? 0x0000FFFFFFFFFFFF : ($cpu->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF);
+        $isUser = $cpu->cpl() === 3;
+        $pagingEnabled = $cpu->isPagingEnabled();
 
-        if ($this->runtime->context()->cpu()->isProtectedMode()) {
+        if ($cpu->isProtectedMode()) {
             $descriptor = $this->segmentDescriptor($ssSelector);
             if ($descriptor !== null && ($descriptor['present'] ?? false)) {
-                $cpl = $this->runtime->context()->cpu()->cpl();
+                $cpl = $cpu->cpl();
                 $rpl = $ssSelector & 0x3;
                 $dpl = $descriptor['dpl'] ?? 0;
                 $isWritable = ($descriptor['type'] & 0x2) !== 0;
@@ -777,6 +1452,49 @@ C;
 
         [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
         return $error === 0 ? $physical : $linear;
+    }
+
+    private function stackAddressSize(): int
+    {
+        $cpu = $this->runtime->context()->cpu();
+
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            return 64;
+        }
+
+        $cached = method_exists($cpu, 'getCachedSegmentDescriptor')
+            ? $cpu->getCachedSegmentDescriptor(RegisterType::SS)
+            : null;
+
+        $default = is_array($cached) ? ($cached['default'] ?? null) : null;
+        if ($default === 32 || $default === 16 || $default === 64) {
+            return (int) $default;
+        }
+
+        if ($cpu->isProtectedMode()) {
+            return $cpu->defaultOperandSize() === 32 ? 32 : 16;
+        }
+
+        return 16;
+    }
+
+    private function stackPointerMask(int $stackAddrSize): int
+    {
+        return match ($stackAddrSize) {
+            32 => 0xFFFFFFFF,
+            16 => 0xFFFF,
+            default => -1,
+        };
+    }
+
+    private function valueMask(int $valueSize): int
+    {
+        return match ($valueSize) {
+            32 => 0xFFFFFFFF,
+            16 => 0xFFFF,
+            8 => 0xFF,
+            default => ($valueSize >= 63) ? -1 : ((1 << $valueSize) - 1),
+        };
     }
 
     /**
@@ -895,7 +1613,9 @@ C;
             FFI::addr($resultError)
         );
 
-        return [$resultValue->cdata, $resultError->cdata];
+        $value = $resultValue->cdata;
+        $this->maybeLogWatchedAccess('READ', 'linear', $linear, 8, $value);
+        return [$value, $resultError->cdata];
     }
 
     /**
@@ -917,7 +1637,9 @@ C;
             FFI::addr($resultError)
         );
 
-        return [$resultValue->cdata, $resultError->cdata];
+        $value = $resultValue->cdata;
+        $this->maybeLogWatchedAccess('READ', 'linear', $linear, 16, $value);
+        return [$value, $resultError->cdata];
     }
 
     /**
@@ -939,7 +1661,9 @@ C;
             FFI::addr($resultError)
         );
 
-        return [$resultValue->cdata, $resultError->cdata];
+        $value = $resultValue->cdata;
+        $this->maybeLogWatchedAccess('READ', 'linear', $linear, 32, $value);
+        return [$value, $resultError->cdata];
     }
 
     /**
@@ -961,7 +1685,9 @@ C;
             FFI::addr($resultError)
         );
 
-        return [$resultValue->cdata, $resultError->cdata];
+        $value = $resultValue->cdata;
+        $this->maybeLogWatchedAccess('READ', 'linear', $linear, 64, (int) $value);
+        return [$value, $resultError->cdata];
     }
 
     /**
@@ -970,6 +1696,7 @@ C;
      */
     public function writeMemory8(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
     {
+        $this->maybeLogWatchedAccess('WRITE', 'linear', $linear, 8, $value);
         $this->maybeLogMsDosBootWrite('linear', $linear, 8, $value);
         return self::$ffi->memory_accessor_write_memory_8(
             $this->handle,
@@ -987,6 +1714,7 @@ C;
      */
     public function writeMemory16(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
     {
+        $this->maybeLogWatchedAccess('WRITE', 'linear', $linear, 16, $value);
         $this->maybeLogMsDosBootWrite('linear', $linear, 16, $value);
         return self::$ffi->memory_accessor_write_memory_16(
             $this->handle,
@@ -1004,6 +1732,7 @@ C;
      */
     public function writeMemory32(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
     {
+        $this->maybeLogWatchedAccess('WRITE', 'linear', $linear, 32, $value);
         $this->maybeLogMsDosBootWrite('linear', $linear, 32, $value);
         return self::$ffi->memory_accessor_write_memory_32(
             $this->handle,
@@ -1021,6 +1750,7 @@ C;
      */
     public function writeMemory64(int $linear, int $value, bool $isUser, bool $pagingEnabled, int $linearMask): int
     {
+        $this->maybeLogWatchedAccess('WRITE', 'linear', $linear, 64, $value);
         $this->maybeLogMsDosBootWrite('linear', $linear, 64, $value);
         return self::$ffi->memory_accessor_write_memory_64(
             $this->handle,
@@ -1037,6 +1767,7 @@ C;
      */
     public function writePhysical16(int $address, int $value): void
     {
+        $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 16, $value);
         $this->maybeLogMsDosBootWrite('phys', $address, 16, $value);
         self::$ffi->memory_accessor_write_physical_16($this->handle, $address, $value & 0xFFFF);
     }

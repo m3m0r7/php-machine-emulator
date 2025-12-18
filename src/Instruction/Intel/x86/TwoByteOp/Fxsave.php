@@ -19,9 +19,6 @@ class Fxsave implements InstructionInterface
 {
     use Instructable;
 
-    private array $xmm = [];
-    private int $mxcsr = 0x1F80;
-
     public function opcodes(): array
     {
         return $this->applyPrefixes([[0x0F, 0xAE]]);
@@ -29,7 +26,7 @@ class Fxsave implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
-        $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $memory = $runtime->memory();
         $modrmByte = $memory->byte();
         $modrm = $memory->modRegRM($modrmByte);
@@ -44,20 +41,26 @@ class Fxsave implements InstructionInterface
 
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
 
-        if ($reg === 0) { // FXSAVE
-            return $this->fxsave($runtime, $address);
-        } elseif ($reg === 1) { // FXRSTOR
-            return $this->fxrstor($runtime, $address);
-        } elseif ($reg === 7) { // CLFLUSH
-            // Consume address and treat as no-op
-            return ExecutionStatus::SUCCESS;
-        }
-
-        return ExecutionStatus::SUCCESS;
+        return match ($reg) {
+            0 => $this->fxsave($runtime, $address),   // FXSAVE
+            1 => $this->fxrstor($runtime, $address),  // FXRSTOR
+            2 => $this->ldmxcsr($runtime, $address),  // LDMXCSR
+            3 => $this->stmxcsr($runtime, $address),  // STMXCSR
+            7 => ExecutionStatus::SUCCESS,            // CLFLUSH (no-op)
+            default => ExecutionStatus::SUCCESS,
+        };
     }
 
     private function fxsave(RuntimeInterface $runtime, int $address): ExecutionStatus
     {
+        $cpu = $runtime->context()->cpu();
+        $xmmCount = ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) ? 16 : 8;
+
+        // Initialize the whole 512-byte region to zero for deterministic reserved fields.
+        for ($i = 0; $i < 512; $i += 4) {
+            $this->writeMemory32($runtime, $address + $i, 0);
+        }
+
         // FCW/FSW/FTW/Opcode/IP/DP placeholders
         $this->writeMemory16($runtime, $address + 0, 0x037F);
         $this->writeMemory16($runtime, $address + 2, 0);
@@ -68,23 +71,16 @@ class Fxsave implements InstructionInterface
         $this->writeMemory32($runtime, $address + 16, 0);
         $this->writeMemory32($runtime, $address + 20, 0);
         // MXCSR and mask
-        $this->writeMemory32($runtime, $address + 24, $this->mxcsr);
+        $this->writeMemory32($runtime, $address + 24, $cpu->mxcsr());
         $this->writeMemory32($runtime, $address + 28, 0xFFFF);
 
-        // Save first 8 XMM registers
-        $this->initXmm();
         $base = $address + 160;
-        for ($i = 0; $i < 8; $i++) {
-            $regVals = $this->xmm[$i] ?? [0, 0, 0, 0];
+        for ($i = 0; $i < $xmmCount; $i++) {
+            $regVals = $cpu->getXmm($i);
             $this->writeMemory32($runtime, $base + ($i * 16) + 0, $regVals[0]);
             $this->writeMemory32($runtime, $base + ($i * 16) + 4, $regVals[1]);
             $this->writeMemory32($runtime, $base + ($i * 16) + 8, $regVals[2]);
             $this->writeMemory32($runtime, $base + ($i * 16) + 12, $regVals[3]);
-        }
-
-        // Zero the rest
-        for ($i = 48; $i < 160; $i++) {
-            $this->writeMemory8($runtime, ($address + $i) & 0xFFFFFFFF, 0);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -92,32 +88,37 @@ class Fxsave implements InstructionInterface
 
     private function fxrstor(RuntimeInterface $runtime, int $address): ExecutionStatus
     {
+        $cpu = $runtime->context()->cpu();
+        $xmmCount = ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) ? 16 : 8;
+
         $this->translateLinearWithMmio($runtime, $address, false);
-        $this->mxcsr = $this->readMemory32($runtime, $address + 24);
-        $this->initXmm();
+        $cpu->setMxcsr($this->readMemory32($runtime, $address + 24));
 
         $base = $address + 160;
-        for ($i = 0; $i < 8; $i++) {
+        for ($i = 0; $i < $xmmCount; $i++) {
             $d0 = $this->readMemory32($runtime, $base + ($i * 16));
             $d1 = $this->readMemory32($runtime, $base + ($i * 16) + 4);
             $d2 = $this->readMemory32($runtime, $base + ($i * 16) + 8);
             $d3 = $this->readMemory32($runtime, $base + ($i * 16) + 12);
-            $this->xmm[$i] = [
-                $d0 & 0xFFFFFFFF,
-                $d1 & 0xFFFFFFFF,
-                $d2 & 0xFFFFFFFF,
-                $d3 & 0xFFFFFFFF,
-            ];
+            $cpu->setXmm($i, [$d0, $d1, $d2, $d3]);
         }
 
         return ExecutionStatus::SUCCESS;
     }
 
-    private function initXmm(): void
+    private function ldmxcsr(RuntimeInterface $runtime, int $address): ExecutionStatus
     {
-        if (!empty($this->xmm)) {
-            return;
-        }
-        $this->xmm = array_fill(0, 8, [0, 0, 0, 0]);
+        $cpu = $runtime->context()->cpu();
+        $this->translateLinearWithMmio($runtime, $address, false);
+        $cpu->setMxcsr($this->readMemory32($runtime, $address));
+        return ExecutionStatus::SUCCESS;
+    }
+
+    private function stmxcsr(RuntimeInterface $runtime, int $address): ExecutionStatus
+    {
+        $cpu = $runtime->context()->cpu();
+        $this->translateLinearWithMmio($runtime, $address, true);
+        $this->writeMemory32($runtime, $address, $cpu->mxcsr());
+        return ExecutionStatus::SUCCESS;
     }
 }

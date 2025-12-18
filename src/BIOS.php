@@ -10,6 +10,7 @@ use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Stream\ISO\ISOBootImageStream;
 
 class BIOS
 {
@@ -637,6 +638,13 @@ class BIOS
         $mem->writeBySize(RegisterType::ESI, 0x00000000, 32);
         $mem->writeBySize(RegisterType::EDI, 0x00000000, 32);
         $mem->writeBySize(RegisterType::EBP, 0x00000000, 32);
+
+        // Boot drive number (DL).
+        // For El Torito no-emulation CD boots, BIOS typically passes DL=0xE0 (first CD-ROM).
+        $bootStream = $this->machine->logicBoard()->media()->primary()->stream();
+        if ($bootStream instanceof ISOBootImageStream && $bootStream->isNoEmulation()) {
+            $mem->writeToLowBit(RegisterType::EDX, 0xE0);
+        }
 
         $this->machine->option()->logger()->debug(
             'BIOS: Initialized segment registers DS=ES=SS=FS=GS=0, SP=0xFFFE'

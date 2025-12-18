@@ -1493,6 +1493,72 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0xA5, $this->readMemory(0x9000, 8));
         $this->assertSame(0x5A, $this->readMemory(0x9001, 8));
     }
+
+    // ========================================
+    // Long Mode (64-bit) REP + REX.W Tests
+    // ========================================
+
+    public function testRepMovsq_LongModeCopiesQwords(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setCompatibilityMode(false);
+        $this->cpuContext->setDefaultOperandSize(32);
+        $this->cpuContext->setDefaultAddressSize(64);
+
+        $this->setRegister(RegisterType::ECX, 3, 64);
+        $this->setRegister(RegisterType::ESI, 0x1000, 64);
+        $this->setRegister(RegisterType::EDI, 0x2000, 64);
+        $this->setRegister(RegisterType::DS, 0x0000);
+        $this->setRegister(RegisterType::ES, 0x0000);
+        $this->setDirectionFlag(false);
+
+        $this->writeMemory(0x1000, 0x1122334455667788, 64);
+        $this->writeMemory(0x1008, 0x0123456789ABCDEF, 64);
+        $this->writeMemory(0x1010, 0x0F0E0D0C0B0A0908, 64);
+
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0x48) . chr(0xA5)); // REX.W + MOVS
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        $this->assertSame(0x1122334455667788, $this->readMemory(0x2000, 64));
+        $this->assertSame(0x0123456789ABCDEF, $this->readMemory(0x2008, 64));
+        $this->assertSame(0x0F0E0D0C0B0A0908, $this->readMemory(0x2010, 64));
+        $this->assertSame(0x1018, $this->getRegister(RegisterType::ESI, 64));
+        $this->assertSame(0x2018, $this->getRegister(RegisterType::EDI, 64));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX, 64));
+    }
+
+    public function testRepStosq_LongModeStoresQwords(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setCompatibilityMode(false);
+        $this->cpuContext->setDefaultOperandSize(32);
+        $this->cpuContext->setDefaultAddressSize(64);
+
+        $this->setRegister(RegisterType::ECX, 2, 64);
+        $this->setRegister(RegisterType::EAX, 0x0123456789ABCDEF, 64);
+        $this->setRegister(RegisterType::EDI, 0x3000, 64);
+        $this->setRegister(RegisterType::ES, 0x0000);
+        $this->setDirectionFlag(false);
+
+        $this->writeMemory(0x3000, 0, 64);
+        $this->writeMemory(0x3008, 0, 64);
+
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0x48) . chr(0xAB)); // REX.W + STOS
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        $this->assertSame(0x0123456789ABCDEF, $this->readMemory(0x3000, 64));
+        $this->assertSame(0x0123456789ABCDEF, $this->readMemory(0x3008, 64));
+        $this->assertSame(0x3010, $this->getRegister(RegisterType::EDI, 64));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX, 64));
+    }
 }
 
 /**
@@ -1538,6 +1604,11 @@ class TestInstructionExecutor implements InstructionExecutorInterface
                 $this->cpuContext->setAddressSizeOverride(true);
                 continue;
             }
+            if ($this->cpuContext->isLongMode() && !$this->cpuContext->isCompatibilityMode() && $nextByte >= 0x40 && $nextByte <= 0x4F) {
+                // REX prefix (0x40-0x4F) in 64-bit mode
+                $this->cpuContext->setRex($nextByte & 0x0F);
+                continue;
+            }
 
             // Find the string instruction
             $opcode = $nextByte;
@@ -1579,6 +1650,11 @@ class TestInstructionExecutor implements InstructionExecutorInterface
     }
 
     public function invalidateCaches(): void
+    {
+        // No caching in test executor
+    }
+
+    public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
     {
         // No caching in test executor
     }

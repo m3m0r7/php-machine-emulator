@@ -79,7 +79,11 @@ class AndRegRm implements InstructionInterface
             }
         }
 
-        $runtime->memoryAccessor()->setCarryFlag(false)->setOverflowFlag(false)->updateFlags($result, $isByte ? 8 : $opSize);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $isByte ? 8 : $opSize)
+            ->setCarryFlag(false)
+            ->setOverflowFlag(false)
+            ->setAuxiliaryCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -35,4 +35,11 @@ interface InstructionExecutorInterface
      * Invalidate any executor-side caches (decode, translation blocks, etc.).
      */
     public function invalidateCaches(): void;
+
+    /**
+     * Best-effort cache invalidation when code is written into an already-executed page.
+     *
+     * Implementations may treat this as a no-op if they don't cache instruction decode/translation.
+     */
+    public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void;
 }

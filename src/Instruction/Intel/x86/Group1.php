@@ -12,6 +12,7 @@ use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class Group1 implements InstructionInterface
 {
@@ -42,7 +43,7 @@ class Group1 implements InstructionInterface
             ? $memory->signedByte()
             : ($this->isByteOperation($opcode)
                 ? $memory->byte()
-                : ($size === 32 ? $memory->dword() : $memory->short()));
+                : ($size === 16 ? $memory->short() : $memory->signedDword()));
 
         match ($modRegRM->digit()) {
             0x0 => $this->add($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
@@ -66,6 +67,20 @@ class Group1 implements InstructionInterface
     private function isSignExtendedWordOperation(int $opcode): bool
     {
         return $opcode === 0x83;
+    }
+
+    private function updateCommonFlags64(RuntimeInterface $runtime, UInt64 $result): void
+    {
+        $ma = $runtime->memoryAccessor();
+        $ma->setZeroFlag($result->isZero());
+        $ma->setSignFlag($result->isNegativeSigned());
+
+        $lowByte = $result->low32() & 0xFF;
+        $ones = 0;
+        for ($i = 0; $i < 8; $i++) {
+            $ones += ($lowByte >> $i) & 1;
+        }
+        $ma->setParityFlag(($ones % 2) === 0);
     }
 
     protected function add(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
@@ -94,6 +109,37 @@ class Group1 implements InstructionInterface
                 ->setCarryFlag($result > 0xFF)
                 ->setOverflowFlag($of)
                 ->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->add($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+
+            $ma->setCarryFlag($resultU->lt($leftU));
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($resultU)
+                ->and($opU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+            $af = (($leftU->low32() & 0x0F) + ($opU->low32() & 0x0F)) > 0x0F;
+            $ma->setAuxiliaryCarryFlag($af);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -155,6 +201,29 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->or($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+            $ma->setCarryFlag(false);
+            $ma->setOverflowFlag(false);
+            $ma->setAuxiliaryCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $left = $isReg
             ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
@@ -207,6 +276,43 @@ class Group1 implements InstructionInterface
                 ->setCarryFlag($result > 0xFF)
                 ->setOverflowFlag($of)
                 ->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $tempU = $leftU->add($opU);
+            $resultU = $tempU->add($carry);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+
+            $carry1 = $tempU->lt($leftU);
+            $carry2 = $carry !== 0 && $resultU->lt($tempU);
+            $ma->setCarryFlag($carry1 || $carry2);
+
+            $srcU = $opU->add($carry);
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($resultU)
+                ->and($srcU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+
+            $af = (($leftU->low32() & 0x0F) + ($opU->low32() & 0x0F) + $carry) > 0x0F;
+            $ma->setAuxiliaryCarryFlag($af);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -277,6 +383,43 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $tempU = $leftU->sub($opU);
+            $resultU = $tempU->sub($borrow);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+
+            $borrow1 = $leftU->lt($opU);
+            $borrow2 = $borrow !== 0 && $tempU->lt($borrow);
+            $ma->setCarryFlag($borrow1 || $borrow2);
+
+            $srcU = $opU->add($borrow);
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($srcU)
+                ->and($leftU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+
+            $af = (($leftU->low32() & 0x0F) < (($opU->low32() & 0x0F) + $borrow));
+            $ma->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $signBit = $opSize === 32 ? 31 : 15;
         $left = $isReg
@@ -329,6 +472,29 @@ class Group1 implements InstructionInterface
                 ->setCarryFlag(false)
                 ->setOverflowFlag(false)
                 ->setAuxiliaryCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->and($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+            $ma->setCarryFlag(false);
+            $ma->setOverflowFlag(false);
+            $ma->setAuxiliaryCarryFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -387,6 +553,38 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->sub($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+
+            $ma->setCarryFlag($leftU->lt($opU));
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($opU)
+                ->and($leftU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+
+            $af = (($leftU->low32() & 0x0F) < ($opU->low32() & 0x0F));
+            $ma->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $signBit = $opSize === 32 ? 31 : 15;
         $left = $isReg
@@ -439,6 +637,29 @@ class Group1 implements InstructionInterface
                 ->setCarryFlag(false)
                 ->setOverflowFlag(false)
                 ->setAuxiliaryCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->xor($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+            $ma->setCarryFlag(false);
+            $ma->setOverflowFlag(false);
+            $ma->setAuxiliaryCarryFlag(false);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -503,6 +724,32 @@ class Group1 implements InstructionInterface
                 ->setOverflowFlag($of)
                 ->setAuxiliaryCarryFlag($af);
             $runtime->option()->logger()->debug(sprintf('CMP r/m8, imm8: left=0x%02X right=0x%02X ZF=%d', $left, $op, $left === $op ? 1 : 0));
+
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->sub($opU);
+
+            $this->updateCommonFlags64($runtime, $resultU);
+            $ma->setCarryFlag($leftU->lt($opU));
+
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($opU)
+                ->and($leftU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+
+            $af = (($leftU->low32() & 0x0F) < ($opU->low32() & 0x0F));
+            $ma->setAuxiliaryCarryFlag($af);
 
             return ExecutionStatus::SUCCESS;
         }

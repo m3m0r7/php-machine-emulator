@@ -118,4 +118,31 @@ interface RuntimeCPUContextInterface
     // ========================================
     public function currentInstructionPointer(): int;
     public function setCurrentInstructionPointer(int $ip): void;
+
+    // ========================================
+    // SIMD state (SSE/SSE2)
+    // ========================================
+    /**
+     * Read XMM register as 4x32-bit dwords (little-endian).
+     *
+     * @return array{int,int,int,int}
+     */
+    public function getXmm(int $index): array;
+
+    /**
+     * Write XMM register as 4x32-bit dwords (little-endian).
+     *
+     * @param array{int,int,int,int} $value
+     */
+    public function setXmm(int $index, array $value): void;
+
+    /**
+     * Get MXCSR (32-bit).
+     */
+    public function mxcsr(): int;
+
+    /**
+     * Set MXCSR (32-bit).
+     */
+    public function setMxcsr(int $mxcsr): void;
 }

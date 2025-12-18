@@ -23,6 +23,22 @@ class Call implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $memory = $runtime->memory();
+        $cpu = $runtime->context()->cpu();
+
+        // In 64-bit mode, CALL rel32 always uses a 32-bit signed displacement and pushes a 64-bit RIP.
+        // Operand-size override (0x66) is ignored for this instruction in 64-bit mode.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $rel32 = $memory->signedDword();
+            $nextRip = $runtime->memory()->offset();
+
+            $runtime->memoryAccessor()->push(RegisterType::ESP, $nextRip, 64);
+
+            if ($runtime->option()->shouldChangeOffset()) {
+                $runtime->memory()->setOffset($nextRip + $rel32);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
 
         $opSize = $runtime->context()->cpu()->operandSize();
         $offset = $opSize === 32

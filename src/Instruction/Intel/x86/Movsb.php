@@ -33,9 +33,15 @@ class Movsb implements InstructionInterface
             $this->segmentOffsetAddress($runtime, $sourceSegment, $si),
         );
 
-        $destAddress = $this->translateLinearWithMmio($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
-        $runtime->memoryAccessor()->allocate($destAddress, safe: false);
-        $runtime->memoryAccessor()->writeRawByte($destAddress, $value);
+        $destLinear = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
+        // Linear framebuffer writes (e.g. VBE LFB at 0xE0000000) must go through MMIO handling.
+        if ($destLinear >= 0xE0000000 && $destLinear < 0xE1000000) {
+            $this->writeMemory8($runtime, $destLinear, $value);
+        } else {
+            $destAddress = $this->translateLinearWithMmio($runtime, $destLinear, true);
+            $runtime->memoryAccessor()->allocate($destAddress, safe: false);
+            $runtime->memoryAccessor()->writeRawByte($destAddress, $value);
+        }
 
         $step = $this->stepForElement($runtime, 1);
         $this->writeIndex($runtime, RegisterType::ESI, $si + $step);

@@ -6,6 +6,8 @@ namespace Tests\Utils;
 
 use PHPMachineEmulator\Stream\BootableStreamInterface;
 use PHPMachineEmulator\Stream\StreamReaderInterface;
+use PHPMachineEmulator\Stream\StreamReaderProxy;
+use PHPMachineEmulator\Stream\StreamReaderProxyInterface;
 
 class TestBootableStream implements BootableStreamInterface
 {
@@ -17,9 +19,11 @@ class TestBootableStream implements BootableStreamInterface
         $this->data = $data ?: str_repeat("\x00", 512);
     }
 
-    public function proxy(): StreamReaderInterface
+    public function proxy(): StreamReaderProxyInterface
     {
-        return $this;
+        $proxy = new self($this->data);
+        $proxy->setOffset($this->offset());
+        return new StreamReaderProxy($proxy);
     }
 
     public function loadAddress(): int
@@ -63,11 +67,23 @@ class TestBootableStream implements BootableStreamInterface
         return $lo | ($hi << 8);
     }
 
+    public function signedShort(): int
+    {
+        $value = $this->short();
+        return $value >= 0x8000 ? $value - 0x10000 : $value;
+    }
+
     public function dword(): int
     {
         $lo = $this->short();
         $hi = $this->short();
         return $lo | ($hi << 16);
+    }
+
+    public function signedDword(): int
+    {
+        $value = $this->dword();
+        return $value >= 0x80000000 ? $value - 0x100000000 : $value;
     }
 
     public function offset(): int

@@ -114,7 +114,7 @@ class PatternedInstructionsList
             if ($compiled !== null) {
                 $this->compiledPatterns[$ip] = $compiled;
                 $this->stats->incrementCompiledPatterns();
-                $runtime->option()->logger()->info(sprintf(
+                $runtime->option()->logger()->debug(sprintf(
                     'HOT PATTERN compiled at IP=0x%X',
                     $ip
                 ));

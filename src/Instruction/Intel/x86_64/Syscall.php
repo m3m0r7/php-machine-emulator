@@ -127,8 +127,8 @@ class Syscall implements InstructionInterface
             default => -38,
         };
 
-        // Set return value in RAX
-        $memAccessor->writeBySize(RegisterType::EAX, $result & 0xFFFFFFFFFFFFFFFF, 64);
+        // Set return value in RAX (64-bit)
+        $memAccessor->writeBySize(RegisterType::EAX, $result, 64);
 
         // For exit syscalls, return EXIT status
         if ($syscallNum === 60 || $syscallNum === 231) {
@@ -250,14 +250,14 @@ class Syscall implements InstructionInterface
     {
         $memAccessor = $runtime->memoryAccessor();
 
-        $memAccessor->shouldCarryFlag(($flags & (1 << 0)) !== 0);
-        $memAccessor->shouldParityFlag(($flags & (1 << 2)) !== 0);
-        $memAccessor->shouldAuxiliaryCarryFlag(($flags & (1 << 4)) !== 0);
-        $memAccessor->shouldZeroFlag(($flags & (1 << 6)) !== 0);
-        $memAccessor->shouldSignFlag(($flags & (1 << 7)) !== 0);
-        $memAccessor->shouldInterruptFlag(($flags & (1 << 9)) !== 0);
-        $memAccessor->shouldDirectionFlag(($flags & (1 << 10)) !== 0);
-        $memAccessor->shouldOverflowFlag(($flags & (1 << 11)) !== 0);
+        $memAccessor->setCarryFlag(($flags & (1 << 0)) !== 0);
+        $memAccessor->setParityFlag(($flags & (1 << 2)) !== 0);
+        $memAccessor->setAuxiliaryCarryFlag(($flags & (1 << 4)) !== 0);
+        $memAccessor->setZeroFlag(($flags & (1 << 6)) !== 0);
+        $memAccessor->setSignFlag(($flags & (1 << 7)) !== 0);
+        $memAccessor->setInterruptFlag(($flags & (1 << 9)) !== 0);
+        $memAccessor->setDirectionFlag(($flags & (1 << 10)) !== 0);
+        $memAccessor->setOverflowFlag(($flags & (1 << 11)) !== 0);
     }
 
     /**

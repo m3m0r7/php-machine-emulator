@@ -36,8 +36,12 @@ pub struct MemoryAccessor {
     /// Extended Feature Enable Register (EFER MSR)
     efer: u64,
 
-    /// Control registers (CR0-CR4)
-    control_registers: [u32; 5],
+    /// Control registers (CR0-CR8).
+    ///
+    /// Stored as 64-bit to preserve long mode semantics:
+    /// - CR2 must hold the full 64-bit faulting linear address.
+    /// - CR3/CR4 are conceptually 64-bit in IA-32e.
+    control_registers: [u64; 9],
 
     /// Pointer to the memory stream (owned by PHP, just referenced here)
     memory: *mut MemoryStream,
@@ -59,7 +63,7 @@ impl MemoryAccessor {
             interrupt_flag: false,
             instruction_fetch: false,
             efer: 0,
-            control_registers: [0x22, 0, 0, 0, 0], // CR0: MP + NE set
+            control_registers: [0x22, 0, 0, 0, 0, 0, 0, 0, 0], // CR0: MP + NE set
             memory,
         };
         accessor
@@ -214,13 +218,24 @@ impl MemoryAccessor {
     /// Update CPU flags based on a value.
     #[inline(always)]
     pub fn update_flags(&mut self, value: i64, size: u32) {
-        let mask = if size >= 64 { i64::MAX } else { (1i64 << size) - 1 };
+        // Operand sizes are 8/16/32/64. For 64-bit values, `value` is already a signed i64
+        // representing the full 64-bit result, so masking and signed-range checks are unnecessary.
+        if size >= 64 {
+            self.zero_flag = value == 0;
+            self.sign_flag = value < 0;
+            // OF cannot be derived from the result alone for most operations.
+            self.overflow_flag = false;
+            self.parity_flag = ((value & 0xFF) as u8).count_ones() % 2 == 0;
+            return;
+        }
+
+        let mask = (1i64 << size) - 1;
         let masked = value & mask;
 
         self.zero_flag = masked == 0;
         self.sign_flag = (masked & (1i64 << (size - 1))) != 0;
 
-        // Overflow flag calculation
+        // Overflow flag calculation (best-effort; many instructions override OF explicitly)
         let signed_min = -(1i64 << (size - 1));
         let signed_max = (1i64 << (size - 1)) - 1;
         self.overflow_flag = value < signed_min || value > signed_max;
@@ -348,8 +363,8 @@ impl MemoryAccessor {
 
     // Control register operations
     #[inline(always)]
-    pub fn read_control_register(&self, index: usize) -> u32 {
-        if index < 5 {
+    pub fn read_control_register(&self, index: usize) -> u64 {
+        if index < self.control_registers.len() {
             self.control_registers[index]
         } else {
             0
@@ -357,8 +372,8 @@ impl MemoryAccessor {
     }
 
     #[inline(always)]
-    pub fn write_control_register(&mut self, index: usize, value: u32) {
-        if index < 5 {
+    pub fn write_control_register(&mut self, index: usize, value: u64) {
+        if index < self.control_registers.len() {
             self.control_registers[index] = value;
         }
     }
@@ -456,10 +471,12 @@ impl MemoryAccessor {
         (hi << 8) | lo
     }
 
-    /// Check if address is in MMIO range (LAPIC or IOAPIC).
+    /// Check if address is in MMIO range (LAPIC, IOAPIC, or device-mapped regions).
     /// Returns true if the address needs to be handled by PHP.
     #[inline(always)]
     pub fn is_mmio_address(address: usize) -> bool {
+        // PCI VGA BAR (linear framebuffer): 0xE0000000 - 0xE0FFFFFF
+        (address >= 0xE0000000 && address < 0xE1000000) ||
         // LAPIC: 0xFEE00000 - 0xFEE00FFF
         // IOAPIC: 0xFEC00000 - 0xFEC0001F
         (address >= 0xFEE00000 && address < 0xFEE01000) ||
@@ -487,12 +504,35 @@ impl MemoryAccessor {
         let cr4 = self.control_registers[4];
         let pse = (cr4 & (1 << 4)) != 0;
         let pae = (cr4 & (1 << 5)) != 0;
+        let lme = (self.efer & (1 << 8)) != 0;
 
-        if pae {
-            self.translate_linear_pae(linear, is_write, is_user)
+        let (physical, err) = if pae {
+            if lme {
+                self.translate_linear_ia32e(linear, is_write, is_user)
+            } else {
+                self.translate_linear_pae(linear, is_write, is_user)
+            }
         } else {
             self.translate_linear_32(linear, is_write, is_user, pse)
+        };
+
+        // On a page fault, CR2 is set to the faulting linear address.
+        if err != 0 {
+            let cr2 = if pae && lme {
+                // Canonicalize 48-bit linear address (sign-extend bit 47).
+                if (linear & (1u64 << 47)) != 0 {
+                    linear | 0xFFFF_0000_0000_0000
+                } else {
+                    linear
+                }
+            } else {
+                // Non-IA32e: CR2 is 32-bit.
+                linear & 0xFFFF_FFFF
+            };
+            self.control_registers[2] = cr2;
         }
+
+        (physical, err)
     }
 
     /// 32-bit paging translation.
@@ -687,6 +727,137 @@ impl MemoryAccessor {
         }
 
         // Check write access
+        if is_write && (pte & 0x2) == 0 {
+            let err = 0b10 | (if is_user { 0b100 } else { 0 }) | 0b1;
+            return (linear, (0x0E << 16) | err);
+        }
+
+        // Set accessed/dirty bits
+        self.write_physical_64(pde_addr, pde | 0x20);
+        let mut pte_updated = pte | 0x20;
+        if is_write {
+            pte_updated |= 0x40;
+        }
+        self.write_physical_64(pte_addr, pte_updated);
+
+        let phys = ((pte & 0xFFFFFF000) as usize + offset) as u64;
+        (phys & 0xFFFFFFFF, 0)
+    }
+
+    /// IA-32e (long mode) 4-level paging translation (PML4).
+    ///
+    /// This is selected when CR4.PAE=1, paging_enabled=true, and EFER.LME=1.
+    /// Physical addresses are treated as 32-bit (best-effort) to match the current MemoryStream model.
+    fn translate_linear_ia32e(
+        &mut self,
+        linear: u64,
+        is_write: bool,
+        is_user: bool,
+    ) -> (u64, u32) {
+        let cr3 = (self.control_registers[3] & 0xFFFFF000) as usize;
+        let linear_usize = linear as usize;
+
+        let pml4_index = ((linear >> 39) & 0x1FF) as usize;
+        let pdpt_index = ((linear >> 30) & 0x1FF) as usize;
+        let dir_index = ((linear >> 21) & 0x1FF) as usize;
+        let table_index = ((linear >> 12) & 0x1FF) as usize;
+        let offset = linear_usize & 0xFFF;
+
+        // Read PML4E
+        let pml4e_addr = (cr3 + (pml4_index * 8)) & 0xFFFFFFFF;
+        let pml4e = self.read_physical_64(pml4e_addr);
+
+        if (pml4e & 0x1) == 0 {
+            let err = (if is_write { 0b10 } else { 0 }) | (if is_user { 0b100 } else { 0 });
+            return (linear, (0x0E << 16) | err);
+        }
+        if is_user && (pml4e & 0x4) == 0 {
+            let err = (if is_write { 0b10 } else { 0 }) | 0b100 | 0b1;
+            return (linear, (0x0E << 16) | err);
+        }
+        if is_write && (pml4e & 0x2) == 0 {
+            let err = 0b10 | (if is_user { 0b100 } else { 0 }) | 0b1;
+            return (linear, (0x0E << 16) | err);
+        }
+        // Mark PML4E accessed
+        self.write_physical_64(pml4e_addr, pml4e | (1 << 5));
+
+        // Read PDPTE
+        let pdpte_base = (pml4e & 0xFFFFFF000) as usize;
+        let pdpte_addr = (pdpte_base + (pdpt_index * 8)) & 0xFFFFFFFF;
+        let pdpte = self.read_physical_64(pdpte_addr);
+
+        if (pdpte & 0x1) == 0 {
+            let err = (if is_write { 0b10 } else { 0 }) | (if is_user { 0b100 } else { 0 });
+            return (linear, (0x0E << 16) | err);
+        }
+        if is_user && (pdpte & 0x4) == 0 {
+            let err = (if is_write { 0b10 } else { 0 }) | 0b100 | 0b1;
+            return (linear, (0x0E << 16) | err);
+        }
+        if is_write && (pdpte & 0x2) == 0 {
+            let err = 0b10 | (if is_user { 0b100 } else { 0 }) | 0b1;
+            return (linear, (0x0E << 16) | err);
+        }
+        // Mark PDPTE accessed
+        self.write_physical_64(pdpte_addr, pdpte | (1 << 5));
+
+        // 1GB large page (PS)
+        if (pdpte & (1 << 7)) != 0 {
+            let mut pdpte_upd = pdpte | 0x20;
+            if is_write {
+                pdpte_upd |= 0x40;
+            }
+            self.write_physical_64(pdpte_addr, pdpte_upd);
+
+            // Base is 1GB-aligned; keep within 32-bit physical space.
+            let base = (pdpte & 0x000FFFFF_C0000000) as usize;
+            let phys = ((base + (linear_usize & 0x3FFFFFFF)) & 0xFFFFFFFF) as u64;
+            return (phys, 0);
+        }
+
+        // Read PDE
+        let pde_addr = (((pdpte & 0xFFFFFF000) as usize) + (dir_index * 8)) & 0xFFFFFFFF;
+        let pde = self.read_physical_64(pde_addr);
+
+        if (pde & 0x1) == 0 {
+            let err = (if is_write { 0b10 } else { 0 }) | (if is_user { 0b100 } else { 0 });
+            return (linear, (0x0E << 16) | err);
+        }
+        if is_user && (pde & 0x4) == 0 {
+            let err = (if is_write { 0b10 } else { 0 }) | 0b100 | 0b1;
+            return (linear, (0x0E << 16) | err);
+        }
+        if is_write && (pde & 0x2) == 0 {
+            let err = 0b10 | (if is_user { 0b100 } else { 0 }) | 0b1;
+            return (linear, (0x0E << 16) | err);
+        }
+
+        // 2MB large page (PS)
+        if (pde & (1 << 7)) != 0 {
+            let mut pde_upd = pde | 0x20;
+            if is_write {
+                pde_upd |= 0x40;
+            }
+            self.write_physical_64(pde_addr, pde_upd);
+
+            let base = (pde & 0xFFE00000) as usize;
+            let phys = ((base + (linear_usize & 0x1FFFFF)) & 0xFFFFFFFF) as u64;
+            return (phys, 0);
+        }
+
+        // Read PTE
+        let pte_addr = (((pde & 0xFFFFFF000) as usize) + (table_index * 8)) & 0xFFFFFFFF;
+        let pte = self.read_physical_64(pte_addr);
+
+        if (pte & 0x1) == 0 {
+            let err = (if is_write { 0b10 } else { 0 }) | (if is_user { 0b100 } else { 0 });
+            return (linear, (0x0E << 16) | err);
+        }
+        if is_user && (pte & 0x4) == 0 {
+            let err = (if is_write { 0b10 } else { 0 }) | 0b100 | 0b1;
+            return (linear, (0x0E << 16) | err);
+        }
         if is_write && (pte & 0x2) == 0 {
             let err = 0b10 | (if is_user { 0b100 } else { 0 }) | 0b1;
             return (linear, (0x0E << 16) | err);
@@ -1089,17 +1260,17 @@ pub extern "C" fn memory_accessor_instruction_fetch(accessor: *const MemoryAcces
 pub extern "C" fn memory_accessor_read_control_register(
     accessor: *const MemoryAccessor,
     index: usize,
-) -> u32 {
-    unsafe { (*accessor).read_control_register(index) }
+) -> i64 {
+    unsafe { (*accessor).read_control_register(index) as i64 }
 }
 
 #[no_mangle]
 pub extern "C" fn memory_accessor_write_control_register(
     accessor: *mut MemoryAccessor,
     index: usize,
-    value: u32,
+    value: i64,
 ) {
-    unsafe { (*accessor).write_control_register(index, value) }
+    unsafe { (*accessor).write_control_register(index, value as u64) }
 }
 
 // EFER operations
