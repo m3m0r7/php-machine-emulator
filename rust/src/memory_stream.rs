@@ -1,19 +1,33 @@
 //! High-performance memory stream implementation for x86 emulation.
 //!
 //! This module provides a Rust implementation of MemoryStream that can be called
-//! from PHP via FFI. It uses a flat memory model with efficient byte-level access.
+//! from PHP via FFI.
+//!
+//! NOTE: A contiguous `Vec<u8>` implementation performs well for small/medium
+//! memory sizes, but becomes prohibitively slow when the guest touches sparse
+//! high addresses (e.g. near 2GB) because `Vec::resize()` must allocate and
+//! zero-fill the entire range up to that address.
+//!
+//! To keep Ubuntu/GRUB boot practical, we use a sparse page-backed model:
+//! - Unallocated pages read as zero
+//! - Pages are allocated (zeroed) only on first write
+//! - The logical address space remains `physical_max_memory_size + swap_size`
 
-use std::slice;
+use std::{cmp, slice};
 
 /// Expansion chunk size (1MB)
 const EXPANSION_CHUNK_SIZE: usize = 0x100000;
 
-/// Memory stream structure with flat memory model.
-/// Uses a single contiguous Vec<u8> for maximum performance.
+/// Page size (4KB)
+const PAGE_SIZE: usize = 0x1000;
+const PAGE_SHIFT: usize = 12;
+const PAGE_MASK: usize = PAGE_SIZE - 1;
+
+/// Memory stream structure with sparse page-backed memory.
 #[repr(C)]
 pub struct MemoryStream {
-    /// Flat memory buffer
-    data: Vec<u8>,
+    /// Sparse pages (None => implicitly zero-filled)
+    pages: Vec<Option<Box<[u8; PAGE_SIZE]>>>,
     /// Current read/write offset
     offset: usize,
     /// Current allocated size
@@ -32,13 +46,17 @@ impl MemoryStream {
     /// * `physical_max_memory_size` - Maximum physical memory size (default 16MB)
     /// * `swap_size` - Swap size for overflow (default 256MB)
     pub fn new(size: usize, physical_max_memory_size: usize, swap_size: usize) -> Self {
-        let mut data = Vec::with_capacity(size);
-        data.resize(size, 0);
+        let logical_max = physical_max_memory_size + swap_size;
+        let page_count = if logical_max == 0 {
+            0
+        } else {
+            (logical_max + PAGE_SIZE - 1) >> PAGE_SHIFT
+        };
 
         MemoryStream {
-            data,
+            pages: vec![None; page_count],
             offset: 0,
-            size,
+            size: cmp::min(size, logical_max),
             physical_max_memory_size,
             swap_size,
         }
@@ -84,9 +102,6 @@ impl MemoryStream {
             logical_max,
             ((required_offset + 1 + EXPANSION_CHUNK_SIZE - 1) / EXPANSION_CHUNK_SIZE) * EXPANSION_CHUNK_SIZE,
         );
-
-        // Resize the data vector
-        self.data.resize(new_size, 0);
         self.size = new_size;
 
         true
@@ -130,11 +145,7 @@ impl MemoryStream {
             let _ = self.ensure_capacity(self.offset);
         }
 
-        let value = if self.offset < self.data.len() {
-            self.data[self.offset]
-        } else {
-            0
-        };
+        let value = self.read_byte_at(self.offset);
         self.offset += 1;
         value
     }
@@ -188,16 +199,11 @@ impl MemoryStream {
             let _ = self.ensure_capacity(end_offset);
         }
 
-        let mut result = Vec::with_capacity(length);
-        let actual_len = std::cmp::min(length, self.data.len().saturating_sub(self.offset));
-
+        let mut result = vec![0u8; length];
+        let available = self.size.saturating_sub(self.offset);
+        let actual_len = cmp::min(length, available);
         if actual_len > 0 {
-            result.extend_from_slice(&self.data[self.offset..self.offset + actual_len]);
-        }
-
-        // Fill remaining with zeros if needed
-        if actual_len < length {
-            result.resize(length, 0);
+            self.read_slice_at(self.offset, &mut result[..actual_len]);
         }
 
         self.offset += length;
@@ -216,10 +222,11 @@ impl MemoryStream {
             let _ = self.ensure_capacity(end_offset);
         }
 
-        let actual_len = std::cmp::min(length, self.data.len().saturating_sub(self.offset));
+        let available = self.size.saturating_sub(self.offset);
+        let actual_len = cmp::min(length, available);
 
         if actual_len > 0 {
-            buffer[..actual_len].copy_from_slice(&self.data[self.offset..self.offset + actual_len]);
+            self.read_slice_at(self.offset, &mut buffer[..actual_len]);
         }
 
         // Fill remaining with zeros if needed
@@ -234,17 +241,23 @@ impl MemoryStream {
     /// Write a string/bytes at current offset.
     pub fn write(&mut self, value: &[u8]) {
         let len = value.len();
-        let end_offset = self.offset + len;
+        if len == 0 {
+            return;
+        }
 
+        let logical_max = self.logical_max_memory_size();
+        if self.offset >= logical_max {
+            return;
+        }
+
+        let write_len = cmp::min(len, logical_max - self.offset);
+        let end_offset = self.offset + write_len;
         if end_offset >= self.size {
             let _ = self.ensure_capacity(end_offset);
         }
 
-        if self.offset + len <= self.data.len() {
-            self.data[self.offset..self.offset + len].copy_from_slice(value);
-        }
-
-        self.offset += len;
+        self.write_slice_at(self.offset, &value[..write_len]);
+        self.offset += write_len;
     }
 
     /// Write a single byte at current offset.
@@ -253,14 +266,7 @@ impl MemoryStream {
         if self.offset >= self.logical_max_memory_size() {
             return;
         }
-
-        if self.offset >= self.size {
-            let _ = self.ensure_capacity(self.offset);
-        }
-
-        if self.offset < self.data.len() {
-            self.data[self.offset] = value;
-        }
+        self.write_byte_at(self.offset, value);
         self.offset += 1;
     }
 
@@ -290,10 +296,19 @@ impl MemoryStream {
     /// Read a byte at a specific address without changing offset.
     #[inline(always)]
     pub fn read_byte_at(&self, address: usize) -> u8 {
-        if address < self.data.len() {
-            self.data[address]
-        } else {
-            0
+        if address >= self.size {
+            return 0;
+        }
+
+        let page_index = address >> PAGE_SHIFT;
+        if page_index >= self.pages.len() {
+            return 0;
+        }
+        let page_off = address & PAGE_MASK;
+
+        match &self.pages[page_index] {
+            Some(page) => page[page_off],
+            None => 0,
         }
     }
 
@@ -308,8 +323,21 @@ impl MemoryStream {
             let _ = self.ensure_capacity(address);
         }
 
-        if address < self.data.len() {
-            self.data[address] = value;
+        if address >= self.size {
+            return;
+        }
+
+        let page_index = address >> PAGE_SHIFT;
+        if page_index >= self.pages.len() {
+            return;
+        }
+        let page_off = address & PAGE_MASK;
+
+        if self.pages[page_index].is_none() {
+            self.pages[page_index] = Some(Box::new([0u8; PAGE_SIZE]));
+        }
+        if let Some(page) = self.pages[page_index].as_mut() {
+            page[page_off] = value;
         }
     }
 
@@ -368,22 +396,50 @@ impl MemoryStream {
             return;
         }
 
-        // Ensure destination has capacity
-        let dest_end = dest_offset + size;
-        if dest_end >= self.size {
-            let _ = self.ensure_capacity(dest_end);
+        let logical_max = self.logical_max_memory_size();
+        if src_offset >= logical_max || dest_offset >= logical_max {
+            return;
         }
 
-        // Use copy_within for overlapping regions
-        if src_offset < self.data.len() && dest_offset < self.data.len() {
-            let actual_size = std::cmp::min(
-                size,
-                std::cmp::min(
-                    self.data.len() - src_offset,
-                    self.data.len() - dest_offset,
-                ),
-            );
-            self.data.copy_within(src_offset..src_offset + actual_size, dest_offset);
+        // Clamp to the logical address space.
+        let max_size = cmp::min(
+            size,
+            cmp::min(logical_max - src_offset, logical_max - dest_offset),
+        );
+        if max_size == 0 || src_offset == dest_offset {
+            return;
+        }
+
+        // Ensure both ranges exist. Reads are zero-filled for unallocated pages,
+        // but size/offset semantics require that the stream considers these regions "allocated".
+        let src_end = src_offset + max_size;
+        let dest_end = dest_offset + max_size;
+        let _ = self.ensure_capacity(src_end);
+        let _ = self.ensure_capacity(dest_end);
+
+        const CHUNK: usize = 64 * 1024;
+        let mut buffer = vec![0u8; CHUNK];
+
+        // memmove overlap detection
+        let overlap = src_offset < dest_offset && (src_offset + max_size) > dest_offset;
+        if overlap {
+            let mut remaining = max_size;
+            while remaining > 0 {
+                let chunk = cmp::min(CHUNK, remaining);
+                let start = remaining - chunk;
+                self.read_slice_at(src_offset + start, &mut buffer[..chunk]);
+                self.write_slice_at(dest_offset + start, &buffer[..chunk]);
+                remaining -= chunk;
+            }
+            return;
+        }
+
+        let mut offset = 0usize;
+        while offset < max_size {
+            let chunk = cmp::min(CHUNK, max_size - offset);
+            self.read_slice_at(src_offset + offset, &mut buffer[..chunk]);
+            self.write_slice_at(dest_offset + offset, &buffer[..chunk]);
+            offset += chunk;
         }
     }
 
@@ -394,26 +450,100 @@ impl MemoryStream {
             return;
         }
 
-        let dest_end = dest_offset + size;
+        if dest_offset >= self.logical_max_memory_size() {
+            return;
+        }
+
+        let write_len = cmp::min(size, self.logical_max_memory_size() - dest_offset);
+        let dest_end = dest_offset + write_len;
         if dest_end >= self.size {
             let _ = self.ensure_capacity(dest_end);
         }
 
-        if dest_offset < self.data.len() {
-            let actual_size = std::cmp::min(size, self.data.len() - dest_offset);
-            self.data[dest_offset..dest_offset + actual_size].copy_from_slice(&src[..actual_size]);
-        }
+        self.write_slice_at(dest_offset, &src[..write_len]);
     }
 
     /// Get a direct pointer to the internal memory buffer.
     /// This is useful for FFI when PHP needs direct memory access.
     pub fn as_ptr(&self) -> *const u8 {
-        self.data.as_ptr()
+        std::ptr::null()
     }
 
     /// Get a mutable pointer to the internal memory buffer.
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.data.as_mut_ptr()
+        std::ptr::null_mut()
+    }
+
+    fn read_slice_at(&self, address: usize, out: &mut [u8]) {
+        if out.is_empty() {
+            return;
+        }
+
+        let mut addr = address;
+        let mut dst = 0usize;
+
+        while dst < out.len() {
+            let page_index = addr >> PAGE_SHIFT;
+            let page_off = addr & PAGE_MASK;
+            let chunk = cmp::min(out.len() - dst, PAGE_SIZE - page_off);
+
+            if page_index < self.pages.len() && addr < self.size {
+                if let Some(page) = &self.pages[page_index] {
+                    out[dst..dst + chunk].copy_from_slice(&page[page_off..page_off + chunk]);
+                } else {
+                    out[dst..dst + chunk].fill(0);
+                }
+            } else {
+                out[dst..dst + chunk].fill(0);
+            }
+
+            addr += chunk;
+            dst += chunk;
+        }
+    }
+
+    fn write_slice_at(&mut self, address: usize, data: &[u8]) {
+        if data.is_empty() {
+            return;
+        }
+
+        let logical_max = self.logical_max_memory_size();
+        if address >= logical_max {
+            return;
+        }
+
+        let write_len = cmp::min(data.len(), logical_max - address);
+        if write_len == 0 {
+            return;
+        }
+
+        let end = address + write_len;
+        if end >= self.size {
+            let _ = self.ensure_capacity(end);
+        }
+
+        let mut addr = address;
+        let mut src = 0usize;
+        let last = address + write_len;
+
+        while addr < last {
+            let page_index = addr >> PAGE_SHIFT;
+            if page_index >= self.pages.len() {
+                break;
+            }
+            let page_off = addr & PAGE_MASK;
+            let chunk = cmp::min(last - addr, PAGE_SIZE - page_off);
+
+            if self.pages[page_index].is_none() {
+                self.pages[page_index] = Some(Box::new([0u8; PAGE_SIZE]));
+            }
+            if let Some(page) = self.pages[page_index].as_mut() {
+                page[page_off..page_off + chunk].copy_from_slice(&data[src..src + chunk]);
+            }
+
+            addr += chunk;
+            src += chunk;
+        }
     }
 }
 

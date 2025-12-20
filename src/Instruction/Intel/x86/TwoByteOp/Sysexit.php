@@ -33,22 +33,29 @@ class Sysexit implements InstructionInterface
             throw new FaultException(0x0D, 0, 'SYSEXIT CPL check failed');
         }
 
-        $csBase = Rdmsr::readMsr(0x174);
-        $cs = ($csBase + 16) & 0xFFFF;
-        $ss = ($csBase + 24) & 0xFFFF;
+        $csBaseMsr = Rdmsr::readMsr(0x174); // IA32_SYSENTER_CS
+        $csBase = $csBaseMsr->low32() & 0xFFFF;
+        $cs = (($csBase + 16) & 0xFFFC) | 0x3; // RPL forced to 3
+        $ss = (($csBase + 24) & 0xFFFC) | 0x3; // RPL forced to 3
 
         $ma = $runtime->memoryAccessor();
         $eip = $ma->fetch(RegisterType::ECX)->asBytesBySize(32);
         $esp = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
 
-        $ma->write16Bit(RegisterType::CS, $cs);
-        $ma->write16Bit(RegisterType::SS, $ss);
+        $this->writeCodeSegment($runtime, $cs & 0xFFFF, 3);
+        $ma->write16Bit(RegisterType::SS, $ss & 0xFFFF);
+        if ($runtime->context()->cpu()->isProtectedMode() && ($ss & 0xFFFF) !== 0) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $ss & 0xFFFF);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $runtime->context()->cpu()->cacheSegmentDescriptor(RegisterType::SS, $descriptor);
+            }
+        }
         $this->writeRegisterBySize($runtime, RegisterType::ESP, $esp & 0xFFFFFFFF, 32);
 
         $runtime->context()->cpu()->setCpl(3);
         $runtime->context()->cpu()->setUserMode(true);
 
-        $target = $this->linearCodeAddress($runtime, $cs, $eip & 0xFFFFFFFF, 32);
+        $target = $this->linearCodeAddress($runtime, $cs & 0xFFFF, $eip & 0xFFFFFFFF, 32);
         $runtime->memory()->setOffset($target);
 
         return ExecutionStatus::SUCCESS;

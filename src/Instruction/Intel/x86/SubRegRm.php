@@ -84,16 +84,6 @@ class SubRegRm implements InstructionInterface
             $maskedResult = $calc & $mask;
             $af = (($destU & 0x0F) < ($srcU & 0x0F));
 
-            // Debug SUB for LZMA distance calculation
-            $runtime->option()->logger()->debug(sprintf(
-                'SUB r%d: dest=0x%X src=0x%X result=0x%X (destIsRm=%s mode=%d rmReg=%d rmAddr=%s)',
-                $opSize, $dest & 0xFFFFFFFF, $src & 0xFFFFFFFF, $maskedResult,
-                $destIsRm ? 'yes' : 'no',
-                $modRegRM->mode(),
-                $modRegRM->registerOrMemoryAddress(),
-                $rmAddress !== null ? sprintf('0x%X', $rmAddress) : 'null'
-            ));
-
             if ($destIsRm) {
                 if ($rmAddress !== null) {
                     if ($opSize === 32) {

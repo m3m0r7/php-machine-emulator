@@ -19,8 +19,8 @@ class TerminalScreenWriter implements ScreenWriterInterface
     /** @var string Buffered output for batch writing */
     protected string $outputBuffer = '';
 
-    /** @var array<int,array<int,string>> */
-    private array $screenChars = [];
+    /** @var array<int,string> */
+    private array $screenLines = [];
     private ?string $stopOnScreenSubstr = null;
     private bool $stopOnScreenTriggered = false;
     private int $stopOnScreenTail = 0;
@@ -33,9 +33,13 @@ class TerminalScreenWriter implements ScreenWriterInterface
     private ?array $dumpCodeOnStop = null;
     private ?int $dumpStackOnStop = null;
     private bool $dumpPtrStringsOnStop = false;
+    private bool $silentOutput = false;
 
     public function __construct(protected RuntimeInterface $runtime, protected VideoTypeInfo $videoTypeInfo)
     {
+        $silentEnv = getenv('PHPME_SILENT_TTY');
+        $this->silentOutput = $silentEnv !== false && trim($silentEnv) !== '' && trim($silentEnv) !== '0';
+
         $this->stopOnScreenSubstr = $this->resolveStopOnScreenSubstr();
         $this->stopOnScreenTail = $this->resolveStopOnScreenTail();
         $this->dumpMemOnStop = $this->resolveDumpMemOnStop();
@@ -47,6 +51,9 @@ class TerminalScreenWriter implements ScreenWriterInterface
 
     private function writeOutput(string $value): void
     {
+        if ($this->silentOutput) {
+            return;
+        }
         $this->runtime
             ->option()
             ->IO()
@@ -356,26 +363,19 @@ class TerminalScreenWriter implements ScreenWriterInterface
             return;
         }
 
-        if (!isset($this->screenChars[$row])) {
-            $this->screenChars[$row] = [];
+        $line = $this->screenLines[$row] ?? '';
+        if (strlen($line) <= $col) {
+            $line = str_pad($line, $col + 1, ' ');
         }
-        $this->screenChars[$row][$col] = $char;
+        $line[$col] = $char;
+        $this->screenLines[$row] = $line;
 
         $this->maybeStopOnScreenSubstr($row);
     }
 
     private function rowString(int $row): string
     {
-        $cols = $this->screenChars[$row] ?? [];
-        if ($cols === []) {
-            return '';
-        }
-        $maxCol = max(array_keys($cols));
-        $line = '';
-        for ($c = 0; $c <= $maxCol; $c++) {
-            $line .= $cols[$c] ?? ' ';
-        }
-        return $line;
+        return $this->screenLines[$row] ?? '';
     }
 
     private function maybeStopOnScreenSubstr(int $row): void
@@ -417,8 +417,8 @@ class TerminalScreenWriter implements ScreenWriterInterface
         $lines = [];
         if ($this->dumpScreenAllOnStop) {
             $maxRow = 24;
-            if ($this->screenChars !== []) {
-                $maxRow = max($maxRow, max(array_keys($this->screenChars)));
+            if ($this->screenLines !== []) {
+                $maxRow = max($maxRow, max(array_keys($this->screenLines)));
             }
             $minRow = max(0, $maxRow - 30);
             for ($r = $minRow; $r <= $maxRow; $r++) {

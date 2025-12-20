@@ -167,7 +167,8 @@ class Group3 implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($resultU->toInt(), 64)
                 ->setCarryFlag(!$valueU->isZero())
-                ->setOverflowFlag($valueU->eq('9223372036854775808')); // 0x8000000000000000
+                ->setOverflowFlag($valueU->eq('9223372036854775808')) // 0x8000000000000000
+                ->setAuxiliaryCarryFlag(($valueU->low32() & 0x0F) !== 0);
 
             return ExecutionStatus::SUCCESS;
         }
@@ -214,7 +215,8 @@ class Group3 implements InstructionInterface
         $runtime->memoryAccessor()
             ->updateFlags($result, $size)
             ->setCarryFlag($value !== 0)
-            ->setOverflowFlag($value === $mostNegative);
+            ->setOverflowFlag($value === $mostNegative)
+            ->setAuxiliaryCarryFlag(($value & 0x0F) !== 0);
 
         return ExecutionStatus::SUCCESS;
     }

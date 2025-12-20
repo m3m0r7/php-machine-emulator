@@ -85,21 +85,23 @@ class ShrdShlPattern extends AbstractPatternedInstruction
             $memoryAccessor = $runtime->memoryAccessor();
             $memory = $runtime->memory();
 
-            // SHRD: dst = (src:dst >> imm8) & 0xFFFFFFFF
-            $dst = $memoryAccessor->fetch($shrdDst)->asBytesBySize(32);
-            $src = $memoryAccessor->fetch($shrdSrc)->asBytesBySize(32);
-
-            // Combine into 64-bit and shift right
-            $combined = ($src << 32) | $dst;
+            // SHRD: dst = (dst >> imm8) | (src << (32-imm8))  (imm8 masked to 5 bits)
+            $dst = $memoryAccessor->fetch($shrdDst)->asBytesBySize(32) & 0xFFFFFFFF;
+            $src = $memoryAccessor->fetch($shrdSrc)->asBytesBySize(32) & 0xFFFFFFFF;
             $shiftCount = $imm8 & 31;
-            $shrdResult = ($combined >> $shiftCount) & 0xFFFFFFFF;
 
-            // Set CF to the last bit shifted out
-            $lastBitOut = ($shiftCount > 0) ? (($dst >> ($shiftCount - 1)) & 1) : 0;
-            $memoryAccessor->setCarryFlag($lastBitOut !== 0);
+            // x86 semantics: count==0 leaves operand and flags unchanged.
+            if ($shiftCount !== 0) {
+                $shrdResult = (($dst >> $shiftCount) | ($src << (32 - $shiftCount))) & 0xFFFFFFFF;
+                $memoryAccessor->writeBySize($shrdDst, $shrdResult, 32);
 
-            // Write SHRD result
-            $memoryAccessor->writeBySize($shrdDst, $shrdResult, 32);
+                // If the second instruction is ROL, it doesn't touch ZF/SF/PF, so preserve SHRD flags.
+                if (!$isShl) {
+                    $memoryAccessor->setZeroFlag($shrdResult === 0);
+                    $memoryAccessor->setSignFlag(($shrdResult & 0x80000000) !== 0);
+                    $memoryAccessor->setParityFlag($this->calculateParity($shrdResult & 0xFF));
+                }
+            }
 
             // SHL/ROL dst, 1
             $shlVal = $memoryAccessor->fetch($shlDst)->asBytesBySize(32);
@@ -112,6 +114,10 @@ class ShrdShlPattern extends AbstractPatternedInstruction
 
                 // OF is set if sign bit changed
                 $memoryAccessor->setOverflowFlag((($shlResult >> 31) & 1) !== $cfBit);
+
+                $memoryAccessor->setZeroFlag($shlResult === 0);
+                $memoryAccessor->setSignFlag(($shlResult & 0x80000000) !== 0);
+                $memoryAccessor->setParityFlag($this->calculateParity($shlResult & 0xFF));
             } else {
                 // ROL: rotate left by 1
                 $cfBit = ($shlVal >> 31) & 1;
@@ -119,9 +125,6 @@ class ShrdShlPattern extends AbstractPatternedInstruction
                 $memoryAccessor->setCarryFlag($cfBit !== 0);
                 $memoryAccessor->setOverflowFlag(((($shlResult >> 31) & 1) ^ $cfBit) !== 0);
             }
-
-            $memoryAccessor->setZeroFlag($shlResult === 0);
-            $memoryAccessor->setSignFlag(($shlResult & 0x80000000) !== 0);
             $memoryAccessor->writeBySize($shlDst, $shlResult, 32);
 
             // Next IP after both instructions (SHRD=4 bytes, SHL/ROL=2 bytes)

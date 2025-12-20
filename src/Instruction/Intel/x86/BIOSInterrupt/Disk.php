@@ -102,13 +102,25 @@ class Disk implements InterruptInterface
         }
         self::$traceInt13Reads++;
 
+        $cpu = $runtime->context()->cpu();
+        $pm = $cpu->isProtectedMode() ? 1 : 0;
+        $pg = $cpu->isPagingEnabled() ? 1 : 0;
+        $lm = $cpu->isLongMode() ? 1 : 0;
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+        $linearIp = $runtime->memory()->offset() & 0xFFFFFFFF;
+
         $runtime->option()->logger()->warning(sprintf(
-            'INT 13h %s: LBA=%d sectors=%d buf=0x%08X cdrom=%d (%d/%d)',
+            'INT 13h %s: LBA=%d sectors=%d buf=0x%08X cdrom=%d PM=%d PG=%d LM=%d CS=0x%04X linearIP=0x%08X (%d/%d)',
             $kind,
             $lba,
             $sectorCount,
             $bufferAddress & 0xFFFFFFFF,
             $isCdrom ? 1 : 0,
+            $pm,
+            $pg,
+            $lm,
+            $cs,
+            $linearIp,
             self::$traceInt13Reads,
             $limit,
         ));
@@ -210,6 +222,35 @@ class Disk implements InterruptInterface
             $preview,
             $memPreview,
         ));
+
+        $executor = $runtime->architectureProvider()->instructionExecutor();
+        if (method_exists($executor, 'getIpSampleReport')) {
+            $report = $executor->getIpSampleReport(20);
+            if (($report['every'] ?? 0) > 0 && ($report['samples'] ?? 0) > 0) {
+                $runtime->option()->logger()->warning(sprintf(
+                    'IP SAMPLE: every=%d insns=%d samples=%d unique=%d',
+                    (int) ($report['every'] ?? 0),
+                    (int) ($report['instructions'] ?? 0),
+                    (int) ($report['samples'] ?? 0),
+                    (int) ($report['unique'] ?? 0),
+                ));
+
+                foreach (($report['top'] ?? []) as $row) {
+                    $ipVal = (int) ($row[0] ?? 0);
+                    $hits = (int) ($row[1] ?? 0);
+                    $runtime->option()->logger()->warning(sprintf(
+                        'IP SAMPLE TOP: ip=0x%08X hits=%d',
+                        $ipVal & 0xFFFFFFFF,
+                        $hits,
+                    ));
+                }
+            }
+        } elseif (method_exists($executor, 'instructionCount')) {
+            $runtime->option()->logger()->warning(sprintf(
+                'INSNS: total=%d',
+                (int) $executor->instructionCount(),
+            ));
+        }
 
         throw new HaltException('Stopped by PHPME_STOP_ON_INT13_READ_LBA');
     }
@@ -404,10 +445,12 @@ class Disk implements InterruptInterface
         // Restore bootStream offset
         $bootStream->setOffset($savedBootOffset);
 
-        // Invalidate instruction decode/translation caches for the affected memory region
-        // This is critical when loading code (e.g., program executables) to memory,
-        // as the old cached instructions would be stale
-        $runtime->architectureProvider()->instructionExecutor()->invalidateCaches();
+        // Invalidate decode/translation caches only when we overwrote a page that has already been executed.
+        // Most INT 13h reads load data into scratch buffers; flushing all caches every time is very expensive
+        // and unnecessary (it defeats translation block caching).
+        $runtime->architectureProvider()
+            ->instructionExecutor()
+            ->invalidateCachesIfExecutedPageOverlaps($bufferAddress, $bytes);
 
         // update AL with sectors read, AH = 0, clear CF
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
@@ -585,8 +628,10 @@ class Disk implements InterruptInterface
             // and uses INT 13h to load additional sectors to specific addresses
             $this->writeBlockToMemory($runtime, $bufferAddress, $data);
 
-            // Invalidate instruction caches when loading code
-            $runtime->architectureProvider()->instructionExecutor()->invalidateCaches();
+            // Invalidate caches only when we overwrote a page that has already been executed.
+            $runtime->architectureProvider()
+                ->instructionExecutor()
+                ->invalidateCachesIfExecutedPageOverlaps($bufferAddress, strlen($data));
 
             $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
             $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorCount);
@@ -637,8 +682,10 @@ class Disk implements InterruptInterface
 
         $bootStream->setOffset($savedBootOffset);
 
-        // Invalidate instruction caches when loading code
-        $runtime->architectureProvider()->instructionExecutor()->invalidateCaches();
+        // Invalidate caches only when we overwrote a page that has already been executed.
+        $runtime->architectureProvider()
+            ->instructionExecutor()
+            ->invalidateCachesIfExecutedPageOverlaps($bufferAddress, strlen($data));
 
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, 0x00);
         $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorCount);

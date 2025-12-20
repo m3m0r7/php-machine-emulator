@@ -75,5 +75,44 @@ final class RexExtendedRegistersLongMode64Test extends InstructionTestCase
         $this->assertFalse($this->getZeroFlag());
         $this->assertFalse($this->getSignFlag());
     }
-}
 
+    public function testMovRm64Imm32InLongModeWritesSignExtendedImmediateToMemory(): void
+    {
+        $this->setRexBits(0x8); // REX.W
+
+        $address = 0x2000;
+        $this->setRegister(RegisterType::EAX, $address, 64); // RAX
+        $this->writeMemory($address, 0, 64);
+
+        // C7 /0: MOV r/m64, imm32 (sign-extended)
+        // ModRM 00 000 000 = 0x00 -> [RAX]
+        $this->executeBytes([0xC7, 0x00, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        $this->assertSame('0xffffffffffffffff', UInt64::of($this->readMemory($address, 64))->toHex());
+    }
+
+    public function testMovRaxImm64InLongModeReadsImm64(): void
+    {
+        $this->setRexBits(0x8); // REX.W
+
+        // B8: MOV r64, imm64 (RAX)
+        $this->executeBytes([0xB8, 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12]);
+
+        $this->assertSame('0x123456789abcdef0', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+    }
+
+    public function testAddRaxImm32InLongModeSignExtendsImmediate(): void
+    {
+        $this->setRexBits(0x8); // REX.W
+
+        $this->setRegister(RegisterType::EAX, 1, 64); // RAX=1
+
+        // 05: ADD RAX, imm32 (sign-extended with REX.W)
+        $this->executeBytes([0x05, 0xFF, 0xFF, 0xFF, 0xFF]); // +(-1)
+
+        $this->assertSame('0x0000000000000000', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+        $this->assertTrue($this->getCarryFlag());
+        $this->assertTrue($this->getZeroFlag());
+        $this->assertFalse($this->getSignFlag());
+    }
+}

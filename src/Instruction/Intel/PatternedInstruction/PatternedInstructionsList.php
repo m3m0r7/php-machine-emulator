@@ -60,6 +60,18 @@ class PatternedInstructionsList
      */
     private function registerDefaultPatterns(): void
     {
+        // The GRUB/LZMA range-decoder pattern is high-impact but correctness-sensitive.
+        // Keep it opt-in until it is validated against real boot flows.
+        $env = getenv('PHPME_ENABLE_LZMA_PATTERN');
+        if ($env !== false && trim($env) !== '' && trim($env) !== '0') {
+            $this->register(new LzmaRangeDecodeBitPattern());
+            $this->register(new LzmaBitTreeDecodeBytePattern());
+            $this->register(new LzmaBitTreeDecodePattern());
+            $this->register(new LzmaLiteralDecodeMatchPattern());
+        }
+        $this->register(new MemsetDwordLoopPattern());
+        $this->register(new MemmoveBackwardLoopPattern());
+        $this->register(new MovsbLoopPattern());
         $this->register(new ShrdShlPattern());
         $this->register(new AddAdcPattern());
         $this->register(new CmpJccPattern());

@@ -29,17 +29,6 @@ class RepPrefix implements InstructionInterface
         Outs::class,
     ];
 
-    /**
-     * Instructions that should NOT be repeated even with REP prefix.
-     * REP acts as a hint/padding for these instructions.
-     * - REP RET (0xF3 0xC3): AMD branch prediction bug workaround
-     * - REP NOP (0xF3 0x90): PAUSE instruction for spin-wait loops
-     */
-    private const NON_REPEATING_INSTRUCTIONS = [
-        Ret::class,
-        Nop::class,
-    ];
-
     private static ?bool $traceGrubCfgCopy = null;
     private static bool $tracedGrubCfgCopy = false;
 
@@ -74,6 +63,7 @@ class RepPrefix implements InstructionInterface
             // Check ECX before starting - if zero, do nothing
             $counter = $this->readIndex($runtime, RegisterType::ECX);
             if ($counter <= 0) {
+                $this->consumeSkippedStringInstructionIfCountZero($runtime);
                 return ExecutionStatus::SUCCESS;
             }
 
@@ -107,14 +97,12 @@ class RepPrefix implements InstructionInterface
 
             $lastInstruction = $executor->lastInstruction();
 
-            // Check if this is a non-repeating instruction (REP RET, REP NOP/PAUSE)
-            if ($lastInstruction !== null) {
-                foreach (self::NON_REPEATING_INSTRUCTIONS as $nonRepClass) {
-                    if ($lastInstruction instanceof $nonRepClass) {
-                        $this->writeIndex($runtime, RegisterType::ECX, $counter + 1);
-                        return $result;
-                    }
-                }
+            // REP/REPE/REPNE repetition only applies to string instructions.
+            // For everything else, 0xF2/0xF3 acts as a hint/mandatory prefix and must not
+            // modify the count register or loop.
+            if ($lastInstruction !== null && !$this->isStringInstruction($lastInstruction)) {
+                $this->writeIndex($runtime, RegisterType::ECX, $counter + 1);
+                return $result;
             }
 
             if ($result !== ExecutionStatus::SUCCESS) {
@@ -209,6 +197,82 @@ class RepPrefix implements InstructionInterface
         });
 
         return ExecutionStatus::CONTINUE;
+    }
+
+    /**
+     * When REP/REPE/REPNE is used with a zero count, x86 consumes the following instruction
+     * bytes but does not execute the string operation. Without this, the next instruction
+     * would execute once without REP, which breaks semantics (e.g. REP MOVSB with ECX=0).
+     *
+     * For non-string instructions (e.g. F3 90 / PAUSE), REP is treated as a hint and the
+     * following instruction should execute normally; in that case we rewind.
+     */
+    private function consumeSkippedStringInstructionIfCountZero(RuntimeInterface $runtime): void
+    {
+        $memory = $runtime->memory();
+        $start = $memory->offset();
+
+        $cpu = $runtime->context()->cpu();
+
+        $opcode = null;
+        $max = 15; // architectural maximum instruction length
+        for ($i = 0; $i < $max && !$memory->isEOF(); $i++) {
+            $b = $memory->byte() & 0xFF;
+
+            // Treat redundant prefixes as part of the same instruction.
+            if ($b === 0xF2 || $b === 0xF3) {
+                continue;
+            }
+
+            // Legacy prefixes (operand/address size, lock, segment overrides).
+            if (in_array($b, [0x66, 0x67, 0xF0, 0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65], true)) {
+                continue;
+            }
+
+            // REX prefix (64-bit mode only).
+            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $b >= 0x40 && $b <= 0x4F) {
+                continue;
+            }
+
+            $opcode = $b;
+            break;
+        }
+
+        if ($opcode === null) {
+            return;
+        }
+
+        // REP is only semantically relevant for these string instructions; otherwise it acts as a hint.
+        $isString = in_array($opcode, [
+            0xA4, 0xA5, // MOVS
+            0xA6, 0xA7, // CMPS
+            0xAA, 0xAB, // STOS
+            0xAC, 0xAD, // LODS
+            0xAE, 0xAF, // SCAS
+            0x6C, 0x6D, // INS
+            0x6E, 0x6F, // OUTS
+        ], true);
+
+        if (!$isString) {
+            // Rewind so the following instruction executes normally.
+            $memory->setOffset($start);
+        }
+    }
+
+    private function isStringInstruction(InstructionInterface $instruction): bool
+    {
+        return $instruction instanceof Movsb
+            || $instruction instanceof Movsw
+            || $instruction instanceof Stosb
+            || $instruction instanceof Stosw
+            || $instruction instanceof Lodsb
+            || $instruction instanceof Lodsw
+            || $instruction instanceof Ins
+            || $instruction instanceof Outs
+            || $instruction instanceof Cmpsb
+            || $instruction instanceof Cmpsw
+            || $instruction instanceof Scasb
+            || $instruction instanceof Scasw;
     }
 
     /**
@@ -314,36 +378,100 @@ class RepPrefix implements InstructionInterface
             $checkAfterCopy = true;
         }
 
-        // Process each byte using the same methods as Movsb.php
-        for ($i = 0; $i < $count; $i++) {
-            // Read using readMemory8 (same as Movsb.php line 27-30)
-            $srcAddr = $srcSegOff + ($step * $i);
-            $value = $this->readMemory8($runtime, $srcAddr);
+        // Fast path: use MemoryStream internal copy when the address range is a contiguous plain RAM span.
+        // This avoids per-byte PHP overhead for large copies (e.g., GRUB module/font relocation).
+        $usedFastCopy = false;
+        if ($count > 0) {
+            $cpu = $runtime->context()->cpu();
+            if (!$cpu->isPagingEnabled()) {
+                if ($this->canFastBulkMovs($runtime, $si, $di, $srcSegOff, $dstSegOff, $count, 1, $step)) {
+                    [$srcMin, , $byteCount] = $this->bulkMovsRange($srcSegOff, $count, 1, $step);
+                    [$dstMin] = $this->bulkMovsRange($dstSegOff, $count, 1, $step);
+                    $runtime->memory()->copy($runtime->memory(), $srcMin, $dstMin, $byteCount);
+                    $usedFastCopy = true;
+                }
+                // Special-case: overlapping forward copies (dst>src) are common in LZ-style decoders.
+                // REP MOVSB semantics in this case are NOT memmove; the forward, byte-by-byte behavior
+                // causes the copied pattern to repeat when length > distance. Emulate this efficiently
+                // using an initial non-overlapping seed copy followed by exponential self-copy.
+                if (!$usedFastCopy && $step > 0 && $cpu->isA20Enabled()) {
+                    [$srcMin, $srcMax, $byteCount] = $this->bulkMovsRange($srcSegOff, $count, 1, $step);
+                    [$dstMin, $dstMax] = $this->bulkMovsRange($dstSegOff, $count, 1, $step);
 
-            // Write using writeRawByte after allocate (same as Movsb.php line 32-34)
-            $dstAddr = $dstSegOff + ($step * $i);
-            if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
-                $this->writeMemory8($runtime, $dstAddr, $value);
+                    if ($srcMin >= 0 && $dstMin >= 0 && $srcMax < 0xE0000000 && $dstMax < 0xE0000000) {
+                        $distance = $dstMin - $srcMin;
+                        $overlapForward = $distance > 0 && $distance < $byteCount && $dstMin <= $srcMax;
+
+                        if ($overlapForward) {
+                            // Preserve 16-bit index wrapping semantics: only optimize when indices won't wrap.
+                            $addrSize = $cpu->addressSize();
+                            if ($addrSize !== 16 || (($si + ($count - 1)) <= 0xFFFF && ($di + ($count - 1)) <= 0xFFFF)) {
+                                // Ensure ranges exist (reads are zero-filled for unallocated memory).
+                                if ($runtime->memory()->ensureCapacity($srcMin + $byteCount) &&
+                                    $runtime->memory()->ensureCapacity($dstMin + $byteCount)) {
+                                    // Seed the first "distance" bytes (src..src+distance-1 -> dst..dst+distance-1).
+                                    $runtime->memory()->copy($runtime->memory(), $srcMin, $dstMin, $distance);
+
+                                    // Fill the remainder by repeatedly copying what we already wrote.
+                                    $filled = $distance;
+                                    while ($filled < $byteCount) {
+                                        $copySize = min($filled, $byteCount - $filled);
+                                        $runtime->memory()->copy($runtime->memory(), $dstMin, $dstMin + $filled, $copySize);
+                                        $filled += $copySize;
+                                    }
+
+                                    $usedFastCopy = true;
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
-                $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
-                $ma->allocate($destAddress, safe: false);
-                $ma->writeRawByte($destAddress, $value);
+                $plan = $this->planFastBulkMovs($runtime, $si, $di, $srcSegOff, $dstSegOff, $count, 1, $step);
+                if ($plan !== null) {
+                    $usedFastCopy = $this->copyLinearRangeWithPaging(
+                        $runtime,
+                        $plan['srcMin'],
+                        $plan['dstMin'],
+                        $plan['byteCount'],
+                        $plan['copyBackward'],
+                    );
+                }
             }
+        }
 
-            // Debug: track writes to 0x0700-0x0710
-            if ($dstAddr >= 0x0700 && $dstAddr <= 0x0710) {
-                $runtime->option()->logger()->warning(sprintf(
-                    'REP MOVSB WRITE: 0x%05X <- 0x%02X (from 0x%05X)',
-                    $dstAddr, $value, $srcAddr
-                ));
-            }
+        if (!$usedFastCopy) {
+            // Process each byte using the same methods as Movsb.php
+            for ($i = 0; $i < $count; $i++) {
+                // Read using readMemory8 (same as Movsb.php line 27-30)
+                $srcAddr = $srcSegOff + ($step * $i);
+                $value = $this->readMemory8($runtime, $srcAddr);
 
-            // Debug: track writes to 0x0CA0-0x0CB0 area (source data for setup code)
-            if ($dstAddr >= 0x0CA0 && $dstAddr <= 0x0CB0) {
-                $runtime->option()->logger()->warning(sprintf(
-                    'REP MOVSB WRITE to source area: 0x%05X <- 0x%02X',
-                    $dstAddr, $value
-                ));
+                // Write using writeRawByte after allocate (same as Movsb.php line 32-34)
+                $dstAddr = $dstSegOff + ($step * $i);
+                if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
+                    $this->writeMemory8($runtime, $dstAddr, $value);
+                } else {
+                    $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
+                    $ma->allocate($destAddress, safe: false);
+                    $ma->writeRawByte($destAddress, $value);
+                }
+
+                // Debug: track writes to 0x0700-0x0710
+                if ($dstAddr >= 0x0700 && $dstAddr <= 0x0710) {
+                    $runtime->option()->logger()->warning(sprintf(
+                        'REP MOVSB WRITE: 0x%05X <- 0x%02X (from 0x%05X)',
+                        $dstAddr, $value, $srcAddr
+                    ));
+                }
+
+                // Debug: track writes to 0x0CA0-0x0CB0 area (source data for setup code)
+                if ($dstAddr >= 0x0CA0 && $dstAddr <= 0x0CB0) {
+                    $runtime->option()->logger()->warning(sprintf(
+                        'REP MOVSB WRITE to source area: 0x%05X <- 0x%02X',
+                        $dstAddr, $value
+                    ));
+                }
             }
         }
 
@@ -444,30 +572,56 @@ class RepPrefix implements InstructionInterface
         $srcSegOff = $this->segmentOffsetAddress($runtime, $sourceSegment, $si);
         $dstSegOff = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
 
-        // Process each element using the same methods as Movsw.php
-        for ($i = 0; $i < $count; $i++) {
-            $offset = $step * $width * $i;
-
-            $value = match ($opSize) {
-                16 => $this->readMemory16($runtime, $srcSegOff + $offset),
-                32 => $this->readMemory32($runtime, $srcSegOff + $offset),
-                64 => $this->readMemory64($runtime, $srcSegOff + $offset),
-                default => $this->readMemory16($runtime, $srcSegOff + $offset),
-            };
-
-            // Write using writeBySize after allocate (same as Movsw.php line 34-36)
-            $dstAddr = $dstSegOff + $offset;
-            if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
-                match ($opSize) {
-                    16 => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
-                    32 => $this->writeMemory32($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
-                    64 => $this->writeMemory64($runtime, $dstAddr, $value),
-                    default => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
-                };
+        $usedFastCopy = false;
+        if ($count > 0) {
+            $cpu = $runtime->context()->cpu();
+            if (!$cpu->isPagingEnabled()) {
+                if ($this->canFastBulkMovs($runtime, $si, $di, $srcSegOff, $dstSegOff, $count, $width, $step)) {
+                    [$srcMin, , $byteCount] = $this->bulkMovsRange($srcSegOff, $count, $width, $step);
+                    [$dstMin] = $this->bulkMovsRange($dstSegOff, $count, $width, $step);
+                    $runtime->memory()->copy($runtime->memory(), $srcMin, $dstMin, $byteCount);
+                    $usedFastCopy = true;
+                }
             } else {
-                $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
-                $ma->allocate($destAddress, $width, safe: false);
-                $ma->writeBySize($destAddress, $value instanceof UInt64 ? $value->toInt() : $value, $opSize);
+                $plan = $this->planFastBulkMovs($runtime, $si, $di, $srcSegOff, $dstSegOff, $count, $width, $step);
+                if ($plan !== null) {
+                    $usedFastCopy = $this->copyLinearRangeWithPaging(
+                        $runtime,
+                        $plan['srcMin'],
+                        $plan['dstMin'],
+                        $plan['byteCount'],
+                        $plan['copyBackward'],
+                    );
+                }
+            }
+        }
+
+        if (!$usedFastCopy) {
+            // Process each element using the same methods as Movsw.php
+            for ($i = 0; $i < $count; $i++) {
+                $offset = $step * $width * $i;
+
+                $value = match ($opSize) {
+                    16 => $this->readMemory16($runtime, $srcSegOff + $offset),
+                    32 => $this->readMemory32($runtime, $srcSegOff + $offset),
+                    64 => $this->readMemory64($runtime, $srcSegOff + $offset),
+                    default => $this->readMemory16($runtime, $srcSegOff + $offset),
+                };
+
+                // Write using writeBySize after allocate (same as Movsw.php line 34-36)
+                $dstAddr = $dstSegOff + $offset;
+                if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
+                    match ($opSize) {
+                        16 => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                        32 => $this->writeMemory32($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                        64 => $this->writeMemory64($runtime, $dstAddr, $value),
+                        default => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                    };
+                } else {
+                    $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
+                    $ma->allocate($destAddress, $width, safe: false);
+                    $ma->writeBySize($destAddress, $value instanceof UInt64 ? $value->toInt() : $value, $opSize);
+                }
             }
         }
 
@@ -551,16 +705,33 @@ class RepPrefix implements InstructionInterface
         // Calculate segment:offset address (not linear yet)
         $dstSegOff = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
 
-        // Process each byte using the same methods as Stosb.php
-        for ($i = 0; $i < $count; $i++) {
-            // Write using writeRawByte after allocate (same as Stosb.php line 33-39)
-            $dstAddr = $dstSegOff + ($step * $i);
-            if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
-                $this->writeMemory8($runtime, $dstAddr, $byte);
-            } else {
-                $address = $this->translateLinearWithMmio($runtime, $dstAddr, true);
-                $ma->allocate($address, safe: false);
-                $ma->writeRawByte($address, $byte);
+        $usedFastFill = false;
+        if ($count > 0 && $this->canFastBulkStos($runtime, $di, $dstSegOff, $count, 1, $step)) {
+            [$dstMin, $byteCount] = $this->bulkStosRange($dstSegOff, $count, 1, $step);
+
+            // Seed the first byte then exponentially copy it to fill the rest.
+            $ma->writeRawByte($dstMin, $byte);
+            $filled = 1;
+            while ($filled < $byteCount) {
+                $copySize = min($filled, $byteCount - $filled);
+                $runtime->memory()->copy($runtime->memory(), $dstMin, $dstMin + $filled, $copySize);
+                $filled += $copySize;
+            }
+            $usedFastFill = true;
+        }
+
+        if (!$usedFastFill) {
+            // Process each byte using the same methods as Stosb.php
+            for ($i = 0; $i < $count; $i++) {
+                // Write using writeRawByte after allocate (same as Stosb.php line 33-39)
+                $dstAddr = $dstSegOff + ($step * $i);
+                if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
+                    $this->writeMemory8($runtime, $dstAddr, $byte);
+                } else {
+                    $address = $this->translateLinearWithMmio($runtime, $dstAddr, true);
+                    $ma->allocate($address, safe: false);
+                    $ma->writeRawByte($address, $byte);
+                }
             }
         }
 
@@ -594,23 +765,46 @@ class RepPrefix implements InstructionInterface
         // Calculate segment:offset address (not linear yet)
         $dstSegOff = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
 
-        // Process each element using the same methods as Stosw.php
-        for ($i = 0; $i < $count; $i++) {
-            $offset = $step * $width * $i;
+        $usedFastFill = false;
+        if ($count > 0 && $this->canFastBulkStos($runtime, $di, $dstSegOff, $count, $width, $step)) {
+            [$dstMin, $byteCount] = $this->bulkStosRange($dstSegOff, $count, $width, $step);
 
-            // Write using writeBySize after allocate (same as Stosw.php line 30-31)
-            $dstAddr = $dstSegOff + $offset;
-            if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
-                match ($opSize) {
-                    16 => $this->writeMemory16($runtime, $dstAddr, $value),
-                    32 => $this->writeMemory32($runtime, $dstAddr, $value),
-                    64 => $this->writeMemory64($runtime, $dstAddr, $value),
-                    default => $this->writeMemory16($runtime, $dstAddr, $value),
-                };
-            } else {
-                $address = $this->translateLinearWithMmio($runtime, $dstAddr, true);
-                $ma->allocate($address, safe: false);
-                $ma->writeBySize($address, $value, $opSize);
+            // Seed one element then exponentially copy it to fill the rest.
+            match ($opSize) {
+                16 => $this->writeMemory16($runtime, $dstMin, $value),
+                32 => $this->writeMemory32($runtime, $dstMin, $value),
+                64 => $this->writeMemory64($runtime, $dstMin, $value),
+                default => $this->writeMemory16($runtime, $dstMin, $value),
+            };
+
+            $filled = $width;
+            while ($filled < $byteCount) {
+                $copySize = min($filled, $byteCount - $filled);
+                $runtime->memory()->copy($runtime->memory(), $dstMin, $dstMin + $filled, $copySize);
+                $filled += $copySize;
+            }
+            $usedFastFill = true;
+        }
+
+        if (!$usedFastFill) {
+            // Process each element using the same methods as Stosw.php
+            for ($i = 0; $i < $count; $i++) {
+                $offset = $step * $width * $i;
+
+                // Write using writeBySize after allocate (same as Stosw.php line 30-31)
+                $dstAddr = $dstSegOff + $offset;
+                if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
+                    match ($opSize) {
+                        16 => $this->writeMemory16($runtime, $dstAddr, $value),
+                        32 => $this->writeMemory32($runtime, $dstAddr, $value),
+                        64 => $this->writeMemory64($runtime, $dstAddr, $value),
+                        default => $this->writeMemory16($runtime, $dstAddr, $value),
+                    };
+                } else {
+                    $address = $this->translateLinearWithMmio($runtime, $dstAddr, true);
+                    $ma->allocate($address, safe: false);
+                    $ma->writeBySize($address, $value, $opSize);
+                }
             }
         }
 
@@ -620,6 +814,379 @@ class RepPrefix implements InstructionInterface
         $this->writeIndex($runtime, RegisterType::ECX, 0);
 
         return ExecutionStatus::SUCCESS;
+    }
+
+    /**
+     * Decide whether we can use MemoryStream::copy for REP MOVS without breaking wrapping/MMIO semantics.
+     *
+     * This fast path is only enabled when:
+     * - Paging is disabled (linear==physical)
+     * - The address-size indices do not wrap during the operation
+     * - The ranges stay below common MMIO regions (e.g., LFB)
+     * - The overlap direction does not require strict per-iteration semantics
+     */
+    private function canFastBulkMovs(
+        RuntimeInterface $runtime,
+        int $si,
+        int $di,
+        int $srcLinear,
+        int $dstLinear,
+        int $count,
+        int $width,
+        int $step,
+    ): bool {
+        if ($count <= 0) {
+            return false;
+        }
+
+        $cpu = $runtime->context()->cpu();
+        if ($cpu->isPagingEnabled()) {
+            return false;
+        }
+
+        // Avoid A20/segment wrapping edge cases in legacy modes.
+        if (!$cpu->isLongMode() && !$cpu->isA20Enabled()) {
+            return false;
+        }
+
+        // Avoid 16-bit index wrapping (common in early real mode) unless the range is provably in-bounds.
+        $addrSize = $cpu->addressSize();
+        if ($addrSize === 16) {
+            $delta = ($count - 1) * $width;
+            if ($step > 0) {
+                if ($si + $delta > 0xFFFF || $di + $delta > 0xFFFF) {
+                    return false;
+                }
+            } else {
+                if ($si - $delta < 0 || $di - $delta < 0) {
+                    return false;
+                }
+            }
+        }
+
+        [$srcMin, $srcMax, $byteCount] = $this->bulkMovsRange($srcLinear, $count, $width, $step);
+        [$dstMin, $dstMax] = $this->bulkMovsRange($dstLinear, $count, $width, $step);
+
+        // Stay away from common MMIO ranges (VBE LFB, APIC, etc.).
+        if ($srcMin < 0 || $dstMin < 0) {
+            return false;
+        }
+        if ($srcMax >= 0xE0000000 || $dstMax >= 0xE0000000) {
+            return false;
+        }
+
+        // Avoid overlap cases where REP MOVS semantics differ from memmove.
+        if ($step > 0) {
+            if ($dstMin > $srcMin && $dstMin <= $srcMax) {
+                return false;
+            }
+        } else {
+            if ($dstMax < $srcMax && $dstMax >= $srcMin) {
+                return false;
+            }
+        }
+
+        // Ensure both ranges exist. The emulator's memory model expands reads with zero-fill,
+        // so the fast path must also extend the source region to preserve semantics.
+        if (!$runtime->memory()->ensureCapacity($srcMin + $byteCount)) {
+            return false;
+        }
+        if (!$runtime->memory()->ensureCapacity($dstMin + $byteCount)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Compute a safe bulk MOVS plan for a memmove-style copy.
+     *
+     * This deliberately does NOT require paging to be disabled; callers must choose
+     * the appropriate copy implementation (linear==physical vs translateLinear chunks).
+     *
+     * @return array{srcMin:int,srcMax:int,dstMin:int,dstMax:int,byteCount:int,copyBackward:bool}|null
+     */
+    private function planFastBulkMovs(
+        RuntimeInterface $runtime,
+        int $si,
+        int $di,
+        int $srcLinear,
+        int $dstLinear,
+        int $count,
+        int $width,
+        int $step,
+    ): ?array {
+        if ($count <= 0) {
+            return null;
+        }
+
+        $cpu = $runtime->context()->cpu();
+
+        // Only handle legacy/compat addresses for now.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            return null;
+        }
+
+        // Avoid A20/segment wrapping edge cases in legacy modes.
+        if (!$cpu->isLongMode() && !$cpu->isA20Enabled()) {
+            return null;
+        }
+
+        // Avoid 16-bit index wrapping unless provably in-bounds.
+        $addrSize = $cpu->addressSize();
+        if ($addrSize === 16) {
+            $delta = ($count - 1) * $width;
+            if ($step > 0) {
+                if ($si + $delta > 0xFFFF || $di + $delta > 0xFFFF) {
+                    return null;
+                }
+            } else {
+                if ($si - $delta < 0 || $di - $delta < 0) {
+                    return null;
+                }
+            }
+        }
+
+        [$srcMin, $srcMax, $byteCount] = $this->bulkMovsRange($srcLinear, $count, $width, $step);
+        [$dstMin, $dstMax] = $this->bulkMovsRange($dstLinear, $count, $width, $step);
+
+        // Stay away from common MMIO ranges (VBE LFB, APIC, etc.) in linear space.
+        if ($srcMin < 0 || $dstMin < 0) {
+            return null;
+        }
+        if ($srcMax >= 0xE0000000 || $dstMax >= 0xE0000000) {
+            return null;
+        }
+
+        // Avoid overlap cases where REP MOVS semantics differ from memmove.
+        if ($step > 0) {
+            if ($dstMin > $srcMin && $dstMin <= $srcMax) {
+                return null;
+            }
+        } else {
+            if ($dstMax < $srcMax && $dstMax >= $srcMin) {
+                return null;
+            }
+        }
+
+        // memmove overlap detection: src < dst < src+len => copy backward.
+        $copyBackward = ($dstMin > $srcMin) && ($dstMin < ($srcMin + $byteCount));
+
+        return [
+            'srcMin' => $srcMin,
+            'srcMax' => $srcMax,
+            'dstMin' => $dstMin,
+            'dstMax' => $dstMax,
+            'byteCount' => $byteCount,
+            'copyBackward' => $copyBackward,
+        ];
+    }
+
+    /**
+     * Copy a linear byte range using paging translation (4KB chunks).
+     *
+     * Returns true only if the copy was performed; on any translation/MMIO issue this returns false
+     * without modifying guest memory contents.
+     */
+    private function copyLinearRangeWithPaging(
+        RuntimeInterface $runtime,
+        int $srcLinear,
+        int $dstLinear,
+        int $byteCount,
+        bool $copyBackward,
+    ): bool {
+        if ($byteCount <= 0) {
+            return true;
+        }
+
+        $cpu = $runtime->context()->cpu();
+        if (!$cpu->isPagingEnabled()) {
+            return false;
+        }
+
+        // Only handle 32-bit linear addresses here.
+        if (($srcLinear >> 32) !== 0 || ($dstLinear >> 32) !== 0) {
+            return false;
+        }
+
+        $ma = $runtime->memoryAccessor();
+        $memory = $runtime->memory();
+        $linearMask = $this->linearMask($runtime);
+        $isUser = $cpu->cpl() === 3;
+
+        $isMmio = static function (int $addr): bool {
+            return ($addr >= 0xE0000000 && $addr < 0xE1000000) ||
+                ($addr >= 0xFEE00000 && $addr < 0xFEE01000) ||
+                ($addr >= 0xFEC00000 && $addr < 0xFEC00020);
+        };
+
+        /** @var array<int, array{int,int,int}> */
+        $segments = [];
+
+        if ($copyBackward) {
+            $remaining = $byteCount;
+            while ($remaining > 0) {
+                $srcEnd = ($srcLinear + $remaining - 1) & 0xFFFFFFFF;
+                $dstEnd = ($dstLinear + $remaining - 1) & 0xFFFFFFFF;
+
+                $srcPageOff = $srcEnd & (self::PAGE_SIZE - 1);
+                $dstPageOff = $dstEnd & (self::PAGE_SIZE - 1);
+                $chunk = min($remaining, min($srcPageOff, $dstPageOff) + 1);
+
+                $srcStart = ($srcEnd - $chunk + 1) & 0xFFFFFFFF;
+                $dstStart = ($dstEnd - $chunk + 1) & 0xFFFFFFFF;
+
+                [$srcPhys, $srcErr] = $ma->translateLinear($srcStart, false, $isUser, true, $linearMask);
+                if ($srcErr !== 0) {
+                    return false;
+                }
+                [$dstPhys, $dstErr] = $ma->translateLinear($dstStart, true, $isUser, true, $linearMask);
+                if ($dstErr !== 0) {
+                    return false;
+                }
+
+                $srcPhys32 = ((int) $srcPhys) & 0xFFFFFFFF;
+                $dstPhys32 = ((int) $dstPhys) & 0xFFFFFFFF;
+                if ($isMmio($srcPhys32) || $isMmio($dstPhys32)) {
+                    return false;
+                }
+
+                if (!$memory->ensureCapacity($srcPhys32 + $chunk)) {
+                    return false;
+                }
+                if (!$memory->ensureCapacity($dstPhys32 + $chunk)) {
+                    return false;
+                }
+
+                $segments[] = [$srcPhys32, $dstPhys32, $chunk];
+                $remaining -= $chunk;
+            }
+        } else {
+            $remaining = $byteCount;
+            $srcPtr = $srcLinear & 0xFFFFFFFF;
+            $dstPtr = $dstLinear & 0xFFFFFFFF;
+            while ($remaining > 0) {
+                $srcPageOff = $srcPtr & (self::PAGE_SIZE - 1);
+                $dstPageOff = $dstPtr & (self::PAGE_SIZE - 1);
+                $chunk = min($remaining, min(self::PAGE_SIZE - $srcPageOff, self::PAGE_SIZE - $dstPageOff));
+
+                [$srcPhys, $srcErr] = $ma->translateLinear($srcPtr, false, $isUser, true, $linearMask);
+                if ($srcErr !== 0) {
+                    return false;
+                }
+                [$dstPhys, $dstErr] = $ma->translateLinear($dstPtr, true, $isUser, true, $linearMask);
+                if ($dstErr !== 0) {
+                    return false;
+                }
+
+                $srcPhys32 = ((int) $srcPhys) & 0xFFFFFFFF;
+                $dstPhys32 = ((int) $dstPhys) & 0xFFFFFFFF;
+                if ($isMmio($srcPhys32) || $isMmio($dstPhys32)) {
+                    return false;
+                }
+
+                if (!$memory->ensureCapacity($srcPhys32 + $chunk)) {
+                    return false;
+                }
+                if (!$memory->ensureCapacity($dstPhys32 + $chunk)) {
+                    return false;
+                }
+
+                $segments[] = [$srcPhys32, $dstPhys32, $chunk];
+                $srcPtr = ($srcPtr + $chunk) & 0xFFFFFFFF;
+                $dstPtr = ($dstPtr + $chunk) & 0xFFFFFFFF;
+                $remaining -= $chunk;
+            }
+        }
+
+        foreach ($segments as [$srcPhys32, $dstPhys32, $chunk]) {
+            $memory->copy($memory, $srcPhys32, $dstPhys32, $chunk);
+        }
+
+        return true;
+    }
+
+    /**
+     * Compute byte ranges for REP MOVS operations.
+     *
+     * @return array{int,int,int} [srcMinOrDstMin, srcMaxOrDstMax, byteCount]
+     */
+    private function bulkMovsRange(int $srcOrDstLinear, int $count, int $width, int $step): array
+    {
+        $byteCount = $count * $width;
+        if ($step > 0) {
+            $min = $srcOrDstLinear;
+            $max = $srcOrDstLinear + $byteCount - 1;
+            return [$min, $max, $byteCount];
+        }
+
+        $min = $srcOrDstLinear - (($count - 1) * $width);
+        $max = $srcOrDstLinear + ($width - 1);
+        return [$min, $max, $byteCount];
+    }
+
+    /**
+     * Compute the contiguous destination range for bulk STOS.
+     *
+     * @return array{int,int} [dstMin, byteCount]
+     */
+    private function bulkStosRange(int $dstLinear, int $count, int $width, int $step): array
+    {
+        $byteCount = $count * $width;
+        if ($step > 0) {
+            return [$dstLinear, $byteCount];
+        }
+        return [$dstLinear - (($count - 1) * $width), $byteCount];
+    }
+
+    private function canFastBulkStos(
+        RuntimeInterface $runtime,
+        int $di,
+        int $dstLinear,
+        int $count,
+        int $width,
+        int $step,
+    ): bool {
+        if ($count <= 0) {
+            return false;
+        }
+
+        $cpu = $runtime->context()->cpu();
+        if ($cpu->isPagingEnabled()) {
+            return false;
+        }
+        if (!$cpu->isLongMode() && !$cpu->isA20Enabled()) {
+            return false;
+        }
+
+        $addrSize = $cpu->addressSize();
+        if ($addrSize === 16) {
+            $delta = ($count - 1) * $width;
+            if ($step > 0) {
+                if ($di + $delta > 0xFFFF) {
+                    return false;
+                }
+            } else {
+                if ($di - $delta < 0) {
+                    return false;
+                }
+            }
+        }
+
+        [$dstMin, $byteCount] = $this->bulkStosRange($dstLinear, $count, $width, $step);
+        $dstMax = $dstMin + $byteCount - 1;
+
+        if ($dstMin < 0) {
+            return false;
+        }
+        if ($dstMax >= 0xE0000000) {
+            return false;
+        }
+
+        if (!$runtime->memory()->ensureCapacity($dstMin + $byteCount)) {
+            return false;
+        }
+        return true;
     }
 
     /**

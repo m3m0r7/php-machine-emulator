@@ -88,6 +88,8 @@ class AddAdcPattern extends AbstractPatternedInstruction
             $memoryAccessor->setCarryFlag($cf1);
             $memoryAccessor->setZeroFlag($result1 === 0);
             $memoryAccessor->setSignFlag(($result1 & 0x80000000) !== 0);
+            $memoryAccessor->setParityFlag($this->calculateParity($result1 & 0xFF));
+            $memoryAccessor->setAuxiliaryCarryFlag((($dst1 & 0x0F) + ($src1 & 0x0F)) > 0x0F);
 
             // Overflow: sign of result differs when adding same-sign operands
             $dst1Sign = ($dst1 & 0x80000000) !== 0;
@@ -109,6 +111,8 @@ class AddAdcPattern extends AbstractPatternedInstruction
             $memoryAccessor->setCarryFlag($cf2);
             $memoryAccessor->setZeroFlag($result2 === 0);
             $memoryAccessor->setSignFlag(($result2 & 0x80000000) !== 0);
+            $memoryAccessor->setParityFlag($this->calculateParity($result2 & 0xFF));
+            $memoryAccessor->setAuxiliaryCarryFlag((($dst2 & 0x0F) + ($src2 & 0x0F) + $carry) > 0x0F);
 
             $dst2Sign = ($dst2 & 0x80000000) !== 0;
             $src2Sign = ($src2 & 0x80000000) !== 0;

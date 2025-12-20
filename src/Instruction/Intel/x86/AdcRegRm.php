@@ -136,12 +136,6 @@ class AdcRegRm implements InstructionInterface
             $signBit = $opSize === 32 ? 31 : 15;
             $maskedResult = $result & $mask;
 
-            // Debug ADC for LZMA distance calculation
-            $runtime->option()->logger()->debug(sprintf(
-                'ADC r%d: dest=0x%X src=0x%X CF=%d result=0x%X',
-                $opSize, $dest & 0xFFFFFFFF, $src & 0xFFFFFFFF, $carry, $maskedResult
-            ));
-
             if ($destIsRm) {
                 if ($rmAddress !== null) {
                     if ($opSize === 32) {

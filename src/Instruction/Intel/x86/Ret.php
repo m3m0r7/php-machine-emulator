@@ -27,14 +27,60 @@ class Ret implements InstructionInterface
         $cpu = $runtime->context()->cpu();
 
         // In 64-bit mode, near RET pops a 64-bit RIP regardless of operand-size override.
-        // Far returns are not valid in 64-bit mode.
+        // Far returns (RETF) are valid and are used for segment/mode transitions.
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $ma = $runtime->memoryAccessor();
+            $popBytes = ($opcode === 0xC2 || $opcode === 0xCA) ? $runtime->memory()->short() : 0;
+
             if ($opcode === 0xCA || $opcode === 0xCB) {
-                throw new ExecutionException('RETF is not supported in 64-bit mode');
+                // RETF in 64-bit mode:
+                // - default: pop RIP and CS using 64-bit stack slots (popq/popq)
+                // - 0x66 prefix: pop 16-bit (popw/popw)
+                $popSize = $cpu->consumeOperandSizeOverride() ? 16 : 64;
+
+                $returnRip = $ma->pop(RegisterType::ESP, $popSize)->asBytesBySize($popSize);
+                $targetCsRaw = $ma->pop(RegisterType::ESP, $popSize)->asBytesBySize($popSize);
+                $targetCs = $targetCsRaw & 0xFFFF;
+
+                $descriptor = null;
+                $nextCpl = null;
+                if ($cpu->isProtectedMode()) {
+                    $descriptor = $this->resolveCodeDescriptor($runtime, $targetCs);
+                    $nextCpl = $this->computeCplForTransfer($runtime, $targetCs, $descriptor);
+                }
+
+                // Returning to an outer privilege pops a new stack pointer and SS.
+                $currentCpl = $cpu->cpl();
+                $newCpl = $targetCs & 0x3;
+                if ($cpu->isProtectedMode() && $newCpl > $currentCpl) {
+                    $newRsp = $ma->pop(RegisterType::ESP, $popSize)->asBytesBySize($popSize);
+                    $newSsRaw = $ma->pop(RegisterType::ESP, $popSize)->asBytesBySize($popSize);
+                    $newSs = $newSsRaw & 0xFFFF;
+
+                    $ma->write16Bit(RegisterType::SS, $newSs);
+                    $ma->writeBySize(RegisterType::ESP, $newRsp, 64);
+                }
+
+                if ($popBytes > 0) {
+                    $rsp = $ma->fetch(RegisterType::ESP)->asBytesBySize(64);
+                    $ma->writeBySize(RegisterType::ESP, $rsp + $popBytes, 64);
+                }
+
+                $this->writeCodeSegment($runtime, $targetCs, $nextCpl, $descriptor);
+
+                if ($runtime->option()->shouldChangeOffset()) {
+                    if (!$cpu->isCompatibilityMode()) {
+                        // 64-bit CS: RIP is a linear address (segmentation is ignored).
+                        $runtime->memory()->setOffset($returnRip);
+                    } else {
+                        $linear = $this->linearCodeAddress($runtime, $targetCs, $returnRip, $popSize);
+                        $runtime->memory()->setOffset($linear);
+                    }
+                }
+
+                return ExecutionStatus::SUCCESS;
             }
 
-            $popBytes = ($opcode === 0xC2) ? $runtime->memory()->short() : 0;
-            $ma = $runtime->memoryAccessor();
             $returnRip = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
 
             if ($popBytes > 0) {

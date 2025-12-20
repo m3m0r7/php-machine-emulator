@@ -11,6 +11,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Stosb;
 use PHPMachineEmulator\Instruction\Intel\x86\Stosw;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsw;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Nopl;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsw;
 use PHPMachineEmulator\Instruction\Intel\x86\Scasb;
@@ -169,6 +170,101 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0xFF, $this->readMemory(0x2000, 8));
         // EDI should NOT change
         $this->assertSame(0x2000, $this->getRegister(RegisterType::EDI));
+    }
+
+    public function testRepMovsb_ZeroCount_ConsumesStringInstructionBytes(): void
+    {
+        $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 0);
+        $this->setRegister(RegisterType::ESI, 0x1000);
+        $this->setRegister(RegisterType::EDI, 0x2000);
+
+        $this->writeMemory(0x1000, 0x42, 8);
+        $this->writeMemory(0x2000, 0xFF, 8);
+
+        // Program: REP MOVSB; NOP
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xF3) . chr(0xA4) . chr(0x90));
+        $this->memoryStream->setOffset(0);
+
+        $executor = new class($this->repPrefix, $this->movsb) implements InstructionExecutorInterface {
+            private ?InstructionInterface $lastInstruction = null;
+            private ?array $lastOpcodes = null;
+            private int $lastInstructionPointer = 0;
+
+            public function __construct(
+                private readonly RepPrefix $repPrefix,
+                private readonly Movsb $movsb,
+            ) {
+            }
+
+            public function execute(RuntimeInterface $runtime): ExecutionStatus
+            {
+                $this->lastInstructionPointer = $runtime->memory()->offset();
+                $opcode = $runtime->memory()->byte() & 0xFF;
+
+                $instruction = match ($opcode) {
+                    0xF3, 0xF2 => $this->repPrefix,
+                    0xA4 => $this->movsb,
+                    0x90 => null, // NOP
+                    default => throw new \RuntimeException(sprintf('Unexpected opcode 0x%02X', $opcode)),
+                };
+
+                $this->lastInstruction = $instruction;
+                $this->lastOpcodes = [$opcode];
+
+                if ($instruction === null) {
+                    return ExecutionStatus::SUCCESS;
+                }
+
+                return $instruction->process($runtime, [$opcode]);
+            }
+
+            public function lastInstruction(): ?InstructionInterface
+            {
+                return $this->lastInstruction;
+            }
+
+            public function lastOpcodes(): ?array
+            {
+                return $this->lastOpcodes;
+            }
+
+            public function lastInstructionPointer(): int
+            {
+                return $this->lastInstructionPointer;
+            }
+
+            public function invalidateCaches(): void
+            {
+            }
+
+            public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
+            {
+            }
+        };
+
+        $iterationContext = $this->cpuContext->iteration();
+        $result = $iterationContext->iterate($this->runtime, $executor);
+        while ($result === ExecutionStatus::CONTINUE) {
+            $result = $iterationContext->iterate($this->runtime, $executor);
+        }
+        $iterationContext->clear();
+        $this->cpuContext->clearTransientOverrides();
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        // Must point at the next instruction (NOP) after consuming "A4" with count=0.
+        $this->assertSame(2, $this->memoryStream->offset());
+
+        // REP MOVSB must not execute when ECX=0.
+        $this->assertSame(0xFF, $this->readMemory(0x2000, 8));
+        $this->assertSame(0x1000, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x2000, $this->getRegister(RegisterType::EDI));
+
+        // Next instruction (NOP) executes normally.
+        $result2 = $iterationContext->iterate($this->runtime, $executor);
+        $this->assertSame(ExecutionStatus::SUCCESS, $result2);
+        $this->assertSame(3, $this->memoryStream->offset());
     }
 
     public function testRepStosb_SingleIteration(): void
@@ -425,6 +521,72 @@ class RepPrefixTest extends InstructionTestCase
     public function testRepMovsb_CopyMemory(): void
     {
         $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 4);
+        $this->setRegister(RegisterType::ESI, 0x1000);
+        $this->setRegister(RegisterType::EDI, 0x2000);
+        $this->setDirectionFlag(false);
+
+        // Source data
+        $this->writeMemory(0x1000, 0x48, 8); // 'H'
+        $this->writeMemory(0x1001, 0x65, 8); // 'e'
+        $this->writeMemory(0x1002, 0x6C, 8); // 'l'
+        $this->writeMemory(0x1003, 0x6C, 8); // 'l'
+
+        // Execute REP MOVSB (F3 A4)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xA4));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        $this->assertSame(0x48, $this->readMemory(0x2000, 8));
+        $this->assertSame(0x65, $this->readMemory(0x2001, 8));
+        $this->assertSame(0x6C, $this->readMemory(0x2002, 8));
+        $this->assertSame(0x6C, $this->readMemory(0x2003, 8));
+        $this->assertSame(0x1004, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x2004, $this->getRegister(RegisterType::EDI));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX));
+    }
+
+    public function testRepMovsb_OverlappingForwardCopyMatchesCpuSemantics(): void
+    {
+        $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 5);
+        $this->setRegister(RegisterType::ESI, 0x1000);
+        $this->setRegister(RegisterType::EDI, 0x1001); // dst > src and overlaps
+        $this->setDirectionFlag(false);
+
+        // Initial bytes: 01 02 03 04 05 06
+        for ($i = 0; $i < 6; $i++) {
+            $this->writeMemory(0x1000 + $i, $i + 1, 8);
+        }
+
+        // Execute REP MOVSB (F3 A4)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xA4));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+
+        // Forward overlapping copy repeats the first byte (distance=1).
+        for ($i = 0; $i < 6; $i++) {
+            $this->assertSame(0x01, $this->readMemory(0x1000 + $i, 8), sprintf('Byte at 0x%04X', 0x1000 + $i));
+        }
+
+        $this->assertSame(0x1005, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x1006, $this->getRegister(RegisterType::EDI));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX));
+    }
+
+    public function testRepMovsb_CopyMemoryWithPagingEnabled(): void
+    {
+        $this->setProtectedMode32();
+        $this->cpuContext->enableA20(true);
+        $this->cpuContext->setPagingEnabled(true);
+
         $this->setRegister(RegisterType::ECX, 4);
         $this->setRegister(RegisterType::ESI, 0x1000);
         $this->setRegister(RegisterType::EDI, 0x2000);
@@ -1558,6 +1720,92 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0x0123456789ABCDEF, $this->readMemory(0x3008, 64));
         $this->assertSame(0x3010, $this->getRegister(RegisterType::EDI, 64));
         $this->assertSame(0, $this->getRegister(RegisterType::ECX, 64));
+    }
+
+    public function testRepPrefixDoesNotRepeatNonStringInstructionAndPreservesCount(): void
+    {
+        $this->setProtectedMode32();
+        $this->setRegister(RegisterType::ECX, 5, 32);
+
+        // Program: F3 0F 1E C0 (REP + NOPL r/m32,r32 with ModRM=11 000 000)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xF3) . chr(0x0F) . chr(0x1E) . chr(0xC0));
+        $this->memoryStream->setOffset(0);
+
+        $noplList = $this->createMock(InstructionListInterface::class);
+        $noplList->method('register')->willReturn(new Register());
+        $nopl = new Nopl($noplList);
+
+        $executor = new class($this->repPrefix, $nopl) implements InstructionExecutorInterface {
+            private ?InstructionInterface $lastInstruction = null;
+            private ?array $lastOpcodes = null;
+            private int $lastInstructionPointer = 0;
+
+            public function __construct(
+                private readonly RepPrefix $repPrefix,
+                private readonly Nopl $nopl,
+            ) {
+            }
+
+            public function execute(RuntimeInterface $runtime): ExecutionStatus
+            {
+                $this->lastInstructionPointer = $runtime->memory()->offset();
+                $opcode = $runtime->memory()->byte() & 0xFF;
+
+                if ($opcode === 0xF3 || $opcode === 0xF2) {
+                    $this->lastInstruction = $this->repPrefix;
+                    $this->lastOpcodes = [$opcode];
+                    return $this->repPrefix->process($runtime, [$opcode]);
+                }
+
+                if ($opcode === 0x0F) {
+                    $second = $runtime->memory()->byte() & 0xFF;
+                    if ($second !== 0x1E) {
+                        throw new \RuntimeException(sprintf('Unexpected 0x0F opcode second byte 0x%02X', $second));
+                    }
+                    $this->lastInstruction = $this->nopl;
+                    $this->lastOpcodes = [0x0F, 0x1E];
+                    return $this->nopl->process($runtime, [0x0F, 0x1E]);
+                }
+
+                throw new \RuntimeException(sprintf('Unexpected opcode 0x%02X', $opcode));
+            }
+
+            public function lastInstruction(): ?InstructionInterface
+            {
+                return $this->lastInstruction;
+            }
+
+            public function lastOpcodes(): ?array
+            {
+                return $this->lastOpcodes;
+            }
+
+            public function lastInstructionPointer(): int
+            {
+                return $this->lastInstructionPointer;
+            }
+
+            public function invalidateCaches(): void
+            {
+            }
+
+            public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
+            {
+            }
+        };
+
+        $iterationContext = $this->cpuContext->iteration();
+        $result = $iterationContext->iterate($this->runtime, $executor);
+        while ($result === ExecutionStatus::CONTINUE) {
+            $result = $iterationContext->iterate($this->runtime, $executor);
+        }
+        $iterationContext->clear();
+        $this->cpuContext->clearTransientOverrides();
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        $this->assertSame(4, $this->memoryStream->offset(), 'REP + non-string must execute once and advance past the full instruction');
+        $this->assertSame(5, $this->getRegister(RegisterType::ECX, 32), 'REP hint must not decrement ECX for non-string instructions');
     }
 }
 

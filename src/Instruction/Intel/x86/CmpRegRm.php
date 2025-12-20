@@ -54,7 +54,6 @@ class CmpRegRm implements InstructionInterface
                 ->setCarryFlag($calc < 0)
                 ->setOverflowFlag($of)
                 ->setAuxiliaryCarryFlag($af);
-            $runtime->option()->logger()->debug(sprintf('CMP r/m8, r8: dest=0x%02X src=0x%02X ZF=%d', $dest, $src, $dest === $src ? 1 : 0));
         } else {
             $dest = $destIsRm
                 ? $this->readRm($runtime, $memory, $modRegRM, $opSize)

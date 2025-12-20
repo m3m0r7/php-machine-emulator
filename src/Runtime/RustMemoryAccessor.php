@@ -33,6 +33,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     private static ?bool $stopOnWatchHit = null;
     private static ?bool $dumpCallsiteOnWatchHit = null;
     private static ?int $dumpCallsiteBytes = null;
+    private static ?bool $dumpIpOnWatchHit = null;
 
     /** @var FFI\CData Pointer to the Rust MemoryAccessor */
     private FFI\CData $handle;
@@ -89,6 +90,16 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $env = getenv('PHPME_DUMP_CALLSITE_ON_WATCH_HIT');
         self::$dumpCallsiteOnWatchHit = $env !== false && self::parseEnvBool($env);
         return self::$dumpCallsiteOnWatchHit;
+    }
+
+    private static function dumpIpOnWatchHitEnabled(): bool
+    {
+        if (self::$dumpIpOnWatchHit !== null) {
+            return self::$dumpIpOnWatchHit;
+        }
+        $env = getenv('PHPME_DUMP_IP_ON_WATCH_HIT');
+        self::$dumpIpOnWatchHit = $env !== false && self::parseEnvBool($env);
+        return self::$dumpIpOnWatchHit;
     }
 
     private static function dumpCallsiteBytes(): int
@@ -151,6 +162,32 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             $bytes .= chr($b);
         }
         return $bytes;
+    }
+
+    private function maybeDumpIpOnWatchHit(): void
+    {
+        if (!self::dumpIpOnWatchHitEnabled()) {
+            return;
+        }
+
+        $linearIp = $this->runtime->memory()->offset() & 0xFFFFFFFF;
+        $dumpLen = self::dumpCallsiteBytes();
+        $half = intdiv($dumpLen, 2);
+        $start = max(0, ($linearIp - $half) & 0xFFFFFFFF);
+        $bytes = $this->readLinearBytesNoLog($start, $dumpLen);
+        $sha1 = sha1($bytes);
+
+        $path = sprintf('debug/memdump_ip_%08X_%d.bin', $linearIp & 0xFFFFFFFF, $dumpLen);
+        @file_put_contents($path, $bytes);
+
+        $this->runtime->option()->logger()->warning(sprintf(
+            'WATCH: ipdump: ip=0x%08X dump=0x%08X..+%d sha1=%s saved=%s',
+            $linearIp & 0xFFFFFFFF,
+            $start & 0xFFFFFFFF,
+            $dumpLen,
+            $sha1,
+            $path,
+        ));
     }
 
     private function maybeDumpCallsiteOnWatchHit(): void
@@ -585,6 +622,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
         $linearIp = $this->runtime->memory()->offset() & 0xFFFFFFFF;
         $pm = $this->runtime->context()->cpu()->isProtectedMode() ? 1 : 0;
+        $pg = $this->runtime->context()->cpu()->isPagingEnabled() ? 1 : 0;
         $cs = $this->fetch(RegisterType::CS)->asByte() & 0xFFFF;
         $ds = $this->fetch(RegisterType::DS)->asByte() & 0xFFFF;
         $es = $this->fetch(RegisterType::ES)->asByte() & 0xFFFF;
@@ -616,7 +654,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         });
 
         $this->runtime->option()->logger()->warning(sprintf(
-            'WATCH: %s %s %d-bit addr=0x%08X value=%s CS=0x%04X DS=0x%04X ES=0x%04X SS=0x%04X SP=0x%04X EAX=0x%08X EBX=0x%08X ECX=0x%08X EDX=0x%08X ESI=0x%08X EDI=0x%08X linearIP=0x%08X PM=%d lastIP=0x%08X lastIns=%s lastOp=%s',
+            'WATCH: %s %s %d-bit addr=0x%08X value=%s CS=0x%04X DS=0x%04X ES=0x%04X SS=0x%04X SP=0x%04X EAX=0x%08X EBX=0x%08X ECX=0x%08X EDX=0x%08X ESI=0x%08X EDI=0x%08X linearIP=0x%08X PM=%d PG=%d lastIP=0x%08X lastIns=%s lastOp=%s',
             $action,
             strtoupper($kind),
             $width,
@@ -635,12 +673,14 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             $edi,
             $linearIp,
             $pm,
+            $pg,
             $lastIp,
             $lastInstructionName,
             $lastOpcodeStr,
         ));
 
         if (self::stopOnWatchHitEnabled()) {
+            $this->maybeDumpIpOnWatchHit();
             $this->maybeDumpCallsiteOnWatchHit();
             throw new HaltException('Stopped by PHPME_STOP_ON_WATCH_HIT');
         }

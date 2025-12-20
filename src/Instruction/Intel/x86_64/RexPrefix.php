@@ -54,9 +54,9 @@ class RexPrefix implements InstructionInterface
         // Set REX state in CPU context
         $runtime->context()->cpu()->setRex($rex);
 
-        // Read and execute the actual opcode that follows
-        $nextOpcode = $runtime->memory()->byte();
-
-        return $runtime->execute($nextOpcode);
+        // Let the main instruction executor fetch/decode the following opcode bytes.
+        // This is required for multi-byte opcodes (e.g. 0x0F ...) and to support
+        // correct prefix chaining semantics.
+        return ExecutionStatus::CONTINUE;
     }
 }

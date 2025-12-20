@@ -131,12 +131,13 @@ class Mov64 implements InstructionInterface
         $regType = $this->getRegisterType64($regCode);
 
         if ($is64Bit) {
-            // Read 64-bit immediate
-            $imm = $memory->int64();
+            // Read 64-bit immediate (little-endian)
+            $immBytes = $memory->read(8);
+            $imm = unpack('Pimm', $immBytes)['imm'];
             $runtime->memoryAccessor()->writeBySize($regType, $imm, 64);
         } else {
             // Read 32-bit immediate, zero-extend
-            $imm = $memory->int32() & 0xFFFFFFFF;
+            $imm = $memory->dword() & 0xFFFFFFFF;
             $runtime->memoryAccessor()->writeBySize($regType, $imm, 64);
         }
 
@@ -164,7 +165,7 @@ class Mov64 implements InstructionInterface
 
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             // Register mode: read immediate after ModR/M
-            $imm32 = $memory->int32();
+            $imm32 = $memory->dword();
 
             if ($is64Bit) {
                 // Sign-extend 32-bit to 64-bit
@@ -178,7 +179,7 @@ class Mov64 implements InstructionInterface
         } else {
             // Memory mode: calculate address, then read immediate
             $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
-            $imm32 = $memory->int32();
+            $imm32 = $memory->dword();
 
             if ($is64Bit) {
                 $value = $this->signExtendImm32to64($imm32);

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Runtime\Ticker;
 
 use PHPMachineEmulator\Display\Writer\WindowScreenWriter;
-use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\Device\DeviceManagerInterface;
 use PHPMachineEmulator\Runtime\Device\KeyboardContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -48,11 +47,6 @@ class DeviceManagerTicker implements TickerInterface
     {
         // Poll for key input
         $this->pollKeyboardInput($ctx, $runtime);
-
-        // If CPU is waiting for key and we have one, complete the operation
-        if ($ctx->isWaitingForKey() && $ctx->hasKey()) {
-            $this->completeKeyboardWait($ctx, $runtime);
-        }
     }
 
     /**
@@ -113,48 +107,4 @@ class DeviceManagerTicker implements TickerInterface
         }
     }
 
-    /**
-     * Complete a keyboard wait operation.
-     */
-    private function completeKeyboardWait(KeyboardContextInterface $ctx, RuntimeInterface $runtime): void
-    {
-        $function = $ctx->getWaitingFunction();
-
-        switch ($function) {
-            case 0x00: // Wait for keypress
-            case 0x10: // Extended keyboard read
-                $key = $ctx->dequeueKey();
-                if ($key !== null) {
-                    $keyCode = ($key['scancode'] << 8) | $key['ascii'];
-                    $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
-                    $ctx->setWaitingForKey(false);
-
-                    $runtime->option()->logger()->debug(sprintf(
-                        'DeviceManagerTicker: key wait completed, keyCode=0x%04X (AH=0x%02X, AL=0x%02X)',
-                        $keyCode,
-                        $key['scancode'],
-                        $key['ascii']
-                    ));
-                }
-                break;
-
-            case 0x01: // Check keystroke (non-blocking)
-            case 0x11: // Extended keystroke status
-                // These should not set waiting state, but handle just in case
-                $key = $ctx->peekKey();
-                if ($key !== null) {
-                    $keyCode = ($key['scancode'] << 8) | $key['ascii'];
-                    $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
-                    $runtime->memoryAccessor()->setZeroFlag(false);
-                } else {
-                    $runtime->memoryAccessor()->setZeroFlag(true);
-                }
-                $ctx->setWaitingForKey(false);
-                break;
-
-            default:
-                $ctx->setWaitingForKey(false);
-                break;
-        }
-    }
 }

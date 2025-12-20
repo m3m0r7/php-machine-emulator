@@ -20,6 +20,7 @@ class KeyboardController
     private bool $expectingMouseCommand = false;
     private int $commandByte = 0x00;
     private bool $mouseAwaitingData = false;
+    private int $outputPort = 0x01; // bit0=1 (not reset), bit1=A20 (synced from CPU)
 
     // SDL key tracking
     private ?int $lastSDLScancode = null;
@@ -192,6 +193,16 @@ class KeyboardController
                 $this->expectingOutputPort = true;
                 $runtime->context()->cpu()->setWaitingA20OutputPort(true);
                 break;
+            case 0xD0: // read output port
+                // Reflect current CPU A20 state in bit 1.
+                $value = $this->outputPort & 0xFF;
+                if ($runtime->context()->cpu()->isA20Enabled()) {
+                    $value |= 0x02;
+                } else {
+                    $value &= ~0x02;
+                }
+                $this->enqueue($value, false);
+                break;
             case 0xD2: // write output buffer for CPU (keyboard)
             case 0xD3: // write output buffer for keyboard interface
                 $this->expectingOutputBuffer = true;
@@ -227,6 +238,7 @@ class KeyboardController
         if ($this->expectingOutputPort) {
             $this->expectingOutputPort = false;
             $runtime->context()->cpu()->setWaitingA20OutputPort(false);
+            $this->outputPort = $value & 0xFF;
             $runtime->context()->cpu()->enableA20(($value & 0x02) !== 0);
             $this->inputBufferFull = false;
             return;

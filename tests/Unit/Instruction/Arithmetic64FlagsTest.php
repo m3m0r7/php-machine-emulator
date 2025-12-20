@@ -94,4 +94,19 @@ class Arithmetic64FlagsTest extends InstructionTestCase
         $this->assertTrue($this->getSignFlag()); // 1-2 => -1
         $this->assertTrue($this->memoryAccessor->shouldParityFlag());
     }
+
+    public function testAddRm64RegWithMemoryOperandUpdatesMemory(): void
+    {
+        $this->enableRexW();
+
+        $address = 0x1000;
+        $this->setRegister(RegisterType::EAX, $address, 64); // RAX
+        $this->setRegister(RegisterType::EBX, 5, 64); // RBX
+        $this->writeMemory($address, 10, 64);
+
+        // ADD r/m64, r64 (0x01 /r): modrm 00 011 000 = 0x18 (dst=[RAX], src=RBX)
+        $this->executeBytes([0x01, 0x18]);
+
+        $this->assertSame(15, $this->readMemory($address, 64));
+    }
 }

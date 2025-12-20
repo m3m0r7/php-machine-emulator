@@ -143,11 +143,39 @@ class System implements InterruptInterface
         // CX contains word count (so byte count = CX * 2)
         $byteCount = $cx * 2;
 
-        // Perform the memory move
-        for ($i = 0; $i < $byteCount; $i++) {
-            $byte = $ma->tryToFetch($srcBase + $i)?->asHighBit() ?? 0;
-            $ma->allocate($dstBase + $i, safe: false);
-            $ma->writeBySize($dstBase + $i, $byte, 8);
+        $srcBase &= 0xFFFFFFFF;
+        $dstBase &= 0xFFFFFFFF;
+
+        $traceEnv = getenv('PHPME_TRACE_INT15_87');
+        if ($traceEnv !== false && trim($traceEnv) !== '' && trim($traceEnv) !== '0') {
+            $runtime->option()->logger()->warning(sprintf(
+                'INT 15h AH=87h: move extended memory src=0x%08X dst=0x%08X bytes=%d',
+                $srcBase,
+                $dstBase,
+                $byteCount,
+            ));
+        }
+
+        $usedFastCopy = false;
+        if ($byteCount > 0
+            && $srcBase < 0xE0000000
+            && $dstBase < 0xE0000000
+            && !$runtime->context()->cpu()->isPagingEnabled()
+        ) {
+            $memory = $runtime->memory();
+            if ($memory->ensureCapacity($srcBase + $byteCount) && $memory->ensureCapacity($dstBase + $byteCount)) {
+                $memory->copy($memory, $srcBase, $dstBase, $byteCount);
+                $usedFastCopy = true;
+            }
+        }
+
+        if (!$usedFastCopy) {
+            // Fallback: byte-by-byte copy through MemoryAccessor for correctness.
+            for ($i = 0; $i < $byteCount; $i++) {
+                $byte = $ma->readRawByte(($srcBase + $i) & 0xFFFFFFFF) ?? 0;
+                $ma->allocate(($dstBase + $i) & 0xFFFFFFFF, safe: false);
+                $ma->writeRawByte(($dstBase + $i) & 0xFFFFFFFF, $byte);
+            }
         }
 
         $ma->writeToHighBit(RegisterType::EAX, 0x00); // Success

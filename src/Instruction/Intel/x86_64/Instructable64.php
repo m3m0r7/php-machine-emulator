@@ -247,7 +247,7 @@ trait Instructable64
             8 => $this->readMemory8($runtime, $address),
             16 => $this->readMemory16($runtime, $address),
             32 => $this->readMemory32($runtime, $address),
-            64 => $this->readMemory64($runtime, $address),
+            64 => $this->readMemory64($runtime, $address)->toInt(),
             default => $this->readMemory32($runtime, $address),
         };
     }

@@ -163,7 +163,7 @@ class Arithmetic64 implements InstructionInterface
         $dst = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($size);
 
         // Read immediate (32-bit, sign-extended for 64-bit)
-        $imm32 = $memory->int32();
+        $imm32 = $memory->dword();
         if ($size === 64) {
             $src = $this->signExtendImm32($imm32);
         } else {

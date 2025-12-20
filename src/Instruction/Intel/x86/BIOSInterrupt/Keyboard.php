@@ -99,6 +99,7 @@ class Keyboard implements InterruptInterface
             $key = $keyboard->dequeueKey();
             if ($key !== null) {
                 $keyCode = ($key['scancode'] << 8) | $key['ascii'];
+                $keyboard->setWaitingForKey(false);
                 $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
 
                 $runtime->option()->logger()->debug(sprintf(
@@ -119,6 +120,7 @@ class Keyboard implements InterruptInterface
 
                 $keyCode = $screenWriter->pollKeyPress();
                 if ($keyCode !== null) {
+                    $keyboard->setWaitingForKey(false);
                     $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
 
                     $runtime->option()->logger()->debug(sprintf(
@@ -137,6 +139,7 @@ class Keyboard implements InterruptInterface
                     $byte = 0x0D;
                 }
                 // Return key in AX (scancode 0, ascii = byte)
+                $keyboard->setWaitingForKey(false);
                 $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $byte);
 
                 $runtime->option()->logger()->debug(sprintf(

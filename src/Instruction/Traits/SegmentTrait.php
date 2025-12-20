@@ -304,6 +304,11 @@ trait SegmentTrait
         $ctx = $runtime->context()->cpu();
         if ($ctx->isProtectedMode()) {
             $descriptor ??= $this->readSegmentDescriptor($runtime, $normalized);
+            // Cache CS hidden descriptor state (base/limit/default size).
+            // CS cannot be loaded via MOV/POP, so far control transfers must populate the cache.
+            if (is_array($descriptor) && ($descriptor['present'] ?? false)) {
+                $ctx->cacheSegmentDescriptor(RegisterType::CS, $descriptor);
+            }
         } else {
             // Real mode always defaults to 16-bit code; ignore cached descriptor size
             $descriptor = null;
