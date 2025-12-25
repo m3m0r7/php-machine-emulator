@@ -29,6 +29,8 @@ use PHPMachineEmulator\Runtime\Ticker\PitTicker;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
+use PHPMachineEmulator\Stream\PagedMemoryStream;
+use PHPMachineEmulator\Stream\RustFfiContext;
 use PHPMachineEmulator\Stream\RustMemoryStream;
 use PHPMachineEmulator\Video\VideoInterface;
 
@@ -70,13 +72,16 @@ class Runtime implements RuntimeInterface
         $this->addressMap = new AddressMap($this);
 
         // Convert boot stream to memory stream (must be before RustMemoryAccessor)
-        $this->memory = $this->createMemoryStream();
+        $ffiContext = new RustFfiContext();
+        $this->memory = $this->createMemoryStream($ffiContext);
 
         $this->memoryAccessor = new RustMemoryAccessor(
             $this,
             $this->architectureProvider
                 ->observers(),
+            $ffiContext,
         );
+        $this->memory = new PagedMemoryStream($this->memory, $this);
 
         // Initialize DeviceManager with keyboard and video contexts
         $deviceManager = new DeviceManager();
@@ -122,7 +127,7 @@ class Runtime implements RuntimeInterface
     /**
      * Create memory stream with boot data copied in.
      */
-    private function createMemoryStream(): MemoryStreamInterface
+    private function createMemoryStream(RustFfiContext $ffiContext): MemoryStreamInterface
     {
         $memoryContext = $this->logicBoard()->memory();
         $bootStream = $this->logicBoard()->media()->primary()->stream();
@@ -132,6 +137,7 @@ class Runtime implements RuntimeInterface
             $memoryContext->initialMemory(),
             $memoryContext->maxMemory(),
             $memoryContext->swapSize(),
+            $ffiContext,
         );
 
         $loadAddress = $bootStream->loadAddress();

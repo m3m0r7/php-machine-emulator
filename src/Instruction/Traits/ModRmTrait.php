@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Traits;
 
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -17,6 +18,12 @@ use PHPMachineEmulator\Util\UInt64;
  */
 trait ModRmTrait
 {
+    protected function rmGprRegisterType(RuntimeInterface $runtime, ModRegRMInterface $modRegRM): \PHPMachineEmulator\Instruction\RegisterType
+    {
+        $cpu = $runtime->context()->cpu();
+        return Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
+    }
+
     /**
      * Read operand from R/M field by size.
      * @return int|UInt64 Returns UInt64 for 64-bit reads, int otherwise
@@ -24,7 +31,7 @@ trait ModRmTrait
     protected function readRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $size): int|UInt64
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            return $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
+            return $this->readRegisterBySize($runtime, $this->rmGprRegisterType($runtime, $modRegRM), $size);
         }
 
         $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
@@ -47,7 +54,7 @@ trait ModRmTrait
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $intValue = $value instanceof UInt64 ? $value->toInt() : $value;
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $intValue, $size);
+            $this->writeRegisterBySize($runtime, $this->rmGprRegisterType($runtime, $modRegRM), $intValue, $size);
             return;
         }
 
@@ -67,6 +74,10 @@ trait ModRmTrait
     protected function readRm8(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
+            $cpu = $runtime->context()->cpu();
+            if ($cpu->isLongMode()) {
+                return $this->read8BitRegister64($runtime, $modRegRM->registerOrMemoryAddress(), $cpu->hasRex(), $cpu->rexB());
+            }
             return $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
         }
 
@@ -80,6 +91,11 @@ trait ModRmTrait
     protected function writeRm8(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
+            $cpu = $runtime->context()->cpu();
+            if ($cpu->isLongMode()) {
+                $this->write8BitRegister64($runtime, $modRegRM->registerOrMemoryAddress(), $value, $cpu->hasRex(), $cpu->rexB());
+                return;
+            }
             $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $value);
             return;
         }
@@ -94,6 +110,11 @@ trait ModRmTrait
     protected function writeRm8WithDebug(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value, bool $debug): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
+            $cpu = $runtime->context()->cpu();
+            if ($cpu->isLongMode()) {
+                $this->write8BitRegister64($runtime, $modRegRM->registerOrMemoryAddress(), $value, $cpu->hasRex(), $cpu->rexB());
+                return;
+            }
             $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $value);
             return;
         }
@@ -124,7 +145,7 @@ trait ModRmTrait
     protected function readRm16(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            return $runtime->memoryAccessor()->fetch($modRegRM->registerOrMemoryAddress())->asByte();
+            return $this->readRegisterBySize($runtime, $this->rmGprRegisterType($runtime, $modRegRM), 16);
         }
 
         $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
@@ -139,7 +160,7 @@ trait ModRmTrait
     protected function writeRm16(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            $runtime->memoryAccessor()->write16Bit($modRegRM->registerOrMemoryAddress(), $value);
+            $this->writeRegisterBySize($runtime, $this->rmGprRegisterType($runtime, $modRegRM), $value, 16);
             return;
         }
 
@@ -153,7 +174,7 @@ trait ModRmTrait
     protected function readRm32(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): int
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            return $runtime->memoryAccessor()->fetch($modRegRM->registerOrMemoryAddress())->asBytesBySize(32);
+            return $this->readRegisterBySize($runtime, $this->rmGprRegisterType($runtime, $modRegRM), 32);
         }
 
         $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
@@ -166,7 +187,7 @@ trait ModRmTrait
     protected function writeRm32(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $value): void
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            $runtime->memoryAccessor()->writeBySize($modRegRM->registerOrMemoryAddress(), $value, 32);
+            $this->writeRegisterBySize($runtime, $this->rmGprRegisterType($runtime, $modRegRM), $value, 32);
             return;
         }
 
@@ -180,7 +201,7 @@ trait ModRmTrait
     protected function readRm64(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): UInt64
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            $value = $runtime->memoryAccessor()->fetch($modRegRM->registerOrMemoryAddress())->asBytesBySize(64);
+            $value = $this->readRegisterBySize($runtime, $this->rmGprRegisterType($runtime, $modRegRM), 64);
             return UInt64::of($value);
         }
 
@@ -195,7 +216,7 @@ trait ModRmTrait
     {
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $intValue = $value instanceof UInt64 ? $value->toInt() : $value;
-            $runtime->memoryAccessor()->writeBySize($modRegRM->registerOrMemoryAddress(), $intValue, 64);
+            $this->writeRegisterBySize($runtime, $this->rmGprRegisterType($runtime, $modRegRM), $intValue, 64);
             return;
         }
 

@@ -23,6 +23,9 @@ class WindowOption
         public int $sdlWindowPosY = self::SDL_WINDOWPOS_CENTERED,
         public int $sdlWindowFlags = self::SDL_WINDOW_SHOWN,
         public int $sdlRendererFlags = self::SDL_RENDERER_ACCELERATED,
+        public bool $useFramebuffer = true,
+        /** @var string[] */
+        public array $librarySearchPaths = [],
     ) {
     }
 
@@ -40,16 +43,18 @@ class WindowOption
             }
         }
 
-        $pathEnv = getenv('PATH');
-        if ($pathEnv !== false) {
-            $paths = explode(PATH_SEPARATOR, $pathEnv);
-            foreach ($paths as $dir) {
-                $libDir = dirname($dir) . '/lib';
-                foreach ($this->getLibraryNames() as $libName) {
-                    $candidate = $libDir . '/' . $libName;
-                    if (file_exists($candidate)) {
-                        return $candidate;
-                    }
+        foreach ($this->librarySearchPaths as $dir) {
+            if ($dir === '') {
+                continue;
+            }
+            if (file_exists($dir) && !is_dir($dir)) {
+                return $dir;
+            }
+            $libDir = rtrim($dir, '/\\');
+            foreach ($this->getLibraryNames() as $libName) {
+                $candidate = $libDir . '/' . $libName;
+                if (file_exists($candidate)) {
+                    return $candidate;
                 }
             }
         }

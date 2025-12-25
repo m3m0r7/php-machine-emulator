@@ -6,27 +6,24 @@ namespace PHPMachineEmulator\Instruction\Intel\Observer;
 
 use PHPMachineEmulator\Display\Cursor;
 use PHPMachineEmulator\Display\CursorInterface;
-use PHPMachineEmulator\Display\Pixel\Color;
+use PHPMachineEmulator\Display\Pixel\VgaPaletteColor;
 use PHPMachineEmulator\Runtime\MemoryAccessorObserverInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class VideoInitializerObserver implements MemoryAccessorObserverInterface
 {
     protected ?CursorInterface $cursor = null;
-    protected ?int $cachedVideoTypeFlagAddress = null;
 
     public function addressRange(): ?array
     {
-        // This observer watches a single specific address
-        // Return null to indicate dynamic address (depends on runtime)
-        return null;
+        // Video type flag is stored at a fixed address.
+        $addr = 0xFF0000;
+        return ['min' => $addr, 'max' => $addr];
     }
 
     public function shouldMatch(RuntimeInterface $runtime, int $address, ?int $previousValue, ?int $nextValue): bool
     {
-        // Cache the video type flag address to avoid repeated lookups
-        $this->cachedVideoTypeFlagAddress ??= $runtime->video()->videoTypeFlagAddress();
-        return $address === $this->cachedVideoTypeFlagAddress;
+        return $address === $runtime->video()->videoTypeFlagAddress();
     }
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): void
@@ -58,10 +55,11 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
 
         $screenWriter = $runtime->context()->screen()->screenWriter();
         $this->cursor ??= new Cursor($screenWriter);
+        $black = VgaPaletteColor::Black->toColor();
 
         for ($y = 0; $y < $clearHeight; $y++) {
             for ($x = 0; $x < $clearWidth; $x++) {
-                $screenWriter->dot($x, $y, Color::asBlack());
+                $screenWriter->dot($x, $y, $black);
             }
         }
 

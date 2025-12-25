@@ -23,8 +23,20 @@ class Jmp implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $memory = $runtime->memory();
+        $cpu = $runtime->context()->cpu();
 
-        $relOffset = $runtime->context()->cpu()->operandSize() === 32
+        // In 64-bit mode, JMP rel32 always uses a 32-bit signed displacement (rel32),
+        // and the operand-size override prefix (0x66) is ignored.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $relOffset = $memory->signedDword();
+            $pos = $runtime->memory()->offset();
+            if ($runtime->option()->shouldChangeOffset()) {
+                $runtime->memory()->setOffset($pos + $relOffset);
+            }
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $relOffset = $cpu->operandSize() === 32
             ? $memory->signedDword()
             : $memory->signedShort();
 

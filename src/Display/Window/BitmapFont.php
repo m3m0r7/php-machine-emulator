@@ -12,30 +12,30 @@ namespace PHPMachineEmulator\Display\Window;
  */
 class BitmapFont
 {
-    protected static ?array $glyphs = null;
+    private ?array $glyphs = null;
 
     /** @var array<string, array<array{0: int, 1: int}>> Pre-computed pixel positions for each glyph */
-    protected static array $glyphPixelsCache = [];
+    private array $glyphPixelsCache = [];
 
     /** @var array<string, int> Cached pixel counts per glyph */
-    protected static array $glyphPixelCountCache = [];
+    private array $glyphPixelCountCache = [];
 
     /**
      * Get glyph for a character.
      * Accepts both single-byte string and direct byte value lookup.
      */
-    public static function getGlyph(string $char): ?array
+    public function getGlyph(string $char): ?array
     {
         $byte = ord($char);
-        return self::glyphs()[$byte] ?? null;
+        return $this->glyphs()[$byte] ?? null;
     }
 
     /**
      * Get glyph by CP437 byte value directly.
      */
-    public static function getGlyphByCode(int $code): ?array
+    public function getGlyphByCode(int $code): ?array
     {
-        return self::glyphs()[$code] ?? null;
+        return $this->glyphs()[$code] ?? null;
     }
 
     /**
@@ -43,13 +43,13 @@ class BitmapFont
      * Returns array of [x, y] positions where pixels should be drawn.
      * @return array<array{0: int, 1: int}>|null
      */
-    public static function getGlyphPixels(string $char): ?array
+    public function getGlyphPixels(string $char): ?array
     {
-        if (isset(self::$glyphPixelsCache[$char])) {
-            return self::$glyphPixelsCache[$char];
+        if (isset($this->glyphPixelsCache[$char])) {
+            return $this->glyphPixelsCache[$char];
         }
 
-        $glyph = self::getGlyph($char);
+        $glyph = $this->getGlyph($char);
         if ($glyph === null) {
             return null;
         }
@@ -67,8 +67,8 @@ class BitmapFont
             }
         }
 
-        self::$glyphPixelsCache[$char] = $pixels;
-        self::$glyphPixelCountCache[$char] = count($pixels);
+        $this->glyphPixelsCache[$char] = $pixels;
+        $this->glyphPixelCountCache[$char] = count($pixels);
         return $pixels;
     }
 
@@ -76,14 +76,14 @@ class BitmapFont
      * Get pre-computed pixel positions by CP437 byte value.
      * @return array<array{0: int, 1: int}>|null
      */
-    public static function getGlyphPixelsByCode(int $code): ?array
+    public function getGlyphPixelsByCode(int $code): ?array
     {
         $key = chr($code);
-        if (isset(self::$glyphPixelsCache[$key])) {
-            return self::$glyphPixelsCache[$key];
+        if (isset($this->glyphPixelsCache[$key])) {
+            return $this->glyphPixelsCache[$key];
         }
 
-        $glyph = self::getGlyphByCode($code);
+        $glyph = $this->getGlyphByCode($code);
         if ($glyph === null) {
             return null;
         }
@@ -101,22 +101,22 @@ class BitmapFont
             }
         }
 
-        self::$glyphPixelsCache[$key] = $pixels;
-        self::$glyphPixelCountCache[$key] = count($pixels);
+        $this->glyphPixelsCache[$key] = $pixels;
+        $this->glyphPixelCountCache[$key] = count($pixels);
         return $pixels;
     }
 
     /**
      * Get cached pixel count for a glyph (avoids count() call).
      */
-    public static function getGlyphPixelCount(string $char): int
+    public function getGlyphPixelCount(string $char): int
     {
-        if (isset(self::$glyphPixelCountCache[$char])) {
-            return self::$glyphPixelCountCache[$char];
+        if (isset($this->glyphPixelCountCache[$char])) {
+            return $this->glyphPixelCountCache[$char];
         }
         // Trigger cache population
-        $pixels = self::getGlyphPixels($char);
-        return $pixels !== null ? self::$glyphPixelCountCache[$char] : 0;
+        $pixels = $this->getGlyphPixels($char);
+        return $pixels !== null ? $this->glyphPixelCountCache[$char] : 0;
     }
 
     /**
@@ -124,9 +124,9 @@ class BitmapFont
      * Index is the byte value (0x00-0xFF).
      * Each glyph is 16 bytes (one byte per row).
      */
-    public static function glyphs(): array
+    public function glyphs(): array
     {
-        return self::$glyphs ??= [
+        return $this->glyphs ??= [
             // 0x00: NUL (blank)
             0x00 => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
             // 0x01: ☺ (smiley)
@@ -642,12 +642,12 @@ class BitmapFont
         ];
     }
 
-    public static function charWidth(): int
+    public function charWidth(): int
     {
         return 8;
     }
 
-    public static function charHeight(): int
+    public function charHeight(): int
     {
         return 16;
     }

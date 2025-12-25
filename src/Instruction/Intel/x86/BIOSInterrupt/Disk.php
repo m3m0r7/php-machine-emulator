@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
 use PHPMachineEmulator\BIOS;
-use PHPMachineEmulator\Debug\DebugState;
+use PHPMachineEmulator\BootConfig\BootConfigPatcher;
 use PHPMachineEmulator\Disk\HardDisk;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -24,11 +24,13 @@ class Disk implements InterruptInterface
     private const FLOPPY_HEADS = 2;
     private const FLOPPY_SECTORS_PER_TRACK = 18;
     private const ELTORITO_EMULATED_FLOPPY_DRIVE = 0x10;
-    private static ?bool $traceInt13Caller = null;
-    private static ?int $traceInt13ReadsLimit = null;
-    private static int $traceInt13Reads = 0;
+    private ?bool $traceInt13Caller = null;
+    private ?int $traceInt13ReadsLimit = null;
+    private int $traceInt13Reads = 0;
     /** @var array<int,true>|null */
-    private static ?array $stopOnInt13ReadLbaSet = null;
+    private ?array $stopOnInt13ReadLbaSet = null;
+    private ?BootConfigPatcher $bootConfigPatcher = null;
+    private bool $bootConfigPatchAnnounced = false;
 
     public function __construct(protected RuntimeInterface $runtime)
     {
@@ -62,45 +64,24 @@ class Disk implements InterruptInterface
         };
     }
 
-    private static function traceInt13ReadsLimit(): int
+    private function traceInt13ReadsLimit(RuntimeInterface $runtime): int
     {
-        if (self::$traceInt13ReadsLimit !== null) {
-            return self::$traceInt13ReadsLimit;
+        if ($this->traceInt13ReadsLimit !== null) {
+            return $this->traceInt13ReadsLimit;
         }
 
-        $env = getenv('PHPME_TRACE_INT13_READS');
-        if ($env === false) {
-            self::$traceInt13ReadsLimit = 0;
-            return 0;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            self::$traceInt13ReadsLimit = 0;
-            return 0;
-        }
-
-        if ($trimmed === '1') {
-            self::$traceInt13ReadsLimit = 50;
-            return 50;
-        }
-
-        if (preg_match('/^\\d+$/', $trimmed) === 1) {
-            self::$traceInt13ReadsLimit = max(1, (int) $trimmed);
-            return self::$traceInt13ReadsLimit;
-        }
-
-        self::$traceInt13ReadsLimit = 50;
-        return 50;
+        $limit = $runtime->logicBoard()->debug()->trace()->traceInt13ReadsLimit;
+        $this->traceInt13ReadsLimit = max(0, $limit);
+        return $this->traceInt13ReadsLimit;
     }
 
     private function maybeTraceInt13Read(RuntimeInterface $runtime, string $kind, int $lba, int $sectorCount, int $bufferAddress, bool $isCdrom): void
     {
-        $limit = self::traceInt13ReadsLimit();
-        if ($limit <= 0 || self::$traceInt13Reads >= $limit) {
+        $limit = $this->traceInt13ReadsLimit($runtime);
+        if ($limit <= 0 || $this->traceInt13Reads >= $limit) {
             return;
         }
-        self::$traceInt13Reads++;
+        $this->traceInt13Reads++;
 
         $cpu = $runtime->context()->cpu();
         $pm = $cpu->isProtectedMode() ? 1 : 0;
@@ -121,7 +102,7 @@ class Disk implements InterruptInterface
             $lm,
             $cs,
             $linearIp,
-            self::$traceInt13Reads,
+            $this->traceInt13Reads,
             $limit,
         ));
     }
@@ -132,52 +113,19 @@ class Disk implements InterruptInterface
      * Set `PHPME_STOP_ON_INT13_READ_LBA` to a decimal/hex (0x...) number or a comma/space-separated list.
      * Example: `PHPME_STOP_ON_INT13_READ_LBA=1885` or `PHPME_STOP_ON_INT13_READ_LBA=1885,2974`.
      */
-    private static function stopOnInt13ReadLbaSet(): array
+    private function stopOnInt13ReadLbaSet(RuntimeInterface $runtime): array
     {
-        if (self::$stopOnInt13ReadLbaSet !== null) {
-            return self::$stopOnInt13ReadLbaSet;
+        if ($this->stopOnInt13ReadLbaSet !== null) {
+            return $this->stopOnInt13ReadLbaSet;
         }
 
-        $env = getenv('PHPME_STOP_ON_INT13_READ_LBA');
-        if ($env === false) {
-            self::$stopOnInt13ReadLbaSet = [];
-            return self::$stopOnInt13ReadLbaSet;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            self::$stopOnInt13ReadLbaSet = [];
-            return self::$stopOnInt13ReadLbaSet;
-        }
-
-        $parts = preg_split('/[\\s,]+/', $trimmed);
-        $set = [];
-        foreach ($parts as $part) {
-            if ($part === null) {
-                continue;
-            }
-            $p = trim($part);
-            if ($p === '') {
-                continue;
-            }
-
-            if (preg_match('/^0x[0-9a-fA-F]+$/', $p) === 1) {
-                $set[(int) hexdec(substr($p, 2))] = true;
-                continue;
-            }
-            if (preg_match('/^\\d+$/', $p) === 1) {
-                $set[(int) $p] = true;
-                continue;
-            }
-        }
-
-        self::$stopOnInt13ReadLbaSet = $set;
-        return self::$stopOnInt13ReadLbaSet;
+        $this->stopOnInt13ReadLbaSet = $runtime->logicBoard()->debug()->trace()->stopOnInt13ReadLbaSet;
+        return $this->stopOnInt13ReadLbaSet;
     }
 
     private function maybeStopOnInt13Read(RuntimeInterface $runtime, string $kind, int $lba, int $sectorCount, int $bufferAddress, bool $isCdrom, ?string $data = null): void
     {
-        $set = self::stopOnInt13ReadLbaSet();
+        $set = $this->stopOnInt13ReadLbaSet($runtime);
         if ($set === [] || $sectorCount <= 0) {
             return;
         }
@@ -371,9 +319,9 @@ class Disk implements InterruptInterface
         $bytes = $sectorsToRead * self::SECTOR_SIZE;
         $bufferAddress = $this->segmentRegisterLinearAddress($runtime, RegisterType::ES, $bx, $addressSize);
 
-        DebugState::notifyInt13Read($lba, $sectorsToRead);
+        $runtime->logicBoard()->debug()->watchState()->notifyInt13Read($lba, $sectorsToRead);
 
-        if ($this->shouldTraceInt13Caller() && ($lba === 67 || $lba === 1343)) {
+        if ($this->shouldTraceInt13Caller($runtime) && ($lba === 67 || $lba === 1343)) {
             [$retCs, $retIp, $retFlags, $callerCs, $callerIp] = $this->peekChainedReturnFrame16($runtime);
             $runtime->option()->logger()->debug(sprintf(
                 'INT 13h caller: return=%04X:%04X (callsite~%04X:%04X) FLAGS=0x%04X chainReturn=%04X:%04X',
@@ -611,7 +559,7 @@ class Disk implements InterruptInterface
             $isNoEmulationCdrom ? 'yes' : 'no'
         ));
 
-        DebugState::notifyInt13Read($lba, $sectorCount);
+        $runtime->logicBoard()->debug()->watchState()->notifyInt13Read($lba, $sectorCount);
 
         $this->maybeTraceInt13Read($runtime, 'READ-LBA', $lba, $sectorCount, $bufferAddress, $isNoEmulationCdrom);
 
@@ -623,6 +571,8 @@ class Disk implements InterruptInterface
                 $this->fail($runtime, 0x20);
                 return;
             }
+
+            $data = $this->maybePatchBootConfigData($runtime, $data);
 
             // Write data to memory - ISOLINUX manages its own memory layout
             // and uses INT 13h to load additional sectors to specific addresses
@@ -1160,13 +1110,12 @@ class Disk implements InterruptInterface
         return ($hi << 16) | $lo;
     }
 
-    private function shouldTraceInt13Caller(): bool
+    private function shouldTraceInt13Caller(RuntimeInterface $runtime): bool
     {
-        if (self::$traceInt13Caller === null) {
-            $env = getenv('PHPME_TRACE_INT13_CALLER');
-            self::$traceInt13Caller = $env !== false && $env !== '' && $env !== '0';
+        if ($this->traceInt13Caller === null) {
+            $this->traceInt13Caller = $runtime->logicBoard()->debug()->trace()->traceInt13Caller;
         }
-        return self::$traceInt13Caller;
+        return $this->traceInt13Caller;
     }
 
     /**
@@ -1195,5 +1144,28 @@ class Disk implements InterruptInterface
         $chainCs = $this->readMemory16($runtime, ($frameLinear + 8) & $linearMask);
 
         return [$cs, $ip, $flags, $chainCs, $chainIp];
+    }
+
+    private function bootConfigPatcher(): BootConfigPatcher
+    {
+        if ($this->bootConfigPatcher === null) {
+            $this->bootConfigPatcher = new BootConfigPatcher(
+                $this->runtime->logicBoard()->debug()->bootConfig(),
+            );
+        }
+        return $this->bootConfigPatcher;
+    }
+
+    private function maybePatchBootConfigData(RuntimeInterface $runtime, string $data): string
+    {
+        $result = $this->bootConfigPatcher()->patch($data);
+        if ($result->isPatched() && !$this->bootConfigPatchAnnounced) {
+            $this->bootConfigPatchAnnounced = true;
+            $runtime->option()->logger()->warning(sprintf(
+                'PATCH: boot config updated (%s)',
+                implode(', ', $result->appliedRules),
+            ));
+        }
+        return $result->data;
     }
 }

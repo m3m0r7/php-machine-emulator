@@ -146,8 +146,7 @@ class System implements InterruptInterface
         $srcBase &= 0xFFFFFFFF;
         $dstBase &= 0xFFFFFFFF;
 
-        $traceEnv = getenv('PHPME_TRACE_INT15_87');
-        if ($traceEnv !== false && trim($traceEnv) !== '' && trim($traceEnv) !== '0') {
+        if ($runtime->logicBoard()->debug()->trace()->traceInt15_87) {
             $runtime->option()->logger()->warning(sprintf(
                 'INT 15h AH=87h: move extended memory src=0x%08X dst=0x%08X bytes=%d',
                 $srcBase,

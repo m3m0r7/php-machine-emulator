@@ -33,7 +33,7 @@ class Sysexit implements InstructionInterface
             throw new FaultException(0x0D, 0, 'SYSEXIT CPL check failed');
         }
 
-        $csBaseMsr = Rdmsr::readMsr(0x174); // IA32_SYSENTER_CS
+        $csBaseMsr = $runtime->context()->cpu()->readMsr(0x174); // IA32_SYSENTER_CS
         $csBase = $csBaseMsr->low32() & 0xFFFF;
         $cs = (($csBase + 16) & 0xFFFC) | 0x3; // RPL forced to 3
         $ss = (($csBase + 24) & 0xFFFC) | 0x3; // RPL forced to 3

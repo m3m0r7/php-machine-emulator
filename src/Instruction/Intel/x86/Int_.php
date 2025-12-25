@@ -536,7 +536,17 @@ class Int_ implements InstructionInterface
         $offsetHigh = $this->readMemory32($runtime, $descAddr + 8);
 
         if (($selector & 0xFFFC) === 0) {
-            throw new FaultException(0x0D, 0, sprintf('IDT target selector is null for vector %02X', $vector));
+            $entryBytes = [];
+            for ($i = 0; $i < 16; $i++) {
+                $entryBytes[] = sprintf('%02X', $this->readMemory8($runtime, $descAddr + $i));
+            }
+            throw new FaultException(0x0D, 0, sprintf(
+                'IDT target selector is null for vector %02X (idtr.base=0x%08X desc=0x%08X entry=%s)',
+                $vector,
+                $base & 0xFFFFFFFF,
+                $descAddr & 0xFFFFFFFF,
+                implode(' ', $entryBytes),
+            ));
         }
 
         // Present bit
@@ -596,7 +606,9 @@ class Int_ implements InstructionInterface
             $ma->write16Bit(RegisterType::SS, $newCpl & 0x3);
         }
 
-        // Push SS, RSP, RFLAGS, CS, RIP (as 64-bit values)
+        // Push interrupt frame.
+        // In IA-32e mode, SS/RSP are pushed only when a stack switch occurs
+        // (privilege change or IST). Otherwise the frame is RIP/CS/RFLAGS only.
         $flags =
             ($ma->shouldCarryFlag() ? 1 : 0) |
             0x2 | // reserved bit always set
@@ -608,8 +620,10 @@ class Int_ implements InstructionInterface
             ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
             ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
 
-        $ma->push(RegisterType::ESP, $oldSs, 64);
-        $ma->push(RegisterType::ESP, $oldRsp, 64);
+        if ($newStack) {
+            $ma->push(RegisterType::ESP, $oldSs, 64);
+            $ma->push(RegisterType::ESP, $oldRsp, 64);
+        }
         $ma->push(RegisterType::ESP, $flags, 64);
         $ma->push(RegisterType::ESP, $oldCs, 64);
         $ma->push(RegisterType::ESP, $returnRip, 64);

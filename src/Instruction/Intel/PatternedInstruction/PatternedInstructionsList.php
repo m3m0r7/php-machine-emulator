@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\PatternedInstruction;
 
+use PHPMachineEmulator\LogicBoard\Debug\PatternDebugConfig;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -43,15 +44,17 @@ class PatternedInstructionsList
      * Statistics tracking
      */
     private PatternedInstructionsListStats $stats;
+    private PatternDebugConfig $debugConfig;
 
     /**
      * Threshold for pattern detection (hits before we check for patterns)
      */
     private const DETECTION_THRESHOLD = 10;
 
-    public function __construct()
+    public function __construct(?PatternDebugConfig $debugConfig = null)
     {
         $this->stats = new PatternedInstructionsListStats();
+        $this->debugConfig = $debugConfig ?? new PatternDebugConfig();
         $this->registerDefaultPatterns();
     }
 
@@ -62,16 +65,16 @@ class PatternedInstructionsList
     {
         // The GRUB/LZMA range-decoder pattern is high-impact but correctness-sensitive.
         // Keep it opt-in until it is validated against real boot flows.
-        $env = getenv('PHPME_ENABLE_LZMA_PATTERN');
-        if ($env !== false && trim($env) !== '' && trim($env) !== '0') {
-            $this->register(new LzmaRangeDecodeBitPattern());
-            $this->register(new LzmaBitTreeDecodeBytePattern());
-            $this->register(new LzmaBitTreeDecodePattern());
-            $this->register(new LzmaLiteralDecodeMatchPattern());
+        if ($this->debugConfig->enableLzmaPattern) {
+            $this->register(new LzmaRangeDecodeBitPattern($this->debugConfig->traceHotPatterns));
+            $this->register(new LzmaBitTreeDecodeBytePattern($this->debugConfig->traceHotPatterns));
+            $this->register(new LzmaBitTreeDecodePattern($this->debugConfig->traceHotPatterns));
+            $this->register(new LzmaLiteralDecodeMatchPattern($this->debugConfig->traceHotPatterns));
         }
-        $this->register(new MemsetDwordLoopPattern());
-        $this->register(new MemmoveBackwardLoopPattern());
-        $this->register(new MovsbLoopPattern());
+        $this->register(new MemsetDwordLoopPattern($this->debugConfig->traceHotPatterns));
+        $this->register(new MemmoveBackwardLoopPattern($this->debugConfig->traceHotPatterns));
+        $this->register(new MovsbLoopPattern($this->debugConfig->traceHotPatterns));
+        $this->register(new StrcpyLoopPattern($this->debugConfig->traceHotPatterns));
         $this->register(new ShrdShlPattern());
         $this->register(new AddAdcPattern());
         $this->register(new CmpJccPattern());

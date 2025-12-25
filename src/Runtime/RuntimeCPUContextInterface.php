@@ -145,4 +145,10 @@ interface RuntimeCPUContextInterface
      * Set MXCSR (32-bit).
      */
     public function setMxcsr(int $mxcsr): void;
+
+    // ========================================
+    // MSR storage
+    // ========================================
+    public function readMsr(int $index): \PHPMachineEmulator\Util\UInt64;
+    public function writeMsr(int $index, \PHPMachineEmulator\Util\UInt64|int $value): void;
 }

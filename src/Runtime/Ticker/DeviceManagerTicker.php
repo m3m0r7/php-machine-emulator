@@ -55,12 +55,10 @@ class DeviceManagerTicker implements TickerInterface
     private function pollKeyboardInput(KeyboardContextInterface $ctx, RuntimeInterface $runtime): void
     {
         $screenWriter = $runtime->context()->screen()->screenWriter();
+        $screenWriter->flushIfNeeded();
 
         if ($screenWriter instanceof WindowScreenWriter) {
-            // SDL mode: poll events and check for key press
-            $screenWriter->window()->processEvents();
-            $screenWriter->flushIfNeeded();
-
+            // SDL mode: check for key press
             $keyCode = $screenWriter->pollKeyPress();
             if ($keyCode !== null) {
                 $scancode = ($keyCode >> 8) & 0xFF;

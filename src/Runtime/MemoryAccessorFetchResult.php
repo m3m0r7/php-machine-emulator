@@ -4,32 +4,13 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Runtime;
 
-use PHPMachineEmulator\Util\BinaryInteger;
-
 class MemoryAccessorFetchResult implements MemoryAccessorFetchResultInterface
 {
-    /** @var array<string, MemoryAccessorFetchResult> */
-    private static array $cache = [];
-
     public function __construct(
         protected int|null $value,
         protected int $storedSizeValue = 16,
         protected bool $alreadyDecoded = false,
     ) {
-    }
-
-    /**
-     * Get a cached instance for the given value and storedSize.
-     */
-    public static function fromCache(int|null $value, int $storedSize): self
-    {
-        // For null or alreadyDecoded cases, don't cache
-        if ($value === null) {
-            return new self($value, $storedSize);
-        }
-
-        $key = $value . '_' . $storedSize;
-        return self::$cache[$key] ??= new self($value, $storedSize);
     }
 
     public function asChar(): string

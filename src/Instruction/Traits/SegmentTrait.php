@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Traits;
 
 use PHPMachineEmulator\Exception\FaultException;
+use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -112,8 +113,25 @@ trait SegmentTrait
             default => 0xFFFF,
         };
         $linearMask = $this->linearMask($runtime);
+        $cpu = $runtime->context()->cpu();
 
-        if ($runtime->context()->cpu()->isProtectedMode()) {
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            if ($cpu->isProtectedMode()) {
+                $descriptor = $this->readSegmentDescriptor($runtime, $selector);
+                if ($descriptor === null || !$descriptor['present']) {
+                    throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
+                }
+                if (($descriptor['system'] ?? false)) {
+                    throw new FaultException(0x0D, $selector, sprintf('Selector 0x%04X is not a code segment', $selector));
+                }
+                if (!($descriptor['executable'] ?? false)) {
+                    throw new FaultException(0x0D, $selector, sprintf('Selector 0x%04X is not executable', $selector));
+                }
+            }
+            return ($offset & $mask) & $linearMask;
+        }
+
+        if ($cpu->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
@@ -160,8 +178,13 @@ trait SegmentTrait
             default => 0xFFFF,
         };
         $linearMask = $this->linearMask($runtime);
+        $cpu = $runtime->context()->cpu();
 
-        if ($runtime->context()->cpu()->isProtectedMode()) {
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            return ($linear & $linearMask) & $mask;
+        }
+
+        if ($cpu->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
@@ -375,6 +398,20 @@ trait SegmentTrait
             if (!$cpu->isLongMode()) {
                 // Long mode requires protected mode; keep defaults reasonable until CS is (re)loaded.
                 $cpu->setLongMode(true);
+
+                if ($runtime->logicBoard()->debug()->stopOnIa32eActive()) {
+                    $runtime->option()->logger()->warning(sprintf(
+                        'STOP: IA-32e activated at ip=0x%08X CR0=0x%08X CR4=0x%08X EFER=0x%08X CS=0x%04X SS=0x%04X RSP=0x%016X',
+                        $runtime->memory()->offset() & 0xFFFFFFFF,
+                        $cr0 & 0xFFFFFFFF,
+                        $cr4 & 0xFFFFFFFF,
+                        $efer & 0xFFFFFFFF,
+                        $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF,
+                        $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF,
+                        $ma->fetch(RegisterType::ESP)->asBytesBySize(64),
+                    ));
+                    throw new HaltException('Stopped by PHPME_STOP_ON_IA32E_ACTIVE');
+                }
             }
 
             $cs = $ma->fetch(RegisterType::CS)->asByte();

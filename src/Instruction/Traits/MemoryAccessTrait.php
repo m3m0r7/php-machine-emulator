@@ -418,9 +418,9 @@ trait MemoryAccessTrait
 
                         if ($x >= 0 && $x < $lfb['width'] && $y >= 0 && $y < $lfb['height']) {
                             $writer = $runtime->context()->screen()->screenWriter();
-                            $renderTerminal = getenv('PHPME_RENDER_LFB_TERMINAL');
+                            $renderTerminal = $runtime->logicBoard()->debug()->memoryAccess()->renderLfbToTerminal;
                             $shouldRender = !($writer instanceof TerminalScreenWriter)
-                                || ($renderTerminal !== false && $renderTerminal !== '' && $renderTerminal !== '0');
+                                || $renderTerminal;
 
                             if ($shouldRender) {
                                 $b = $value & 0xFF;
@@ -437,8 +437,7 @@ trait MemoryAccessTrait
                     }
                 }
 
-                $stopEnv = getenv('PHPME_STOP_ON_LFB_WRITE');
-                if ($stopEnv !== false && $stopEnv !== '' && $stopEnv !== '0') {
+                if ($runtime->logicBoard()->debug()->memoryAccess()->stopOnLfbWrite) {
                     $runtime->option()->logger()->warning(sprintf('LFB: write%d addr=0x%08X value=0x%X', $width, $address & 0xFFFFFFFF, $value & 0xFFFFFFFF));
                     throw new \PHPMachineEmulator\Exception\HaltException('Stopped by PHPME_STOP_ON_LFB_WRITE');
                 }

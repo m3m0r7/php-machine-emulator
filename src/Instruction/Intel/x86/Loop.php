@@ -19,7 +19,7 @@ class Loop implements InstructionInterface
      * Key: loop start address, Value: pattern info array or false if not a pattern
      * @var array<int, array|false>
      */
-    private static array $patternCache = [];
+    private array $patternCache = [];
 
     public function opcodes(): array
     {
@@ -114,8 +114,8 @@ class Loop implements InstructionInterface
         int $size
     ): ?ExecutionStatus {
         // Check pattern cache first
-        if (isset(self::$patternCache[$loopTarget])) {
-            $pattern = self::$patternCache[$loopTarget];
+        if (isset($this->patternCache[$loopTarget])) {
+            $pattern = $this->patternCache[$loopTarget];
             if ($pattern === false) {
                 return null; // Not a recognized pattern
             }
@@ -134,7 +134,7 @@ class Loop implements InstructionInterface
 
             // Check for MOV r8, r/m8 (opcode 0x8A)
             if ($byte1 !== 0x8A) {
-                self::$patternCache[$loopTarget] = false;
+                $this->patternCache[$loopTarget] = false;
                 return null;
             }
 
@@ -145,7 +145,7 @@ class Loop implements InstructionInterface
 
             // We need MOV AL, [something] - reg should be 0 (AL)
             if ($reg !== 0) {
-                self::$patternCache[$loopTarget] = false;
+                $this->patternCache[$loopTarget] = false;
                 return null;
             }
 
@@ -171,7 +171,7 @@ class Loop implements InstructionInterface
                 } elseif ($sibBase === 6) { // ESI
                     $sourceReg = RegisterType::ESI;
                 } else {
-                    self::$patternCache[$loopTarget] = false;
+                    $this->patternCache[$loopTarget] = false;
                     return null;
                 }
             } else {
@@ -190,7 +190,7 @@ class Loop implements InstructionInterface
             }
 
             if ($sourceReg === null) {
-                self::$patternCache[$loopTarget] = false;
+                $this->patternCache[$loopTarget] = false;
                 return null;
             }
 
@@ -204,7 +204,7 @@ class Loop implements InstructionInterface
             // Next should be CALL (0xE8)
             $callOpcode = $memory->byte();
             if ($callOpcode !== 0xE8) {
-                self::$patternCache[$loopTarget] = false;
+                $this->patternCache[$loopTarget] = false;
                 return null;
             }
 
@@ -229,7 +229,7 @@ class Loop implements InstructionInterface
                 'sibScale' => $sibScale,
             ];
 
-            self::$patternCache[$loopTarget] = $pattern;
+            $this->patternCache[$loopTarget] = $pattern;
 
             $runtime->option()->logger()->debug(sprintf(
                 'LOOP: Detected bulk byte-copy pattern at 0x%X, source=%s, callTarget=0x%X, counter=%d',

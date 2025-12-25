@@ -96,8 +96,14 @@ class TranslationBlock implements TranslationBlockInterface
                 ? $instructionRunner($instruction, $opcodes)
                 : $instruction->process($runtime, $opcodes);
 
-            // CRITICAL: Clear transient overrides (like operand size prefix) after each instruction
-            // Without this, prefixes from one instruction bleed into subsequent instructions in the block
+            // Prefix chaining: for instructions that return CONTINUE (e.g. REX/REP),
+            // transient overrides must remain active for the next instruction.
+            if ($status === ExecutionStatus::CONTINUE) {
+                return [$status, $memory->offset()];
+            }
+
+            // CRITICAL: Clear transient overrides (like operand size prefix) after each instruction.
+            // Without this, prefixes from one instruction bleed into subsequent instructions in the block.
             $runtime->context()->cpu()->clearTransientOverrides();
 
             // If instruction changed control flow (jump taken), stop block execution

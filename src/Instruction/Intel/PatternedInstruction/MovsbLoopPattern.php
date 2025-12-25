@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Instruction\Intel\PatternedInstruction;
 
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Stream\PagedMemoryStream;
 
 /**
  * Pattern: forward MOVSB loop with explicit end pointer in ECX.
@@ -24,6 +25,13 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
  */
 class MovsbLoopPattern extends AbstractPatternedInstruction
 {
+    private bool $traceHotPatterns;
+
+    public function __construct(bool $traceHotPatterns = false)
+    {
+        $this->traceHotPatterns = $traceHotPatterns;
+    }
+
     public function name(): string
     {
         return 'MOVSB forward loop';
@@ -175,6 +183,9 @@ class MovsbLoopPattern extends AbstractPatternedInstruction
                     if ($isMmio($srcPhys32) || $isMmio($dstPhys32)) {
                         return PatternedInstructionResult::skip($ip);
                     }
+                    if (self::rangeOverlapsObserverMemory($dstPhys32, $chunk)) {
+                        return PatternedInstructionResult::skip($ip);
+                    }
 
                     if (!$memory->ensureCapacity($srcPhys32 + $chunk)) {
                         return PatternedInstructionResult::skip($ip);
@@ -190,10 +201,14 @@ class MovsbLoopPattern extends AbstractPatternedInstruction
                     $remaining -= $chunk;
                 }
 
+                $physicalMemory = $memory instanceof PagedMemoryStream ? $memory->physicalStream() : $memory;
                 foreach ($segments as [$srcPhys32, $dstPhys32, $chunk]) {
-                    $memory->copy($memory, $srcPhys32, $dstPhys32, $chunk);
+                    $physicalMemory->copy($physicalMemory, $srcPhys32, $dstPhys32, $chunk);
                 }
             } else {
+                if (self::rangeOverlapsObserverMemory($dstLinear, $count)) {
+                    return PatternedInstructionResult::skip($ip);
+                }
                 if (!$memory->ensureCapacity($srcLinear + $count)) {
                     return PatternedInstructionResult::skip($ip);
                 }
@@ -208,8 +223,7 @@ class MovsbLoopPattern extends AbstractPatternedInstruction
 
             if (!$logged) {
                 $logged = true;
-                $env = getenv('PHPME_TRACE_HOT_PATTERNS');
-                if ($env !== false && trim($env) !== '' && trim($env) !== '0') {
+                if ($this->traceHotPatterns) {
                     $runtime->option()->logger()->warning(sprintf(
                         'HOT PATTERN exec: %s ip=0x%08X src=0x%08X dst=0x%08X bytes=%d',
                         $patternName,

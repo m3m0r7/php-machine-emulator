@@ -8,11 +8,21 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\InstructionExecutorInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Stream\PagedMemoryStream;
 use PHPMachineEmulator\Util\UInt64;
 
 class RepPrefix implements InstructionInterface
 {
     use Instructable;
+
+    /**
+     * VGA legacy video memory range (text/graphics).
+     *
+     * Writes to this range must go through MemoryAccessor to trigger observers
+     * (e.g., text mode 0xB8000) and other MMIO-like behavior.
+     */
+    private const VIDEO_MEM_MIN = 0x000A0000;
+    private const VIDEO_MEM_MAX_EXCLUSIVE = 0x000C0000;
 
     /**
      * String instructions that don't check ZF (MOVS, STOS, LODS, INS, OUTS).
@@ -29,23 +39,26 @@ class RepPrefix implements InstructionInterface
         Outs::class,
     ];
 
-    private static ?bool $traceGrubCfgCopy = null;
-    private static bool $tracedGrubCfgCopy = false;
+    private ?bool $traceGrubCfgCopy = null;
+    private bool $tracedGrubCfgCopy = false;
+
+    private static function rangesOverlap(int $minA, int $maxA, int $minB, int $maxB): bool
+    {
+        return $minA <= $maxB && $maxA >= $minB;
+    }
 
     public function opcodes(): array
     {
         return [0xF3, 0xF2];
     }
 
-    private static function shouldTraceGrubCfgCopy(): bool
+    private function shouldTraceGrubCfgCopy(RuntimeInterface $runtime): bool
     {
-        if (self::$traceGrubCfgCopy !== null) {
-            return self::$traceGrubCfgCopy;
+        if ($this->traceGrubCfgCopy !== null) {
+            return $this->traceGrubCfgCopy;
         }
-
-        $env = getenv('PHPME_TRACE_GRUBCFG_COPY');
-        self::$traceGrubCfgCopy = $env !== false && trim($env) !== '' && trim($env) !== '0';
-        return self::$traceGrubCfgCopy;
+        $this->traceGrubCfgCopy = $runtime->logicBoard()->debug()->trace()->traceGrubCfgCopy;
+        return $this->traceGrubCfgCopy;
     }
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
@@ -154,6 +167,12 @@ class RepPrefix implements InstructionInterface
                     // Execute without going through the full executor (which logs)
                     $result = $lastInstruction->process($runtime, $executor->lastOpcodes());
                     $lastResult = $result;
+
+                    // The executor normally clears transient prefix state after each instruction.
+                    // When we bypass it for speed, we must do the same to avoid prefix bleed.
+                    if ($result !== ExecutionStatus::CONTINUE) {
+                        $runtime->context()->cpu()->clearTransientOverrides();
+                    }
 
                     if ($result !== ExecutionStatus::SUCCESS) {
                         return $result;
@@ -398,7 +417,11 @@ class RepPrefix implements InstructionInterface
                     [$srcMin, $srcMax, $byteCount] = $this->bulkMovsRange($srcSegOff, $count, 1, $step);
                     [$dstMin, $dstMax] = $this->bulkMovsRange($dstSegOff, $count, 1, $step);
 
-                    if ($srcMin >= 0 && $dstMin >= 0 && $srcMax < 0xE0000000 && $dstMax < 0xE0000000) {
+                    $videoMax = self::VIDEO_MEM_MAX_EXCLUSIVE - 1;
+                    if ($srcMin >= 0 && $dstMin >= 0 && $srcMax < 0xE0000000 && $dstMax < 0xE0000000 &&
+                        !self::rangesOverlap($srcMin, $srcMax, self::VIDEO_MEM_MIN, $videoMax) &&
+                        !self::rangesOverlap($dstMin, $dstMax, self::VIDEO_MEM_MIN, $videoMax)
+                    ) {
                         $distance = $dstMin - $srcMin;
                         $overlapForward = $distance > 0 && $distance < $byteCount && $dstMin <= $srcMax;
 
@@ -475,7 +498,7 @@ class RepPrefix implements InstructionInterface
             }
         }
 
-        if (!self::$tracedGrubCfgCopy && self::shouldTraceGrubCfgCopy()) {
+        if (!$this->tracedGrubCfgCopy && $this->shouldTraceGrubCfgCopy($runtime)) {
             $fullCount = $count + 1;
             $firstSrc = ($srcSegOff - $step) & 0xFFFFFFFF;
             $firstDst = ($dstSegOff - $step) & 0xFFFFFFFF;
@@ -516,7 +539,7 @@ class RepPrefix implements InstructionInterface
                     $ascii,
                 ));
 
-                self::$tracedGrubCfgCopy = true;
+                $this->tracedGrubCfgCopy = true;
             }
         }
 
@@ -625,7 +648,7 @@ class RepPrefix implements InstructionInterface
             }
         }
 
-        if (!self::$tracedGrubCfgCopy && self::shouldTraceGrubCfgCopy()) {
+        if (!$this->tracedGrubCfgCopy && $this->shouldTraceGrubCfgCopy($runtime)) {
             $fullElems = $count + 1;
             $fullBytes = $fullElems * $width;
             $firstSrc = ($srcSegOff - ($step * $width)) & 0xFFFFFFFF;
@@ -668,7 +691,7 @@ class RepPrefix implements InstructionInterface
                     $ascii,
                 ));
 
-                self::$tracedGrubCfgCopy = true;
+                $this->tracedGrubCfgCopy = true;
             }
         }
 
@@ -867,6 +890,14 @@ class RepPrefix implements InstructionInterface
         [$srcMin, $srcMax, $byteCount] = $this->bulkMovsRange($srcLinear, $count, $width, $step);
         [$dstMin, $dstMax] = $this->bulkMovsRange($dstLinear, $count, $width, $step);
 
+        // Avoid MMIO-like ranges that rely on observers (e.g., VGA text/graphics memory).
+        $videoMax = self::VIDEO_MEM_MAX_EXCLUSIVE - 1;
+        if (self::rangesOverlap($srcMin, $srcMax, self::VIDEO_MEM_MIN, $videoMax) ||
+            self::rangesOverlap($dstMin, $dstMax, self::VIDEO_MEM_MIN, $videoMax)
+        ) {
+            return false;
+        }
+
         // Stay away from common MMIO ranges (VBE LFB, APIC, etc.).
         if ($srcMin < 0 || $dstMin < 0) {
             return false;
@@ -949,6 +980,14 @@ class RepPrefix implements InstructionInterface
 
         [$srcMin, $srcMax, $byteCount] = $this->bulkMovsRange($srcLinear, $count, $width, $step);
         [$dstMin, $dstMax] = $this->bulkMovsRange($dstLinear, $count, $width, $step);
+
+        // Avoid MMIO-like ranges that rely on observers (e.g., VGA text/graphics memory).
+        $videoMax = self::VIDEO_MEM_MAX_EXCLUSIVE - 1;
+        if (self::rangesOverlap($srcMin, $srcMax, self::VIDEO_MEM_MIN, $videoMax) ||
+            self::rangesOverlap($dstMin, $dstMax, self::VIDEO_MEM_MIN, $videoMax)
+        ) {
+            return null;
+        }
 
         // Stay away from common MMIO ranges (VBE LFB, APIC, etc.) in linear space.
         if ($srcMin < 0 || $dstMin < 0) {
@@ -1099,8 +1138,9 @@ class RepPrefix implements InstructionInterface
             }
         }
 
+        $physicalMemory = $memory instanceof PagedMemoryStream ? $memory->physicalStream() : $memory;
         foreach ($segments as [$srcPhys32, $dstPhys32, $chunk]) {
-            $memory->copy($memory, $srcPhys32, $dstPhys32, $chunk);
+            $physicalMemory->copy($physicalMemory, $srcPhys32, $dstPhys32, $chunk);
         }
 
         return true;
@@ -1177,6 +1217,10 @@ class RepPrefix implements InstructionInterface
         $dstMax = $dstMin + $byteCount - 1;
 
         if ($dstMin < 0) {
+            return false;
+        }
+        $videoMax = self::VIDEO_MEM_MAX_EXCLUSIVE - 1;
+        if (self::rangesOverlap($dstMin, $dstMax, self::VIDEO_MEM_MIN, $videoMax)) {
             return false;
         }
         if ($dstMax >= 0xE0000000) {

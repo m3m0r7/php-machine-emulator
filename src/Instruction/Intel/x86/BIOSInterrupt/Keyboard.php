@@ -138,21 +138,23 @@ class Keyboard implements InterruptInterface
                 if ($byte === 0x0A) {
                     $byte = 0x0D;
                 }
-                // Return key in AX (scancode 0, ascii = byte)
+                $scanCode = $this->scanCodeForAscii($byte & 0xFF);
+                // Return key in AX (AH=scancode, AL=ascii)
                 $keyboard->setWaitingForKey(false);
-                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $byte);
+                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, (($scanCode & 0xFF) << 8) | ($byte & 0xFF));
 
                 $runtime->option()->logger()->debug(sprintf(
-                    'INT 16h: polled key, ascii=0x%02X',
+                    'INT 16h: polled key, ascii=0x%02X scancode=0x%02X',
                     $byte
+                    ,
+                    $scanCode & 0xFF,
                 ));
                 return;
             }
         }
 
         // Set waiting state for async completion by DeviceManagerTicker
-        $stopEnv = getenv('PHPME_STOP_ON_INT16_WAIT');
-        if ($stopEnv !== false && $stopEnv !== '' && $stopEnv !== '0') {
+        if ($runtime->logicBoard()->debug()->trace()->stopOnInt16Wait) {
             $runtime->option()->logger()->warning(sprintf('INT 16h: waiting for key (AH=0x%02X)', $function));
             throw new HaltException('Stopped by PHPME_STOP_ON_INT16_WAIT');
         }
@@ -168,6 +170,18 @@ class Keyboard implements InterruptInterface
 
         // Return with AX=0 for now, will be updated by DeviceManagerTicker
         $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, 0);
+    }
+
+    private function scanCodeForAscii(int $ascii): int
+    {
+        return match ($ascii & 0xFF) {
+            0x0D => 0x1C, // Enter
+            0x1B => 0x01, // Esc
+            0x08 => 0x0E, // Backspace
+            0x09 => 0x0F, // Tab
+            0x20 => 0x39, // Space
+            default => 0x00, // best-effort: unknown
+        };
     }
 
     /**

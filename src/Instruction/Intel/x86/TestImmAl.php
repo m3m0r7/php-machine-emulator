@@ -66,7 +66,7 @@ class TestImmAl implements InstructionInterface
                 return ExecutionStatus::SUCCESS;
             }
             if ($opSize === 32) {
-                $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asDword();
+                $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(32);
                 $imm = $runtime->memory()->dword();
                 $result = ($ax & $imm) & 0xFFFFFFFF;
             } else {

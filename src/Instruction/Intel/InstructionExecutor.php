@@ -6,7 +6,6 @@ namespace PHPMachineEmulator\Instruction\Intel;
 
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Exception\FaultException;
-use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Exception\NotFoundInstructionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
@@ -23,6 +22,7 @@ class InstructionExecutor implements InstructionExecutorInterface
     private ?InstructionInterface $lastInstruction = null;
     private ?array $lastOpcodes = null;
     private int $lastInstructionPointer = 0;
+    private int $prevInstructionPointer = 0;
     private int $zeroOpcodeCount = 0;
 
     /**
@@ -44,118 +44,9 @@ class InstructionExecutor implements InstructionExecutorInterface
     private array $hitCount = [];
 
     /**
-     * Cached decision for per-instruction execution tracing.
+     * Debug/helper state (trace/stop logic, counters).
      */
-    private ?bool $traceExecution = null;
-
-    /**
-     * Optional executed instruction counter (for profiling/debugging).
-     */
-    private int $executedInstructions = 0;
-
-    /**
-     * Enable executed-instruction counting (env-gated).
-     */
-    private ?bool $countInstructionsEnabled = null;
-
-    /**
-     * IP sampling interval (in guest instructions). 0 disables sampling.
-     */
-    private ?int $ipSampleEvery = null;
-
-    /**
-     * Countdown to next sample (avoids modulus on hot path).
-     */
-    private int $ipSampleCountdown = 0;
-
-    /**
-     * Sampled IP hit counts (only when sampling enabled).
-     *
-     * @var array<int,int>
-     */
-    private array $ipSampleHits = [];
-
-    /**
-     * Optional stop-after instruction count (env-gated).
-     */
-    private ?int $stopAfterInsns = null;
-
-    /**
-     * Remaining instructions until stop (hot path decrement).
-     */
-    private int $stopAfterInsnsRemaining = 0;
-
-    /**
-     * Optional stop-after seconds (env-gated).
-     */
-    private ?int $stopAfterSecs = null;
-
-    /**
-     * Deadline timestamp (microtime(true)) for stop-after seconds.
-     */
-    private ?float $stopAfterDeadline = null;
-
-    /**
-     * Check wall-clock time only every N instructions to keep overhead low.
-     */
-    private int $stopAfterTimeEvery = 10000;
-
-    /**
-     * Countdown to the next wall-clock time check.
-     */
-    private int $stopAfterTimeCountdown = 0;
-
-    /**
-     * Optional IP tracing set (env-gated).
-     *
-     * @var array<int,true>|null
-     */
-    private ?array $traceIpSet = null;
-
-    /**
-     * Optional stop-at-IP set (env-gated).
-     *
-     * @var array<int,true>|null
-     */
-    private ?array $stopIpSet = null;
-
-    /**
-     * Max logs per traced IP.
-     */
-    private ?int $traceIpLimit = null;
-
-    /**
-     * Logged counts per traced IP.
-     *
-     * @var array<int,int>
-     */
-    private array $traceIpCounts = [];
-
-    /**
-     * Optional control-flow target tracing set (env-gated).
-     *
-     * @var array<int,true>|null
-     */
-    private ?array $traceCflowToSet = null;
-
-    /**
-     * Optional stop-on-control-flow target set (env-gated).
-     *
-     * @var array<int,true>|null
-     */
-    private ?array $stopCflowToSet = null;
-
-    /**
-     * Logged counts per traced control-flow target IP.
-     *
-     * @var array<int,int>
-     */
-    private array $traceCflowCounts = [];
-
-    /**
-     * Max logs per traced control-flow target.
-     */
-    private ?int $traceCflowLimit = null;
+    private ?InstructionExecutorDebug $debug = null;
 
     /**
      * Translation Blocks: startIP => TranslationBlock
@@ -166,21 +57,24 @@ class InstructionExecutor implements InstructionExecutorInterface
     /**
      * Patterned instructions list for optimizing frequently-executed code patterns
      */
-    private PatternedInstructionsList $patternedInstructionsList;
+    private ?PatternedInstructionsList $patternedInstructionsList = null;
 
     private const HOTSPOT_THRESHOLD = 1;
 
     public function __construct()
     {
-        $this->patternedInstructionsList = new PatternedInstructionsList();
     }
 
     public function execute(RuntimeInterface $runtime): ExecutionStatus
     {
         $ip = $runtime->memory()->offset();
+        $runtime->context()->cpu()->syncCompatibilityModeWithCs();
+        $this->prevInstructionPointer = $this->lastInstructionPointer;
         $this->lastInstructionPointer = $ip;
         $this->executedPages[($ip & 0xFFFFFFFF) >> 12] = true;
-        $this->maybeStopAtIp($runtime, $ip);
+        $debug = $this->debug($runtime);
+        $debug->maybeStopAtIp($runtime, $ip, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
+        $debug->maybeStopOnRspBelow($runtime, $ip, $this->prevInstructionPointer);
 
         // REP/iteration handler active? Fall back to single-step to keep lastInstruction accurate.
         if ($runtime->context()->cpu()->iteration()->isActive()) {
@@ -188,11 +82,11 @@ class InstructionExecutor implements InstructionExecutorInterface
         }
 
         // Try hot pattern detection first (fastest path for known patterns)
-        $patternResult = $this->patternedInstructionsList->tryExecutePattern($runtime, $ip);
+        $patternResult = $this->patterns($runtime)->tryExecutePattern($runtime, $ip);
         if ($patternResult !== null && $patternResult->isSuccess()) {
-            $this->recordExecution($runtime, $ip);
-            $this->maybeTraceControlFlowTarget($runtime, $ip, $patternResult->ip(), 'pattern');
-            $this->maybeStopOnControlFlowTarget($runtime, $ip, $patternResult->ip(), null, null, 'pattern');
+            $debug->recordExecution($runtime, $ip);
+            $debug->maybeTraceControlFlowTarget($runtime, $ip, $patternResult->ip(), 'pattern');
+            $debug->maybeStopOnControlFlowTarget($runtime, $ip, $patternResult->ip(), null, null, 'pattern');
             return $patternResult->executionStatus();
         }
 
@@ -217,232 +111,24 @@ class InstructionExecutor implements InstructionExecutorInterface
         return $this->executeSingleInstruction($runtime, $ip);
     }
 
-    private function countInstructionsEnabled(): bool
+    private function debug(RuntimeInterface $runtime): InstructionExecutorDebug
     {
-        if ($this->countInstructionsEnabled !== null) {
-            return $this->countInstructionsEnabled;
+        if ($this->debug === null) {
+            $this->debug = new InstructionExecutorDebug($runtime->logicBoard()->debug());
         }
 
-        $env = getenv('PHPME_COUNT_INSNS');
-        $explicit = $env !== false && trim($env) !== '' && trim($env) !== '0';
-        $this->countInstructionsEnabled = $explicit || ($this->ipSampleEvery() > 0);
-        return $this->countInstructionsEnabled;
+        return $this->debug;
     }
 
-    private function ipSampleEvery(): int
+    private function patterns(RuntimeInterface $runtime): PatternedInstructionsList
     {
-        if ($this->ipSampleEvery !== null) {
-            return $this->ipSampleEvery;
+        if ($this->patternedInstructionsList === null) {
+            $this->patternedInstructionsList = new PatternedInstructionsList(
+                $runtime->logicBoard()->debug()->patterns(),
+            );
         }
 
-        $env = getenv('PHPME_IP_SAMPLE_EVERY');
-        if ($env === false) {
-            $this->ipSampleEvery = 0;
-            return 0;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->ipSampleEvery = 0;
-            return 0;
-        }
-
-        if ($trimmed === '1') {
-            // A small but sane default when enabled.
-            $this->ipSampleEvery = 10000;
-            return $this->ipSampleEvery;
-        }
-
-        if (preg_match('/^\\d+$/', $trimmed) === 1) {
-            $this->ipSampleEvery = max(1, (int) $trimmed);
-            return $this->ipSampleEvery;
-        }
-
-        $this->ipSampleEvery = 0;
-        return 0;
-    }
-
-    private function stopAfterInsns(): int
-    {
-        if ($this->stopAfterInsns !== null) {
-            return $this->stopAfterInsns;
-        }
-
-        $env = getenv('PHPME_STOP_AFTER_INSNS');
-        if ($env === false) {
-            $this->stopAfterInsns = 0;
-            return 0;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->stopAfterInsns = 0;
-            return 0;
-        }
-
-        if (preg_match('/^\\d+$/', $trimmed) === 1) {
-            $this->stopAfterInsns = max(1, (int) $trimmed);
-            $this->stopAfterInsnsRemaining = $this->stopAfterInsns;
-            return $this->stopAfterInsns;
-        }
-
-        $this->stopAfterInsns = 0;
-        return 0;
-    }
-
-    private function stopAfterSecs(): int
-    {
-        if ($this->stopAfterSecs !== null) {
-            return $this->stopAfterSecs;
-        }
-
-        $env = getenv('PHPME_STOP_AFTER_SECS');
-        if ($env === false) {
-            $this->stopAfterSecs = 0;
-            return 0;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->stopAfterSecs = 0;
-            return 0;
-        }
-
-        if (preg_match('/^\\d+$/', $trimmed) === 1) {
-            $this->stopAfterSecs = max(1, (int) $trimmed);
-            return $this->stopAfterSecs;
-        }
-
-        $this->stopAfterSecs = 0;
-        return 0;
-    }
-
-    private function maybeStopAfter(RuntimeInterface $runtime): void
-    {
-        $logSampleReport = function () use ($runtime): void {
-            $report = $this->getIpSampleReport(20);
-            if (($report['every'] ?? 0) > 0 && ($report['samples'] ?? 0) > 0) {
-                $runtime->option()->logger()->warning(sprintf(
-                    'IP SAMPLE: every=%d insns=%d samples=%d unique=%d',
-                    (int) ($report['every'] ?? 0),
-                    (int) ($report['instructions'] ?? 0),
-                    (int) ($report['samples'] ?? 0),
-                    (int) ($report['unique'] ?? 0),
-                ));
-                foreach (($report['top'] ?? []) as $row) {
-                    $ipVal = (int) ($row[0] ?? 0);
-                    $hits = (int) ($row[1] ?? 0);
-                    $runtime->option()->logger()->warning(sprintf(
-                        'IP SAMPLE TOP: ip=0x%08X hits=%d',
-                        $ipVal & 0xFFFFFFFF,
-                        $hits,
-                    ));
-                }
-            } else {
-                $runtime->option()->logger()->warning(sprintf(
-                    'INSNS: total=%d',
-                    (int) $this->instructionCount(),
-                ));
-            }
-        };
-
-        $stopAfterInsns = $this->stopAfterInsns();
-        if ($stopAfterInsns > 0) {
-            $this->stopAfterInsnsRemaining--;
-            if ($this->stopAfterInsnsRemaining <= 0) {
-                $runtime->option()->logger()->warning(sprintf(
-                    'STOP: reached PHPME_STOP_AFTER_INSNS=%d at ip=0x%08X',
-                    $stopAfterInsns,
-                    $runtime->memory()->offset() & 0xFFFFFFFF,
-                ));
-                $logSampleReport();
-                throw new HaltException('Stopped by PHPME_STOP_AFTER_INSNS');
-            }
-        }
-
-        $secs = $this->stopAfterSecs();
-        if ($secs <= 0) {
-            return;
-        }
-
-        if ($this->stopAfterDeadline === null) {
-            $this->stopAfterDeadline = microtime(true) + (float) $secs;
-            $everyEnv = getenv('PHPME_STOP_AFTER_TIME_EVERY');
-            if ($everyEnv !== false) {
-                $trimmed = trim($everyEnv);
-                if ($trimmed !== '' && $trimmed !== '0' && preg_match('/^\\d+$/', $trimmed) === 1) {
-                    $this->stopAfterTimeEvery = max(1, (int) $trimmed);
-                }
-            }
-            $this->stopAfterTimeCountdown = $this->stopAfterTimeEvery;
-        }
-
-        if ($this->stopAfterTimeCountdown <= 0) {
-            $this->stopAfterTimeCountdown = $this->stopAfterTimeEvery;
-        }
-        $this->stopAfterTimeCountdown--;
-        if ($this->stopAfterTimeCountdown !== 0) {
-            return;
-        }
-
-        if (microtime(true) >= ($this->stopAfterDeadline ?? 0.0)) {
-            $runtime->option()->logger()->warning(sprintf(
-                'STOP: reached PHPME_STOP_AFTER_SECS=%d at ip=0x%08X',
-                $secs,
-                $runtime->memory()->offset() & 0xFFFFFFFF,
-            ));
-            $logSampleReport();
-            throw new HaltException('Stopped by PHPME_STOP_AFTER_SECS');
-        }
-    }
-
-    private function recordExecution(RuntimeInterface $runtime, int $ip): void
-    {
-        $every = $this->ipSampleEvery();
-        if ($every <= 0 && !$this->countInstructionsEnabled() && $this->stopAfterInsns() <= 0 && $this->stopAfterSecs() <= 0) {
-            return;
-        }
-
-        $this->executedInstructions++;
-        $this->maybeStopAfter($runtime);
-
-        if ($every <= 0) {
-            return;
-        }
-
-        if ($this->ipSampleCountdown <= 0) {
-            $this->ipSampleCountdown = $every;
-        }
-
-        $this->ipSampleCountdown--;
-        if ($this->ipSampleCountdown !== 0) {
-            return;
-        }
-
-        $this->ipSampleHits[$ip] = ($this->ipSampleHits[$ip] ?? 0) + 1;
-        $this->ipSampleCountdown = $every;
-    }
-
-    private function shouldTraceExecution(RuntimeInterface $runtime): bool
-    {
-        if ($this->traceExecution !== null) {
-            return $this->traceExecution;
-        }
-
-        $env = getenv('PHPME_TRACE_EXEC');
-        if ($env !== false && trim($env) !== '' && trim($env) !== '0') {
-            $this->traceExecution = true;
-            return true;
-        }
-
-        $logger = $runtime->option()->logger();
-        if ($logger instanceof \Monolog\Logger) {
-            $this->traceExecution = $logger->isHandling(\Monolog\Level::Debug);
-            return $this->traceExecution;
-        }
-
-        $this->traceExecution = false;
-        return false;
+        return $this->patternedInstructionsList;
     }
 
     /**
@@ -452,9 +138,12 @@ class InstructionExecutor implements InstructionExecutorInterface
     {
         $memory = $runtime->memory();
         $memoryAccessor = $runtime->memoryAccessor();
+        $debug = $this->debug($runtime);
 
-        $this->maybeTraceIp($runtime, $ip);
-        $this->recordExecution($runtime, $ip);
+        $debug->maybeTraceIp($runtime, $ip);
+        $debug->maybeStopAtIp($runtime, $ip, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
+        $debug->maybeStopOnRspBelow($runtime, $ip, $this->prevInstructionPointer);
+        $debug->recordExecution($runtime, $ip);
 
         // Use decode cache when available
         if (isset($this->decodeCache[$ip])) {
@@ -513,24 +202,18 @@ class InstructionExecutor implements InstructionExecutorInterface
         $this->lastOpcodes = $opcodes;
         $this->lastInstruction = $instruction;
 
-        // Detect infinite loop
-        if ($opcodes === [0x00]) {
-            $this->zeroOpcodeCount++;
-            if ($this->zeroOpcodeCount >= 255) {
-                throw new ExecutionException(sprintf(
-                    'Infinite loop detected: 255 consecutive 0x00 opcodes at IP=0x%05X',
-                    $this->lastInstructionPointer
-                ));
-            }
-        } else {
-            $this->zeroOpcodeCount = 0;
-        }
+        $this->maybeStopOnZeroOpcodeLoop($debug, $opcodes, $this->lastInstructionPointer);
 
-        if ($this->shouldTraceExecution($runtime)) {
-            $this->logExecution($runtime, $ip, $opcodes);
+        if ($debug->shouldTraceExecution($runtime)) {
+            $debug->logExecution($runtime, $ip, $opcodes);
         }
 
         $status = $this->executeInstruction($runtime, $instruction, $opcodes);
+        // Clear transient prefix state after executing a real instruction.
+        // Prefix-only instructions (REX/REP) return CONTINUE and must keep the state for the next instruction.
+        if ($status !== ExecutionStatus::CONTINUE) {
+            $runtime->context()->cpu()->clearTransientOverrides();
+        }
         $this->maybeTraceControlFlow($runtime, $ip, $instruction, $opcodes);
         return $status;
     }
@@ -547,10 +230,14 @@ class InstructionExecutor implements InstructionExecutorInterface
         $cflowInstruction = null;
         $cflowOpcodes = null;
 
-        $beforeInstruction = function (int $ipBefore, InstructionInterface $instruction, array $opcodes) use ($runtime, &$cflowIpBefore, &$cflowInstruction, &$cflowOpcodes): void {
-            $this->maybeTraceIp($runtime, $ipBefore);
-            $this->maybeStopAtIp($runtime, $ipBefore);
-            $this->recordExecution($runtime, $ipBefore);
+        $debug = $this->debug($runtime);
+
+        $beforeInstruction = function (int $ipBefore, InstructionInterface $instruction, array $opcodes) use ($runtime, $debug, &$cflowIpBefore, &$cflowInstruction, &$cflowOpcodes): void {
+            $runtime->context()->cpu()->syncCompatibilityModeWithCs();
+            $debug->maybeTraceIp($runtime, $ipBefore);
+            $debug->maybeStopAtIp($runtime, $ipBefore, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
+            $debug->maybeStopOnRspBelow($runtime, $ipBefore, $this->prevInstructionPointer);
+            $debug->recordExecution($runtime, $ipBefore);
             $this->lastInstructionPointer = $ipBefore;
             $this->lastInstruction = $instruction;
             $this->lastOpcodes = $opcodes;
@@ -561,20 +248,10 @@ class InstructionExecutor implements InstructionExecutorInterface
             $cflowInstruction = $instruction;
             $cflowOpcodes = $opcodes;
 
-            if ($opcodes === [0x00]) {
-                $this->zeroOpcodeCount++;
-                if ($this->zeroOpcodeCount >= 255) {
-                    throw new ExecutionException(sprintf(
-                        'Infinite loop detected: 255 consecutive 0x00 opcodes at IP=0x%05X',
-                        $this->lastInstructionPointer
-                    ));
-                }
-            } else {
-                $this->zeroOpcodeCount = 0;
-            }
+            $this->maybeStopOnZeroOpcodeLoop($debug, $opcodes, $this->lastInstructionPointer);
 
-            if ($this->shouldTraceExecution($runtime)) {
-                $this->logExecution($runtime, $ipBefore, $opcodes);
+            if ($debug->shouldTraceExecution($runtime)) {
+                $debug->logExecution($runtime, $ipBefore, $opcodes);
             }
         };
 
@@ -595,13 +272,13 @@ class InstructionExecutor implements InstructionExecutorInterface
 
             // Allow hot patterns to override TB chaining (important for CALL-heavy loops).
             // When a TB ends at a hot call target, chaining would otherwise bypass the pattern engine.
-            $this->maybeTraceIp($runtime, $exitIp);
-            $this->maybeStopAtIp($runtime, $exitIp);
+            $debug->maybeTraceIp($runtime, $exitIp);
+            $debug->maybeStopAtIp($runtime, $exitIp, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
             $patternResult = $this->patternedInstructionsList->tryExecutePattern($runtime, $exitIp);
             if ($patternResult !== null && $patternResult->isSuccess()) {
-                $this->recordExecution($runtime, $exitIp);
-                $this->maybeTraceControlFlowTarget($runtime, $exitIp, $patternResult->ip(), 'pattern');
-                $this->maybeStopOnControlFlowTarget($runtime, $exitIp, $patternResult->ip(), null, null, 'pattern');
+                $debug->recordExecution($runtime, $exitIp);
+                $debug->maybeTraceControlFlowTarget($runtime, $exitIp, $patternResult->ip(), 'pattern');
+                $debug->maybeStopOnControlFlowTarget($runtime, $exitIp, $patternResult->ip(), null, null, 'pattern');
                 $status = $patternResult->executionStatus();
                 if ($status !== ExecutionStatus::SUCCESS) {
                     return $status;
@@ -647,359 +324,6 @@ class InstructionExecutor implements InstructionExecutorInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    /**
-     * Trace execution at specific IPs for debugging (env-gated).
-     *
-     * - PHPME_TRACE_IP=0x89FA or "0x89FA,0x8A12"
-     * - PHPME_TRACE_IP_LIMIT=10
-     */
-    private function maybeTraceIp(RuntimeInterface $runtime, int $ip): void
-    {
-        $set = $this->traceIpSet();
-        if ($set === [] || !isset($set[$ip & 0xFFFFFFFF])) {
-            return;
-        }
-
-        $limit = $this->traceIpLimit();
-        $count = ($this->traceIpCounts[$ip] ?? 0);
-        if ($count >= $limit) {
-            return;
-        }
-        $this->traceIpCounts[$ip] = $count + 1;
-
-        $cpu = $runtime->context()->cpu();
-        $ma = $runtime->memoryAccessor();
-
-        $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
-        $ds = $ma->fetch(RegisterType::DS)->asByte() & 0xFFFF;
-        $ss = $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF;
-
-        $csCached = $cpu->getCachedSegmentDescriptor(RegisterType::CS);
-        $dsCached = $cpu->getCachedSegmentDescriptor(RegisterType::DS);
-        $ssCached = $cpu->getCachedSegmentDescriptor(RegisterType::SS);
-
-        $bytes = [];
-        $memory = $runtime->memory();
-        $saved = $memory->offset();
-        $memory->setOffset($ip);
-        for ($i = 0; $i < 16 && !$memory->isEOF(); $i++) {
-            $bytes[] = $memory->byte();
-        }
-        $memory->setOffset($saved);
-
-        $hex = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $bytes));
-
-        $runtime->option()->logger()->warning(sprintf(
-            'TRACE_IP: ip=0x%08X bytes=%s PM=%d PG=%d LM=%d op=%d addr=%d A20=%d CS=0x%04X DS=0x%04X SS=0x%04X csBase=0x%08X csDef=%s dsBase=0x%08X ssBase=0x%08X',
-            $ip & 0xFFFFFFFF,
-            $hex,
-            $cpu->isProtectedMode() ? 1 : 0,
-            $cpu->isPagingEnabled() ? 1 : 0,
-            $cpu->isLongMode() ? 1 : 0,
-            $cpu->operandSize(),
-            $cpu->addressSize(),
-            $cpu->isA20Enabled() ? 1 : 0,
-            $cs,
-            $ds,
-            $ss,
-            (int) (($csCached['base'] ?? 0) & 0xFFFFFFFF),
-            $csCached === null ? 'n/a' : (string) ($csCached['default'] ?? 'n/a'),
-            (int) (($dsCached['base'] ?? 0) & 0xFFFFFFFF),
-            (int) (($ssCached['base'] ?? 0) & 0xFFFFFFFF),
-        ));
-    }
-
-    /**
-     * @return array<int,true>
-     */
-    private function traceIpSet(): array
-    {
-        if ($this->traceIpSet !== null) {
-            return $this->traceIpSet;
-        }
-
-        $env = getenv('PHPME_TRACE_IP');
-        if ($env === false) {
-            $this->traceIpSet = [];
-            return $this->traceIpSet;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->traceIpSet = [];
-            return $this->traceIpSet;
-        }
-
-        $parts = preg_split('/[\\s,]+/', $trimmed);
-        $set = [];
-        foreach ($parts as $part) {
-            if ($part === null) {
-                continue;
-            }
-            $p = trim($part);
-            if ($p === '') {
-                continue;
-            }
-
-            if (preg_match('/^0x[0-9a-fA-F]+$/', $p) === 1) {
-                $set[(int) hexdec(substr($p, 2)) & 0xFFFFFFFF] = true;
-                continue;
-            }
-            if (preg_match('/^\\d+$/', $p) === 1) {
-                $set[(int) $p & 0xFFFFFFFF] = true;
-                continue;
-            }
-        }
-
-        $this->traceIpSet = $set;
-        return $this->traceIpSet;
-    }
-
-    /**
-     * @return array<int,true>
-     */
-    private function stopIpSet(): array
-    {
-        if ($this->stopIpSet !== null) {
-            return $this->stopIpSet;
-        }
-
-        $env = getenv('PHPME_STOP_AT_IP');
-        if ($env === false) {
-            $this->stopIpSet = [];
-            return $this->stopIpSet;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->stopIpSet = [];
-            return $this->stopIpSet;
-        }
-
-        $parts = preg_split('/[\\s,]+/', $trimmed);
-        $set = [];
-        foreach ($parts as $part) {
-            if ($part === null) {
-                continue;
-            }
-            $p = trim($part);
-            if ($p === '') {
-                continue;
-            }
-
-            if (preg_match('/^0x[0-9a-fA-F]+$/', $p) === 1) {
-                $set[(int) hexdec(substr($p, 2)) & 0xFFFFFFFF] = true;
-                continue;
-            }
-            if (preg_match('/^\\d+$/', $p) === 1) {
-                $set[(int) $p & 0xFFFFFFFF] = true;
-                continue;
-            }
-        }
-
-        $this->stopIpSet = $set;
-        return $this->stopIpSet;
-    }
-
-    private function traceIpLimit(): int
-    {
-        if ($this->traceIpLimit !== null) {
-            return $this->traceIpLimit;
-        }
-
-        $env = getenv('PHPME_TRACE_IP_LIMIT');
-        if ($env === false) {
-            $this->traceIpLimit = 10;
-            return $this->traceIpLimit;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->traceIpLimit = 10;
-            return $this->traceIpLimit;
-        }
-
-        if (preg_match('/^\\d+$/', $trimmed) === 1) {
-            $this->traceIpLimit = max(1, (int) $trimmed);
-            return $this->traceIpLimit;
-        }
-
-        $this->traceIpLimit = 10;
-        return $this->traceIpLimit;
-    }
-
-    /**
-     * @return array<int,true>
-     */
-    private function traceCflowToSet(): array
-    {
-        if ($this->traceCflowToSet !== null) {
-            return $this->traceCflowToSet;
-        }
-
-        $env = getenv('PHPME_TRACE_CFLOW_TO');
-        if ($env === false) {
-            $this->traceCflowToSet = [];
-            return $this->traceCflowToSet;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->traceCflowToSet = [];
-            return $this->traceCflowToSet;
-        }
-
-        $parts = preg_split('/[\\s,]+/', $trimmed);
-        $set = [];
-        foreach ($parts as $part) {
-            if ($part === null) {
-                continue;
-            }
-            $p = trim($part);
-            if ($p === '') {
-                continue;
-            }
-
-            if (preg_match('/^0x[0-9a-fA-F]+$/', $p) === 1) {
-                $set[(int) hexdec(substr($p, 2)) & 0xFFFFFFFF] = true;
-                continue;
-            }
-            if (preg_match('/^\\d+$/', $p) === 1) {
-                $set[(int) $p & 0xFFFFFFFF] = true;
-                continue;
-            }
-        }
-
-        $this->traceCflowToSet = $set;
-        return $this->traceCflowToSet;
-    }
-
-    /**
-     * @return array<int,true>
-     */
-    private function stopCflowToSet(): array
-    {
-        if ($this->stopCflowToSet !== null) {
-            return $this->stopCflowToSet;
-        }
-
-        $env = getenv('PHPME_STOP_ON_CFLOW_TO');
-        if ($env === false) {
-            $this->stopCflowToSet = [];
-            return $this->stopCflowToSet;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->stopCflowToSet = [];
-            return $this->stopCflowToSet;
-        }
-
-        $parts = preg_split('/[\\s,]+/', $trimmed);
-        $set = [];
-        foreach ($parts as $part) {
-            if ($part === null) {
-                continue;
-            }
-            $p = trim($part);
-            if ($p === '') {
-                continue;
-            }
-
-            if (preg_match('/^0x[0-9a-fA-F]+$/', $p) === 1) {
-                $set[(int) hexdec(substr($p, 2)) & 0xFFFFFFFF] = true;
-                continue;
-            }
-            if (preg_match('/^\\d+$/', $p) === 1) {
-                $set[(int) $p & 0xFFFFFFFF] = true;
-                continue;
-            }
-        }
-
-        $this->stopCflowToSet = $set;
-        return $this->stopCflowToSet;
-    }
-
-    private function traceCflowLimit(): int
-    {
-        if ($this->traceCflowLimit !== null) {
-            return $this->traceCflowLimit;
-        }
-
-        $env = getenv('PHPME_TRACE_CFLOW_LIMIT');
-        if ($env === false) {
-            $this->traceCflowLimit = 10;
-            return $this->traceCflowLimit;
-        }
-
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            $this->traceCflowLimit = 10;
-            return $this->traceCflowLimit;
-        }
-
-        if (preg_match('/^\\d+$/', $trimmed) === 1) {
-            $this->traceCflowLimit = max(1, (int) $trimmed);
-            return $this->traceCflowLimit;
-        }
-
-        $this->traceCflowLimit = 10;
-        return $this->traceCflowLimit;
-    }
-
-    private function maybeTraceControlFlowTarget(
-        RuntimeInterface $runtime,
-        int $ipBefore,
-        int $ipAfter,
-        string $source,
-        ?string $bytes = null,
-    ): void {
-        $targets = $this->traceCflowToSet();
-        $maskedAfter = $ipAfter & 0xFFFFFFFF;
-        if ($targets === [] || !isset($targets[$maskedAfter])) {
-            return;
-        }
-
-        $limit = $this->traceCflowLimit();
-        $count = ($this->traceCflowCounts[$maskedAfter] ?? 0);
-        if ($count >= $limit) {
-            return;
-        }
-        $this->traceCflowCounts[$maskedAfter] = $count + 1;
-
-        $ma = $runtime->memoryAccessor();
-        $cf = $ma->shouldCarryFlag() ? 1 : 0;
-        $zf = $ma->shouldZeroFlag() ? 1 : 0;
-        $sf = $ma->shouldSignFlag() ? 1 : 0;
-        $of = $ma->shouldOverflowFlag() ? 1 : 0;
-
-        if ($bytes === null) {
-            $runtime->option()->logger()->warning(sprintf(
-                'TRACE_CFLOW: %s ip=0x%08X -> 0x%08X FL[CF=%d ZF=%d SF=%d OF=%d]',
-                $source,
-                $ipBefore & 0xFFFFFFFF,
-                $maskedAfter,
-                $cf,
-                $zf,
-                $sf,
-                $of,
-            ));
-            return;
-        }
-
-        $runtime->option()->logger()->warning(sprintf(
-            'TRACE_CFLOW: %s ip=0x%08X -> 0x%08X bytes=%s FL[CF=%d ZF=%d SF=%d OF=%d]',
-            $source,
-            $ipBefore & 0xFFFFFFFF,
-            $maskedAfter,
-            $bytes,
-            $cf,
-            $zf,
-            $sf,
-            $of,
-        ));
-    }
-
     private function maybeTraceControlFlow(RuntimeInterface $runtime, int $ipBefore, InstructionInterface $instruction, array $opcodes): void
     {
         if (!$this->isControlFlowInstruction($opcodes)) {
@@ -1007,106 +331,34 @@ class InstructionExecutor implements InstructionExecutorInterface
         }
 
         $ipAfter = $runtime->memory()->offset();
-        $this->maybeStopOnControlFlowTarget($runtime, $ipBefore, $ipAfter, $instruction, $opcodes, 'instruction');
+        $debug = $this->debug($runtime);
+        $debug->maybeStopOnControlFlowTarget($runtime, $ipBefore, $ipAfter, $instruction, $opcodes, 'instruction');
         $opcodeStr = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $opcodes));
         $mnemonic = preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($instruction)) ?? 'insn';
 
-        $this->maybeTraceControlFlowTarget($runtime, $ipBefore, $ipAfter, $mnemonic, $opcodeStr);
+        $debug->maybeTraceControlFlowTarget($runtime, $ipBefore, $ipAfter, $mnemonic, $opcodeStr);
     }
 
-    private function maybeStopAtIp(RuntimeInterface $runtime, int $ip): void
+    private function maybeStopOnZeroOpcodeLoop(InstructionExecutorDebug $debug, array $opcodes, int $ip): void
     {
-        $set = $this->stopIpSet();
-        $masked = $ip & 0xFFFFFFFF;
-        if ($set === [] || !isset($set[$masked])) {
+        $limit = $debug->zeroOpcodeLoopLimit();
+        if ($limit <= 0) {
+            $this->zeroOpcodeCount = 0;
             return;
         }
 
-        $cpu = $runtime->context()->cpu();
-        $ma = $runtime->memoryAccessor();
-
-        $bytes = [];
-        $memory = $runtime->memory();
-        $saved = $memory->offset();
-        $memory->setOffset($ip);
-        for ($i = 0; $i < 16 && !$memory->isEOF(); $i++) {
-            $bytes[] = $memory->byte();
-        }
-        $memory->setOffset($saved);
-
-        $hex = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $bytes));
-
-        $runtime->option()->logger()->warning(sprintf(
-            'STOP_AT_IP: ip=0x%08X bytes=%s PM=%d PG=%d LM=%d op=%d addr=%d A20=%d CS=0x%04X',
-            $masked,
-            $hex,
-            $cpu->isProtectedMode() ? 1 : 0,
-            $cpu->isPagingEnabled() ? 1 : 0,
-            $cpu->isLongMode() ? 1 : 0,
-            $cpu->operandSize(),
-            $cpu->addressSize(),
-            $cpu->isA20Enabled() ? 1 : 0,
-            $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF,
-        ));
-
-        throw new HaltException('Stopped by PHPME_STOP_AT_IP');
-    }
-
-    private function maybeStopOnControlFlowTarget(
-        RuntimeInterface $runtime,
-        int $ipBefore,
-        int $ipAfter,
-        ?InstructionInterface $instruction,
-        ?array $opcodes,
-        string $source,
-    ): void {
-        $targets = $this->stopCflowToSet();
-        $maskedAfter = $ipAfter & 0xFFFFFFFF;
-        if ($targets === [] || !isset($targets[$maskedAfter])) {
-            return;
-        }
-
-        $ma = $runtime->memoryAccessor();
-        $cf = $ma->shouldCarryFlag() ? 1 : 0;
-        $zf = $ma->shouldZeroFlag() ? 1 : 0;
-        $sf = $ma->shouldSignFlag() ? 1 : 0;
-        $of = $ma->shouldOverflowFlag() ? 1 : 0;
-
-        $mnemonic = $source;
-        if ($instruction !== null) {
-            $mnemonic = preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($instruction)) ?? $source;
-        }
-
-        $bytes = $opcodes === null
-            ? null
-            : implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $opcodes));
-
-        if ($bytes === null) {
-            $runtime->option()->logger()->warning(sprintf(
-                'STOP_CFLOW_TO: %s ip=0x%08X -> 0x%08X FL[CF=%d ZF=%d SF=%d OF=%d]',
-                $mnemonic,
-                $ipBefore & 0xFFFFFFFF,
-                $maskedAfter,
-                $cf,
-                $zf,
-                $sf,
-                $of,
-            ));
+        if ($opcodes === [0x00]) {
+            $this->zeroOpcodeCount++;
+            if ($this->zeroOpcodeCount >= $limit) {
+                throw new ExecutionException(sprintf(
+                    'Infinite loop detected: %d consecutive 0x00 opcodes at IP=0x%05X',
+                    $limit,
+                    $ip
+                ));
+            }
         } else {
-            $runtime->option()->logger()->warning(sprintf(
-                'STOP_CFLOW_TO: %s ip=0x%08X -> 0x%08X bytes=%s FL[CF=%d ZF=%d SF=%d OF=%d]',
-                $mnemonic,
-                $ipBefore & 0xFFFFFFFF,
-                $maskedAfter,
-                $bytes,
-                $cf,
-                $zf,
-                $sf,
-                $of,
-            ));
+            $this->zeroOpcodeCount = 0;
         }
-
-        throw new HaltException('Stopped by PHPME_STOP_ON_CFLOW_TO');
     }
 
     /**
@@ -1290,7 +542,28 @@ class InstructionExecutor implements InstructionExecutorInterface
         try {
             return $instruction->process($runtime, $opcodes);
         } catch (FaultException $e) {
-            $runtime->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
+            $cpu = $runtime->context()->cpu();
+            $ma = $runtime->memoryAccessor();
+            $ip = $runtime->memory()->offset();
+            $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+            $cr2 = $ma->readControlRegister(2);
+
+            $bytes = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $opcodes));
+            $runtime->option()->logger()->error(sprintf(
+                'CPU fault: %s vec=0x%02X err=%s ip=0x%08X rip=0x%016X cs=0x%04X cr2=0x%016X PM=%d PG=%d LM=%d bytes=%s',
+                $e->getMessage(),
+                $e->vector() & 0xFF,
+                $e->errorCode() === null ? 'n/a' : sprintf('0x%04X', $e->errorCode() & 0xFFFF),
+                $ip & 0xFFFFFFFF,
+                $ip,
+                $cs,
+                $cr2,
+                $cpu->isProtectedMode() ? 1 : 0,
+                $cpu->isPagingEnabled() ? 1 : 0,
+                $cpu->isLongMode() ? 1 : 0,
+                $bytes,
+            ));
+            $this->debug($runtime)->maybeDumpPageFaultContext($runtime, $e, $ip);
             if ($runtime->interruptDeliveryHandler()->raiseFault(
                 $runtime,
                 $e->vector(),
@@ -1304,28 +577,6 @@ class InstructionExecutor implements InstructionExecutorInterface
             $runtime->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
             throw $e;
         }
-    }
-
-    private function logExecution(RuntimeInterface $runtime, int $ipBefore, array $opcodes): void
-    {
-        $memoryAccessor = $runtime->memoryAccessor();
-        $cf = $memoryAccessor->shouldCarryFlag() ? 1 : 0;
-        $zf = $memoryAccessor->shouldZeroFlag() ? 1 : 0;
-        $sf = $memoryAccessor->shouldSignFlag() ? 1 : 0;
-        $of = $memoryAccessor->shouldOverflowFlag() ? 1 : 0;
-        $eax = $memoryAccessor->fetch(RegisterType::EAX)->asBytesBySize(32);
-        $ebx = $memoryAccessor->fetch(RegisterType::EBX)->asBytesBySize(32);
-        $ecx = $memoryAccessor->fetch(RegisterType::ECX)->asBytesBySize(32);
-        $edx = $memoryAccessor->fetch(RegisterType::EDX)->asBytesBySize(32);
-        $esi = $memoryAccessor->fetch(RegisterType::ESI)->asBytesBySize(32);
-        $edi = $memoryAccessor->fetch(RegisterType::EDI)->asBytesBySize(32);
-        $ebp = $memoryAccessor->fetch(RegisterType::EBP)->asBytesBySize(32);
-        $esp = $memoryAccessor->fetch(RegisterType::ESP)->asBytesBySize(32);
-        $opcodeStr = implode(' ', array_map(fn($b) => sprintf('0x%02X', $b), $opcodes));
-        $runtime->option()->logger()->debug(sprintf(
-            'EXEC: IP=0x%05X op=%-12s FL[CF=%d ZF=%d SF=%d OF=%d] EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X',
-            $ipBefore, $opcodeStr, $cf, $zf, $sf, $of, $eax, $ebx, $ecx, $edx, $esi, $edi, $ebp, $esp
-        ));
     }
 
     public function lastInstruction(): ?InstructionInterface
@@ -1370,7 +621,7 @@ class InstructionExecutor implements InstructionExecutorInterface
      */
     public function instructionCount(): int
     {
-        return $this->executedInstructions;
+        return $this->debug?->instructionCount() ?? 0;
     }
 
     /**
@@ -1380,40 +631,17 @@ class InstructionExecutor implements InstructionExecutorInterface
      */
     public function getIpSampleReport(int $top = 20): array
     {
-        $every = $this->ipSampleEvery();
-        if ($every <= 0 || $this->ipSampleHits === []) {
+        if ($this->debug === null) {
             return [
-                'every' => $every,
-                'instructions' => $this->executedInstructions,
+                'every' => 0,
+                'instructions' => 0,
                 'samples' => 0,
                 'unique' => 0,
                 'top' => [],
             ];
         }
 
-        $total = 0;
-        foreach ($this->ipSampleHits as $c) {
-            $total += $c;
-        }
-
-        $hits = $this->ipSampleHits;
-        arsort($hits);
-
-        $topList = [];
-        foreach ($hits as $ip => $count) {
-            $topList[] = [(int) $ip, (int) $count];
-            if (count($topList) >= $top) {
-                break;
-            }
-        }
-
-        return [
-            'every' => $every,
-            'instructions' => $this->executedInstructions,
-            'samples' => $total,
-            'unique' => count($this->ipSampleHits),
-            'top' => $topList,
-        ];
+        return $this->debug->getIpSampleReport($top);
     }
 
     /**
@@ -1424,7 +652,7 @@ class InstructionExecutor implements InstructionExecutorInterface
         $this->decodeCache = [];
         $this->hitCount = [];
         $this->translationBlocks = [];
-        $this->traceExecution = null;
+        $this->debug?->resetTraceCache();
         $this->patternedInstructionsList->invalidateCaches();
     }
 

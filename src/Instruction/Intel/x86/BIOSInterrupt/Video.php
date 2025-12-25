@@ -14,8 +14,8 @@ use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class Video implements InterruptInterface
 {
-    private static ?int $traceInt10CallsLimit = null;
-    private static int $traceInt10Calls = 0;
+    private ?int $traceInt10CallsLimit = null;
+    private int $traceInt10Calls = 0;
 
     private bool $vbeInitialized = false;
     private int $vbeModeInfoAddr = 0x2200;
@@ -74,41 +74,24 @@ class Video implements InterruptInterface
         };
     }
 
-    private static function traceInt10CallsLimit(): int
+    private function traceInt10CallsLimit(RuntimeInterface $runtime): int
     {
-        if (self::$traceInt10CallsLimit !== null) {
-            return self::$traceInt10CallsLimit;
+        if ($this->traceInt10CallsLimit !== null) {
+            return $this->traceInt10CallsLimit;
         }
 
-        $env = getenv('PHPME_TRACE_INT10_CALLS');
-        if ($env === false) {
-            self::$traceInt10CallsLimit = 0;
-            return 0;
-        }
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            self::$traceInt10CallsLimit = 0;
-            return 0;
-        }
-        if ($trimmed === '1') {
-            self::$traceInt10CallsLimit = 50;
-            return 50;
-        }
-        if (preg_match('/^\\d+$/', $trimmed) === 1) {
-            self::$traceInt10CallsLimit = max(1, (int) $trimmed);
-            return self::$traceInt10CallsLimit;
-        }
-        self::$traceInt10CallsLimit = 50;
-        return 50;
+        $limit = $runtime->logicBoard()->debug()->trace()->traceInt10CallsLimit;
+        $this->traceInt10CallsLimit = max(0, $limit);
+        return $this->traceInt10CallsLimit;
     }
 
     private function maybeTraceInt10Call(RuntimeInterface $runtime, int $ah, int $al): void
     {
-        $limit = self::traceInt10CallsLimit();
-        if ($limit <= 0 || self::$traceInt10Calls >= $limit) {
+        $limit = $this->traceInt10CallsLimit($runtime);
+        if ($limit <= 0 || $this->traceInt10Calls >= $limit) {
             return;
         }
-        self::$traceInt10Calls++;
+        $this->traceInt10Calls++;
 
         $ma = $runtime->memoryAccessor();
         $ax = $ma->fetch(RegisterType::EAX)->asBytesBySize(16) & 0xFFFF;
@@ -123,7 +106,7 @@ class Video implements InterruptInterface
             $bx,
             $cx,
             $dx,
-            self::$traceInt10Calls,
+            $this->traceInt10Calls,
             $limit,
         ));
     }
@@ -153,8 +136,7 @@ class Video implements InterruptInterface
             return;
         }
 
-        $stopEnv = getenv('PHPME_STOP_ON_INT10_WRITE_STRING');
-        if ($stopEnv !== false && $stopEnv !== '' && $stopEnv !== '0') {
+        if ($runtime->logicBoard()->debug()->trace()->stopOnInt10WriteString) {
             $dx = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asBytesBySize(16) & 0xFFFF;
             $row = ($dx >> 8) & 0xFF;
             $col = $dx & 0xFF;
@@ -228,8 +210,7 @@ class Video implements InterruptInterface
         $videoType = $fetchResult->asLowBit();
         $runtime->option()->logger()->debug(sprintf('Set Video Mode: 0x%02X', $videoType));
 
-        $stopEnv = getenv('PHPME_STOP_ON_SET_VIDEO_MODE');
-        if ($stopEnv !== false && $stopEnv !== '' && $stopEnv !== '0') {
+        if ($runtime->logicBoard()->debug()->trace()->stopOnSetVideoMode) {
             $runtime->option()->logger()->warning(sprintf('INT10: set video mode 0x%02X', $videoType));
             throw new HaltException('Stopped by PHPME_STOP_ON_SET_VIDEO_MODE');
         }
@@ -606,8 +587,7 @@ class Video implements InterruptInterface
             );
             $ma->write16Bit(RegisterType::EAX, 0x004F);
 
-            $stopEnv = getenv('PHPME_STOP_ON_VBE_SETMODE');
-            if ($stopEnv !== false && $stopEnv !== '' && $stopEnv !== '0') {
+            if ($runtime->logicBoard()->debug()->trace()->stopOnVbeSetMode) {
                 $runtime->option()->logger()->warning(sprintf('VBE: set mode 0x%X', $mode));
                 throw new HaltException('Stopped by PHPME_STOP_ON_VBE_SETMODE');
             }

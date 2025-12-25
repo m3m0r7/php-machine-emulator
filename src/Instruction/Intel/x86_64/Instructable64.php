@@ -49,8 +49,12 @@ trait Instructable64
      * Read value from a register by size with 64-bit support.
      * Handles REX prefix for extended registers.
      */
-    protected function readRegisterBySize(RuntimeInterface $runtime, int $register, int $size): int
+    protected function readRegisterBySize(RuntimeInterface $runtime, int|RegisterType $register, int $size): int
     {
+        if ($register instanceof RegisterType) {
+            return $this->baseReadRegisterBySize($runtime, $register, $size);
+        }
+
         $cpu = $runtime->context()->cpu();
 
         // In 64-bit mode, treat integer register operands as GPR codes (0-15),
@@ -75,8 +79,13 @@ trait Instructable64
      * Write value to a register by size with 64-bit support.
      * In 64-bit mode, 32-bit writes zero-extend to 64 bits.
      */
-    protected function writeRegisterBySize(RuntimeInterface $runtime, int $register, int $value, int $size): void
+    protected function writeRegisterBySize(RuntimeInterface $runtime, int|RegisterType $register, int $value, int $size): void
     {
+        if ($register instanceof RegisterType) {
+            $this->baseWriteRegisterBySize($runtime, $register, $value, $size);
+            return;
+        }
+
         $cpu = $runtime->context()->cpu();
 
         // In 64-bit mode, treat integer register operands as GPR codes (0-15),

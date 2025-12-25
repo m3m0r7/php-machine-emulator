@@ -18,6 +18,13 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
  */
 final class LzmaBitTreeDecodePattern extends AbstractPatternedInstruction
 {
+    private bool $traceHotPatterns;
+
+    public function __construct(bool $traceHotPatterns = false)
+    {
+        $this->traceHotPatterns = $traceHotPatterns;
+    }
+
     public function name(): string
     {
         return 'LZMA bit-tree decode function';
@@ -135,8 +142,7 @@ final class LzmaBitTreeDecodePattern extends AbstractPatternedInstruction
 
             if (!$logged) {
                 $logged = true;
-                $env = getenv('PHPME_TRACE_HOT_PATTERNS');
-                if ($env !== false && trim($env) !== '' && trim($env) !== '0') {
+                if ($this->traceHotPatterns) {
                     $runtime->option()->logger()->warning(sprintf(
                         'HOT PATTERN exec: %s ip=0x%08X bits=%d',
                         $patternName,

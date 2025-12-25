@@ -332,9 +332,10 @@ class Arithmetic64 implements InstructionInterface
      */
     private function signExtendImm32(int $value): int
     {
+        $value &= 0xFFFFFFFF;
         if (($value & 0x80000000) !== 0) {
-            return $value | 0xFFFFFFFF00000000;
+            return $value | (-1 << 32);
         }
-        return $value & 0xFFFFFFFF;
+        return $value;
     }
 }

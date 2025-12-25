@@ -26,23 +26,44 @@ class Iret implements InstructionInterface
         $opSize = $runtime->context()->cpu()->operandSize();
         $ma = $runtime->memoryAccessor();
 
-        // IA-32e 64-bit mode: IRETQ stack frame uses 64-bit slots.
-        // Pop RIP, CS, RFLAGS, RSP, SS as 64-bit values.
+        // IA-32e 64-bit mode: IRETQ uses 64-bit stack slots.
+        // It always pops RIP, CS, RFLAGS. RSP/SS are popped only when returning
+        // to an outer privilege level (e.g. kernel -> user).
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             $rip = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
             $csQ = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
             $flags = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
-            $newRsp = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
-            $newSsQ = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
 
-            $ma->write16Bit(RegisterType::SS, $newSsQ & 0xFFFF);
-            $ma->writeBySize(RegisterType::ESP, $newRsp, 64);
+            $targetCs = $csQ & 0xFFFF;
+            $currentCpl = $cpu->cpl();
+            $newCpl = $targetCs & 0x3;
 
-            $newCpl = $csQ & 0x3;
-            $this->writeCodeSegment($runtime, $csQ & 0xFFFF, $newCpl);
+            $descriptor = null;
+            $nextCpl = null;
+            if ($cpu->isProtectedMode()) {
+                $descriptor = $this->resolveCodeDescriptor($runtime, $targetCs);
+                $nextCpl = $this->computeCplForTransfer($runtime, $targetCs, $descriptor);
+            }
+
+            $returningToOuter = $cpu->isProtectedMode() && ($newCpl > $currentCpl);
+            if ($returningToOuter) {
+                $newRsp = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
+                $newSsQ = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
+                $ma->write16Bit(RegisterType::SS, $newSsQ & 0xFFFF);
+                $ma->writeBySize(RegisterType::ESP, $newRsp, 64);
+            }
+
+            $this->writeCodeSegment($runtime, $targetCs, $nextCpl, $descriptor);
 
             if ($runtime->option()->shouldChangeOffset()) {
-                $runtime->memory()->setOffset($rip);
+                if (!$cpu->isCompatibilityMode()) {
+                    // 64-bit CS: RIP is a linear address (segmentation is ignored).
+                    $runtime->memory()->setOffset($rip);
+                } else {
+                    // Compatibility mode: resolve CS base/limit.
+                    $linear = $this->linearCodeAddress($runtime, $targetCs, $rip, 32);
+                    $runtime->memory()->setOffset($linear);
+                }
             }
 
             // Restore flags directly from the popped value

@@ -40,7 +40,7 @@ class Wrmsr implements InstructionInterface
         $edx = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
         $value = UInt64::fromParts($eax, $edx);
 
-        Rdmsr::writeMsr($ecx, $value);
+        $runtime->context()->cpu()->writeMsr($ecx, $value);
 
         if ($ecx === 0x1B) { // APIC_BASE
             $enable = !$value->and(1 << 11)->isZero();

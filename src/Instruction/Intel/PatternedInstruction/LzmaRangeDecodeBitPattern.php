@@ -27,6 +27,14 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
  */
 class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
 {
+    private bool $traceHotPatterns;
+    private ?array $segState = null;
+
+    public function __construct(bool $traceHotPatterns = false)
+    {
+        $this->traceHotPatterns = $traceHotPatterns;
+    }
+
     public function name(): string
     {
         return 'LZMA range decode bit';
@@ -44,7 +52,7 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
             return null;
         }
 
-        // Exact bytes captured from Ubuntu 22.04 GRUB (hot inner routine).
+        // Exact bytes captured from a GRUB core image (hot inner routine).
         $expected = [
             0x8D, 0x04, 0x83, 0x89, 0xC1, 0x8B, 0x01, 0x8B, 0x55, 0xF4, 0xC1, 0xEA, 0x0B, 0xF7, 0xE2,
             0x3B, 0x45, 0xF0, 0x76, 0x28, 0x89, 0x45, 0xF4, 0xBA, 0x00, 0x08, 0x00, 0x00, 0x2B, 0x11,
@@ -76,7 +84,7 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
 
             // Require flat segments (base=0) for a fast/precise RET + data addressing.
             // Do not rely on the Unreal-mode cache always being populated; resolve via GDT/LDT as needed.
-            static $segState = null;
+            $segState = $this->segState;
             $csSel = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
             $dsSel = $ma->fetch(RegisterType::DS)->asByte() & 0xFFFF;
             $ssSel = $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF;
@@ -86,9 +94,9 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
                 || ($segState['dsSel'] ?? null) !== $dsSel
                 || ($segState['ssSel'] ?? null) !== $ssSel
             ) {
-                $csBase = self::resolveSegmentBase($runtime, RegisterType::CS);
-                $dsBase = self::resolveSegmentBase($runtime, RegisterType::DS);
-                $ssBase = self::resolveSegmentBase($runtime, RegisterType::SS);
+                $csBase = $this->resolveSegmentBase($runtime, RegisterType::CS);
+                $dsBase = $this->resolveSegmentBase($runtime, RegisterType::DS);
+                $ssBase = $this->resolveSegmentBase($runtime, RegisterType::SS);
                 $segState = [
                     'csSel' => $csSel,
                     'dsSel' => $dsSel,
@@ -97,6 +105,7 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
                     'dsBase' => $dsBase,
                     'ssBase' => $ssBase,
                 ];
+                $this->segState = $segState;
             }
             $csBase = $segState['csBase'] ?? null;
             $dsBase = $segState['dsBase'] ?? null;
@@ -185,8 +194,7 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
 
             if (!$logged) {
                 $logged = true;
-                $env = getenv('PHPME_TRACE_HOT_PATTERNS');
-                if ($env !== false && trim($env) !== '' && trim($env) !== '0') {
+                if ($this->traceHotPatterns) {
                     $runtime->option()->logger()->warning(sprintf(
                         'HOT PATTERN exec: %s ip=0x%08X',
                         $patternName,
@@ -206,7 +214,7 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
         };
     }
 
-    private static function resolveSegmentBase(RuntimeInterface $runtime, RegisterType $segment): ?int
+    private function resolveSegmentBase(RuntimeInterface $runtime, RegisterType $segment): ?int
     {
         $cpu = $runtime->context()->cpu();
 
@@ -226,7 +234,7 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
         }
 
         $selector = $runtime->memoryAccessor()->fetch($segment)->asByte() & 0xFFFF;
-        $descriptor = self::readSegmentDescriptor($runtime, $selector);
+        $descriptor = $this->readSegmentDescriptor($runtime, $selector);
         // Match current emulator behavior: if the descriptor can't be resolved, treat base as 0.
         // (SegmentTrait::segmentBase() returns 0 for missing/not-present descriptors.)
         if ($descriptor === null || !($descriptor['present'] ?? false)) {
@@ -240,7 +248,7 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
      *
      * @return array{base:int,limit:int,present:bool}|null
      */
-    private static function readSegmentDescriptor(RuntimeInterface $runtime, int $selector): ?array
+    private function readSegmentDescriptor(RuntimeInterface $runtime, int $selector): ?array
     {
         $cpu = $runtime->context()->cpu();
         if (!$cpu->isProtectedMode()) {

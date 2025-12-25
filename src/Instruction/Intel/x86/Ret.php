@@ -30,6 +30,7 @@ class Ret implements InstructionInterface
         // Far returns (RETF) are valid and are used for segment/mode transitions.
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             $ma = $runtime->memoryAccessor();
+            $rspBefore = $ma->fetch(RegisterType::ESP)->asBytesBySize(64);
             $popBytes = ($opcode === 0xC2 || $opcode === 0xCA) ? $runtime->memory()->short() : 0;
 
             if ($opcode === 0xCA || $opcode === 0xCB) {
@@ -69,6 +70,38 @@ class Ret implements InstructionInterface
                 $this->writeCodeSegment($runtime, $targetCs, $nextCpl, $descriptor);
 
                 if ($runtime->option()->shouldChangeOffset()) {
+                    $max = $runtime->memory()->logicalMaxMemorySize();
+                    if ($returnRip < 0 || $returnRip >= $max) {
+                        $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                        $ss = $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+                        $rspAfter = $ma->fetch(RegisterType::ESP)->asBytesBySize(64);
+                        $linearMask = $this->linearMask($runtime);
+                        $stackLinear = $rspBefore & $linearMask;
+                        $stackHex = '';
+                        for ($i = 0; $i < 32; $i++) {
+                            try {
+                                $stackHex .= sprintf('%02X', $this->readMemory8($runtime, $stackLinear + $i));
+                            } catch (\Throwable) {
+                                break;
+                            }
+                        }
+                        $runtime->option()->logger()->error(sprintf(
+                            'BAD RETF64: rip=0x%016X max=0x%08X rspBefore=0x%016X rspAfter=0x%016X cs=0x%04X ss=0x%04X PM=%d PG=%d LM=%d CM=%d stackLinear=0x%016X stack=%s',
+                            $returnRip,
+                            $max & 0xFFFFFFFF,
+                            $rspBefore,
+                            $rspAfter,
+                            $cs,
+                            $ss,
+                            $cpu->isProtectedMode() ? 1 : 0,
+                            $cpu->isPagingEnabled() ? 1 : 0,
+                            $cpu->isLongMode() ? 1 : 0,
+                            $cpu->isCompatibilityMode() ? 1 : 0,
+                            $stackLinear,
+                            $stackHex === '' ? 'n/a' : $stackHex,
+                        ));
+                        throw new \PHPMachineEmulator\Exception\HaltException('Stopped by bad RETF target');
+                    }
                     if (!$cpu->isCompatibilityMode()) {
                         // 64-bit CS: RIP is a linear address (segmentation is ignored).
                         $runtime->memory()->setOffset($returnRip);
@@ -89,6 +122,38 @@ class Ret implements InstructionInterface
             }
 
             if ($runtime->option()->shouldChangeOffset()) {
+                $max = $runtime->memory()->logicalMaxMemorySize();
+                if ($returnRip < 0 || $returnRip >= $max) {
+                    $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                    $ss = $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+                    $rspAfter = $ma->fetch(RegisterType::ESP)->asBytesBySize(64);
+                    $linearMask = $this->linearMask($runtime);
+                    $stackLinear = $rspBefore & $linearMask;
+                    $stackHex = '';
+                    for ($i = 0; $i < 32; $i++) {
+                        try {
+                            $stackHex .= sprintf('%02X', $this->readMemory8($runtime, $stackLinear + $i));
+                        } catch (\Throwable) {
+                            break;
+                        }
+                    }
+                    $runtime->option()->logger()->error(sprintf(
+                        'BAD RET64: rip=0x%016X max=0x%08X rspBefore=0x%016X rspAfter=0x%016X cs=0x%04X ss=0x%04X PM=%d PG=%d LM=%d CM=%d stackLinear=0x%016X stack=%s',
+                        $returnRip,
+                        $max & 0xFFFFFFFF,
+                        $rspBefore,
+                        $rspAfter,
+                        $cs,
+                        $ss,
+                        $cpu->isProtectedMode() ? 1 : 0,
+                        $cpu->isPagingEnabled() ? 1 : 0,
+                        $cpu->isLongMode() ? 1 : 0,
+                        $cpu->isCompatibilityMode() ? 1 : 0,
+                        $stackLinear,
+                        $stackHex === '' ? 'n/a' : $stackHex,
+                    ));
+                    throw new \PHPMachineEmulator\Exception\HaltException('Stopped by bad RET target');
+                }
                 $runtime->memory()->setOffset($returnRip);
             }
 

@@ -28,6 +28,13 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
  */
 trait IoPortTrait
 {
+    private ?Ata $ioPortAta = null;
+    private int $ioPortPciConfigAddr = 0;
+    /** @var array<string, array<int, int>>|null */
+    private ?array $ioPortPciConfigSpace = null;
+    /** @var array<string, mixed>|null */
+    private ?array $ioPortVgaState = null;
+
     /**
      * Assert I/O permission for the given port.
      *
@@ -92,31 +99,30 @@ trait IoPortTrait
     {
         $runtime->option()->logger()->debug(sprintf('IN from port 0x%04X (%d-bit)', $port, $width));
 
-        // Use function-local static variables to maintain state across calls
-        // without causing issues between different test runs
-        static $ata;
-        $ata ??= new Ata($runtime);
+        $ata = $this->ioPortAta ??= new Ata($runtime);
         $ctx = $runtime->context()->cpu();
         $kbd = $ctx->keyboardController();
         $cmos = $ctx->cmos();
         $picState = $ctx->picState();
-        static $pciConfigAddr = 0;
-        static $pciConfigSpace = null;
-        $pciConfigSpace ??= $this->defaultPciConfig();
-        static $vga = null;
-        $vga ??= [
-            'seq_idx' => 0,
-            'seq' => array_fill(0, 5, 0),
-            'gfx_idx' => 0,
-            'gfx' => array_fill(0, 9, 0),
-            'crtc_idx' => 0,
-            'crtc' => array_fill(0, 0x19, 0),
-            'attr_idx' => 0,
-            'attr' => array_fill(0, 0x15, 0),
-            'misc_output' => 0x63,
-            'feature' => 0,
-            'flip_flop' => false,
-        ];
+        if ($this->ioPortPciConfigSpace === null) {
+            $this->ioPortPciConfigSpace = $this->defaultPciConfig();
+        }
+        if ($this->ioPortVgaState === null) {
+            $this->ioPortVgaState = [
+                'seq_idx' => 0,
+                'seq' => array_fill(0, 5, 0),
+                'gfx_idx' => 0,
+                'gfx' => array_fill(0, 9, 0),
+                'crtc_idx' => 0,
+                'crtc' => array_fill(0, 0x19, 0),
+                'attr_idx' => 0,
+                'attr' => array_fill(0, 0x15, 0),
+                'misc_output' => 0x63,
+                'feature' => 0,
+                'flip_flop' => false,
+            ];
+        }
+        $vga = &$this->ioPortVgaState;
 
         // Keyboard Controller
         if ($port === KbcPort::DATA->value) {
@@ -166,14 +172,14 @@ trait IoPortTrait
 
         // PCI Configuration
         if ($port === PciPort::CONFIG_ADDRESS->value) {
-            return $pciConfigAddr;
+            return $this->ioPortPciConfigAddr;
         }
         if ($port === PciPort::CONFIG_DATA->value) {
-            $bus = ($pciConfigAddr >> 16) & 0xFF;
-            $dev = ($pciConfigAddr >> 11) & 0x1F;
-            $func = ($pciConfigAddr >> 8) & 0x7;
-            $reg = $pciConfigAddr & 0xFC;
-            return $this->readPciConfig($pciConfigSpace, $bus, $dev, $func, $reg);
+            $bus = ($this->ioPortPciConfigAddr >> 16) & 0xFF;
+            $dev = ($this->ioPortPciConfigAddr >> 11) & 0x1F;
+            $func = ($this->ioPortPciConfigAddr >> 8) & 0x7;
+            $reg = $this->ioPortPciConfigAddr & 0xFC;
+            return $this->readPciConfig($this->ioPortPciConfigSpace, $bus, $dev, $func, $reg);
         }
 
         // VGA read stubs
@@ -235,27 +241,28 @@ trait IoPortTrait
         $ctx = $runtime->context()->cpu();
         $picState = $ctx->picState();
         $pit = $ctx->pit();
-        static $ata;
-        $ata ??= new Ata($runtime);
+        $ata = $this->ioPortAta ??= new Ata($runtime);
         $kbd = $ctx->keyboardController();
         $cmos = $ctx->cmos();
-        static $pciConfigAddr = 0;
-        static $pciConfigSpace = null;
-        $pciConfigSpace ??= $this->defaultPciConfig();
-        static $vga = null;
-        $vga ??= [
-            'seq_idx' => 0,
-            'seq' => array_fill(0, 5, 0),
-            'gfx_idx' => 0,
-            'gfx' => array_fill(0, 9, 0),
-            'crtc_idx' => 0,
-            'crtc' => array_fill(0, 0x19, 0),
-            'attr_idx' => 0,
-            'attr' => array_fill(0, 0x15, 0),
-            'misc_output' => 0x63,
-            'feature' => 0,
-            'flip_flop' => false,
-        ];
+        if ($this->ioPortPciConfigSpace === null) {
+            $this->ioPortPciConfigSpace = $this->defaultPciConfig();
+        }
+        if ($this->ioPortVgaState === null) {
+            $this->ioPortVgaState = [
+                'seq_idx' => 0,
+                'seq' => array_fill(0, 5, 0),
+                'gfx_idx' => 0,
+                'gfx' => array_fill(0, 9, 0),
+                'crtc_idx' => 0,
+                'crtc' => array_fill(0, 0x19, 0),
+                'attr_idx' => 0,
+                'attr' => array_fill(0, 0x15, 0),
+                'misc_output' => 0x63,
+                'feature' => 0,
+                'flip_flop' => false,
+            ];
+        }
+        $vga = &$this->ioPortVgaState;
 
         // Serial Port
         if ($port === SerialPort::COM1_DATA->value) {
@@ -271,15 +278,15 @@ trait IoPortTrait
 
         // PCI Configuration
         if ($port === PciPort::CONFIG_ADDRESS->value) {
-            $pciConfigAddr = $value;
+            $this->ioPortPciConfigAddr = $value;
             return;
         }
         if ($port === PciPort::CONFIG_DATA->value) {
-            $bus = ($pciConfigAddr >> 16) & 0xFF;
-            $dev = ($pciConfigAddr >> 11) & 0x1F;
-            $func = ($pciConfigAddr >> 8) & 0x7;
-            $reg = $pciConfigAddr & 0xFC;
-            $this->writePciConfig($pciConfigSpace, $bus, $dev, $func, $reg, $value, $width);
+            $bus = ($this->ioPortPciConfigAddr >> 16) & 0xFF;
+            $dev = ($this->ioPortPciConfigAddr >> 11) & 0x1F;
+            $func = ($this->ioPortPciConfigAddr >> 8) & 0x7;
+            $reg = $this->ioPortPciConfigAddr & 0xFC;
+            $this->writePciConfig($this->ioPortPciConfigSpace, $bus, $dev, $func, $reg, $value, $width);
             return;
         }
 

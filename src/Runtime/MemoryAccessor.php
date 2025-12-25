@@ -91,12 +91,12 @@ class MemoryAccessor implements MemoryAccessorInterface
             $this->validateRegisterAddressWasAllocated($address);
             // GPRs (0-7 and 16-23) are stored as 64-bit, segment registers as 16-bit
             $storedSize = $this->isGprAddress($address) ? 64 : 16;
-            return MemoryAccessorFetchResult::fromCache($this->registers[$address], $storedSize);
+            return new MemoryAccessorFetchResult($this->registers[$address], $storedSize);
         }
 
         // General memory uses MemoryStream
         $value = $this->readFromMemory($address);
-        return MemoryAccessorFetchResult::fromCache($value, 8);
+        return new MemoryAccessorFetchResult($value, 8);
     }
 
     public function tryToFetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface|null
@@ -110,12 +110,12 @@ class MemoryAccessor implements MemoryAccessorInterface
             }
             // GPRs (0-7 and 16-23) are stored as 64-bit, segment registers as 16-bit
             $storedSize = $this->isGprAddress($address) ? 64 : 16;
-            return MemoryAccessorFetchResult::fromCache($this->registers[$address], $storedSize);
+            return new MemoryAccessorFetchResult($this->registers[$address], $storedSize);
         }
 
         // General memory uses MemoryStream
         $value = $this->readFromMemory($address);
-        return MemoryAccessorFetchResult::fromCache($value, 8);
+        return new MemoryAccessorFetchResult($value, 8);
     }
 
     public function write16Bit(int|RegisterType $registerType, int|null $value): self
@@ -620,6 +620,15 @@ class MemoryAccessor implements MemoryAccessorInterface
         $linearMask = $cpu->isLongMode() ? 0x0000FFFFFFFFFFFF : ($cpu->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF);
         $isUser = $cpu->cpl() === 3;
         $pagingEnabled = $cpu->isPagingEnabled();
+
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $linear = ($sp & $mask) & $linearMask;
+            [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+            if ($error !== 0 && $error !== 0xFFFFFFFF) {
+                $this->throwTranslationError($linear, $error);
+            }
+            return $physical;
+        }
 
         if ($cpu->isProtectedMode()) {
             $descriptor = $this->segmentDescriptor($ssSelector);

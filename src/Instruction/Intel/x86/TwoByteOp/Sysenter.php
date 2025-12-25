@@ -33,9 +33,10 @@ class Sysenter implements InstructionInterface
             throw new FaultException(0x0D, 0, 'SYSENTER CPL check failed');
         }
 
-        $csMsr = Rdmsr::readMsr(0x174);  // IA32_SYSENTER_CS
-        $espMsr = Rdmsr::readMsr(0x175); // IA32_SYSENTER_ESP
-        $eipMsr = Rdmsr::readMsr(0x176); // IA32_SYSENTER_EIP
+        $cpu = $runtime->context()->cpu();
+        $csMsr = $cpu->readMsr(0x174);  // IA32_SYSENTER_CS
+        $espMsr = $cpu->readMsr(0x175); // IA32_SYSENTER_ESP
+        $eipMsr = $cpu->readMsr(0x176); // IA32_SYSENTER_EIP
 
         $cs = $csMsr->low32() & 0xFFFC; // RPL forced to 0
         $esp = $espMsr->low32() & 0xFFFFFFFF;

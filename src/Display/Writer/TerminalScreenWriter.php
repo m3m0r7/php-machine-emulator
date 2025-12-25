@@ -7,6 +7,9 @@ namespace PHPMachineEmulator\Display\Writer;
 use PHPMachineEmulator\Display\Pixel\ColorInterface;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\LogicBoard\Debug\ScreenDebugConfig;
+use PHPMachineEmulator\LogicBoard\Debug\ScreenDumpCodeConfig;
+use PHPMachineEmulator\LogicBoard\Debug\ScreenDumpMemoryConfig;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Video\VideoTypeInfo;
 
@@ -15,6 +18,10 @@ class TerminalScreenWriter implements ScreenWriterInterface
     protected int $cursorRow = 0;
     protected int $cursorCol = 0;
     protected int $currentAttribute = 0x07; // Default: white on black
+    protected int $terminalCols = 80;
+    protected int $terminalRows = 24;
+    protected int $graphScaleX = 1;
+    protected int $graphScaleY = 1;
 
     /** @var string Buffered output for batch writing */
     protected string $outputBuffer = '';
@@ -26,27 +33,75 @@ class TerminalScreenWriter implements ScreenWriterInterface
     private int $stopOnScreenTail = 0;
     private int $stopOnScreenTailRemaining = 0;
     private ?int $stopOnScreenMatchedRow = null;
-    /** @var array{address:int,length:int}|null */
-    private ?array $dumpMemOnStop = null;
+    private ?ScreenDumpMemoryConfig $dumpMemOnStop = null;
     private bool $dumpScreenAllOnStop = false;
-    /** @var array{length:int,before:int}|null */
-    private ?array $dumpCodeOnStop = null;
+    private ?ScreenDumpCodeConfig $dumpCodeOnStop = null;
     private ?int $dumpStackOnStop = null;
     private bool $dumpPtrStringsOnStop = false;
     private bool $silentOutput = false;
+    private bool $supportsTrueColor = false;
+    private TerminalScreenWriterOption $option;
+    /** @var array<int,int> */
+    private array $vgaToAnsi256;
 
-    public function __construct(protected RuntimeInterface $runtime, protected VideoTypeInfo $videoTypeInfo)
+    public function __construct(
+        protected RuntimeInterface $runtime,
+        protected VideoTypeInfo $videoTypeInfo,
+        ?TerminalScreenWriterOption $option = null,
+    )
     {
-        $silentEnv = getenv('PHPME_SILENT_TTY');
-        $this->silentOutput = $silentEnv !== false && trim($silentEnv) !== '' && trim($silentEnv) !== '0';
+        $this->option = $option ?? new TerminalScreenWriterOption();
+        $this->silentOutput = $this->option->silentOutput;
+        $this->supportsTrueColor = $this->option->supportsTrueColor;
+        $this->vgaToAnsi256 = [
+            0 => 0,    // Black
+            1 => 4,    // Blue
+            2 => 2,    // Green
+            3 => 6,    // Cyan
+            4 => 1,    // Red
+            5 => 5,    // Magenta
+            6 => 3,    // Brown/Yellow
+            7 => 7,    // Light Gray
+            8 => 8,    // Dark Gray
+            9 => 12,   // Light Blue
+            10 => 10,  // Light Green
+            11 => 14,  // Light Cyan
+            12 => 9,   // Light Red
+            13 => 13,  // Light Magenta
+            14 => 11,  // Yellow
+            15 => 15,  // White
+        ];
+        $this->resolveTerminalDimensions();
+        $this->updateGraphicScaling($this->videoTypeInfo);
 
-        $this->stopOnScreenSubstr = $this->resolveStopOnScreenSubstr();
-        $this->stopOnScreenTail = $this->resolveStopOnScreenTail();
-        $this->dumpMemOnStop = $this->resolveDumpMemOnStop();
-        $this->dumpScreenAllOnStop = $this->resolveDumpScreenAllOnStop();
-        $this->dumpCodeOnStop = $this->resolveDumpCodeOnStop();
-        $this->dumpStackOnStop = $this->resolveDumpStackOnStop();
-        $this->dumpPtrStringsOnStop = $this->resolveDumpPtrStringsOnStop();
+        $this->applyScreenDebugConfig($runtime->logicBoard()->debug()->screen());
+    }
+
+    private function resolveTerminalDimensions(): void
+    {
+        $cols = $this->option->terminalCols;
+        $rows = $this->option->terminalRows;
+
+        $this->terminalCols = $cols > 0 ? $cols : 80;
+        $this->terminalRows = $rows > 0 ? $rows : 24;
+    }
+
+    private function updateGraphicScaling(VideoTypeInfo $videoTypeInfo): void
+    {
+        if ($videoTypeInfo->isTextMode) {
+            $this->graphScaleX = 1;
+            $this->graphScaleY = 1;
+            return;
+        }
+
+        $width = $videoTypeInfo->width;
+        $height = $videoTypeInfo->height;
+
+        $scaleX = (int) ceil($width / max(1, $this->terminalCols));
+        $scaleY = (int) ceil($height / max(1, $this->terminalRows));
+
+        $this->graphScaleX = max(1, $scaleX);
+        $this->graphScaleY = max(1, $scaleY);
     }
 
     private function writeOutput(string $value): void
@@ -61,128 +116,15 @@ class TerminalScreenWriter implements ScreenWriterInterface
             ->write($value);
     }
 
-    private function resolveStopOnScreenSubstr(): ?string
+    private function applyScreenDebugConfig(ScreenDebugConfig $config): void
     {
-        $grubEnv = getenv('PHPME_STOP_ON_GRUB_FREE_MAGIC');
-        if ($grubEnv !== false && $grubEnv !== '' && $grubEnv !== '0') {
-            return 'free magic is broken';
-        }
-
-        $env = getenv('PHPME_STOP_ON_SCREEN_SUBSTR');
-        if ($env === false) {
-            return null;
-        }
-        $trimmed = trim($env);
-        return $trimmed === '' ? null : $trimmed;
-    }
-
-    private function resolveDumpMemOnStop(): ?array
-    {
-        $env = getenv('PHPME_DUMP_MEM_ON_SCREEN_STOP');
-        if ($env === false) {
-            return null;
-        }
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            return null;
-        }
-
-        // Format: "<address>[:<length>]" where address/length can be decimal or 0x... hex.
-        $parts = explode(':', $trimmed, 2);
-        $addressStr = trim($parts[0]);
-        $lengthStr = isset($parts[1]) ? trim($parts[1]) : '256';
-
-        $address = $this->parseIntEnv($addressStr);
-        $length = max(1, min(4096, $this->parseIntEnv($lengthStr)));
-        if ($address === null) {
-            return null;
-        }
-
-        return ['address' => $address & 0xFFFFFFFF, 'length' => $length];
-    }
-
-    private function resolveDumpScreenAllOnStop(): bool
-    {
-        $env = getenv('PHPME_DUMP_SCREEN_ALL_ON_STOP');
-        return $env !== false && $env !== '' && $env !== '0';
-    }
-
-    private function resolveDumpCodeOnStop(): ?array
-    {
-        $env = getenv('PHPME_DUMP_CODE_ON_SCREEN_STOP');
-        if ($env === false) {
-            return null;
-        }
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            return null;
-        }
-
-        $length = $this->parseIntEnv($trimmed) ?? 512;
-        $length = max(1, min(4096, $length));
-
-        $beforeEnv = getenv('PHPME_DUMP_CODE_ON_SCREEN_STOP_BEFORE');
-        $before = 32;
-        if ($beforeEnv !== false) {
-            $beforeTrimmed = trim($beforeEnv);
-            if ($beforeTrimmed !== '' && $beforeTrimmed !== '0') {
-                $before = $this->parseIntEnv($beforeTrimmed) ?? $before;
-            }
-        }
-        $before = max(0, min(4096, $before));
-
-        return ['length' => $length, 'before' => $before];
-    }
-
-    private function resolveDumpStackOnStop(): ?int
-    {
-        $env = getenv('PHPME_DUMP_STACK_ON_SCREEN_STOP');
-        if ($env === false) {
-            return null;
-        }
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            return null;
-        }
-        $length = $this->parseIntEnv($trimmed) ?? 512;
-        return max(1, min(4096, $length));
-    }
-
-    private function resolveDumpPtrStringsOnStop(): bool
-    {
-        $env = getenv('PHPME_DUMP_PTR_STRINGS_ON_SCREEN_STOP');
-        return $env !== false && $env !== '' && $env !== '0';
-    }
-
-    private function resolveStopOnScreenTail(): int
-    {
-        $env = getenv('PHPME_STOP_ON_SCREEN_SUBSTR_TAIL');
-        if ($env === false) {
-            return 0;
-        }
-        $trimmed = trim($env);
-        if ($trimmed === '' || $trimmed === '0') {
-            return 0;
-        }
-        $parsed = $this->parseIntEnv($trimmed);
-        if ($parsed === null) {
-            return 0;
-        }
-        return max(0, min(4096, $parsed));
-    }
-
-    private function parseIntEnv(string $value): ?int
-    {
-        if ($value === '') {
-            return null;
-        }
-        if (preg_match('/^0x[0-9a-fA-F]+$/', $value) === 1) {
-            return (int) hexdec(substr($value, 2));
-        }
-        if (preg_match('/^\\d+$/', $value) === 1) {
-            return (int) $value;
-        }
-        return null;
+        $this->stopOnScreenSubstr = $config->stopOnScreenSubstr;
+        $this->stopOnScreenTail = max(0, $config->stopOnScreenTail);
+        $this->dumpMemOnStop = $config->dumpMemory;
+        $this->dumpScreenAllOnStop = $config->dumpScreenAll;
+        $this->dumpCodeOnStop = $config->dumpCode;
+        $this->dumpStackOnStop = $config->dumpStackLength;
+        $this->dumpPtrStringsOnStop = $config->dumpPointerStrings;
     }
 
     private function readRawBytes(int $address, int $length): string
@@ -203,8 +145,8 @@ class TerminalScreenWriter implements ScreenWriterInterface
         $ascii = preg_replace('/[^\\x20-\\x7E]/', '.', substr($bytes, 0, min(256, strlen($bytes)))) ?? '';
         $sha1 = sha1($bytes);
         $savedPath = null;
-        $saveEnv = getenv('PHPME_DUMP_MEM_ON_SCREEN_STOP_SAVE');
-        if ($saveEnv !== false && $saveEnv !== '' && $saveEnv !== '0') {
+        $saveDump = $this->dumpMemOnStop?->save ?? false;
+        if ($saveDump) {
             $savedPath = sprintf('debug/memdump_%08X_%d.bin', $address & 0xFFFFFFFF, $length);
             @file_put_contents($savedPath, $bytes);
         }
@@ -498,12 +440,12 @@ class TerminalScreenWriter implements ScreenWriterInterface
         ));
 
         if ($this->dumpCodeOnStop !== null) {
-            $before = $this->dumpCodeOnStop['before'];
+            $before = $this->dumpCodeOnStop->before;
             $start = max(0, (($linearIp & 0xFFFFFFFF) - $before));
             $this->dumpMemoryToFile(
                 'CODE',
                 $start,
-                $this->dumpCodeOnStop['length'],
+                $this->dumpCodeOnStop->length,
                 'debug/codedump_%08X_%d.bin',
             );
         }
@@ -531,7 +473,7 @@ class TerminalScreenWriter implements ScreenWriterInterface
         }
 
         if ($this->dumpMemOnStop !== null) {
-            $this->dumpMemoryPreview($this->dumpMemOnStop['address'], $this->dumpMemOnStop['length']);
+            $this->dumpMemoryPreview($this->dumpMemOnStop->address, $this->dumpMemOnStop->length);
         }
 
         throw new HaltException('Stopped by PHPME_STOP_ON_SCREEN_SUBSTR');
@@ -575,18 +517,41 @@ class TerminalScreenWriter implements ScreenWriterInterface
 
     public function dot(int $x, int $y, ColorInterface $color): void
     {
+        if (!$this->videoTypeInfo->isTextMode) {
+            if (($x % $this->graphScaleX) !== 0 || ($y % $this->graphScaleY) !== 0) {
+                return;
+            }
+            $x = intdiv($x, $this->graphScaleX);
+            $y = intdiv($y, $this->graphScaleY);
+            if ($x < 0 || $y < 0 || $x >= $this->terminalCols || $y >= $this->terminalRows) {
+                return;
+            }
+        }
+
         // Buffer the cursor move and dot sequence instead of immediate write
         // ANSI escape sequence: move cursor then draw colored space
+        if ($this->supportsTrueColor) {
+            $this->outputBuffer .= sprintf(
+                "\033[%d;%dH\033[38;2;%d;%d;%d;48;2;%d;%d;%d;1m \033[0m",
+                $y + 1,
+                $x + 1,
+                $color->red(),
+                $color->green(),
+                $color->blue(),
+                $color->red(),
+                $color->green(),
+                $color->blue(),
+            );
+            return;
+        }
+
+        $ansi = $this->rgbToAnsi256($color);
         $this->outputBuffer .= sprintf(
-            "\033[%d;%dH\033[38;2;%d;%d;%d;48;2;%d;%d;%d;1m \033[0m",
+            "\033[%d;%dH\033[38;5;%d;48;5;%d;1m \033[0m",
             $y + 1,
             $x + 1,
-            $color->red(),
-            $color->green(),
-            $color->blue(),
-            $color->red(),
-            $color->green(),
-            $color->blue(),
+            $ansi,
+            $ansi,
         );
     }
 
@@ -670,30 +635,32 @@ class TerminalScreenWriter implements ScreenWriterInterface
 
     protected function vgaToAnsi(int $fg, int $bg): string
     {
-        // VGA to ANSI 256-color mapping
-        static $vgaToAnsi256 = [
-            0 => 0,    // Black
-            1 => 4,    // Blue
-            2 => 2,    // Green
-            3 => 6,    // Cyan
-            4 => 1,    // Red
-            5 => 5,    // Magenta
-            6 => 3,    // Brown/Yellow
-            7 => 7,    // Light Gray
-            8 => 8,    // Dark Gray
-            9 => 12,   // Light Blue
-            10 => 10,  // Light Green
-            11 => 14,  // Light Cyan
-            12 => 9,   // Light Red
-            13 => 13,  // Light Magenta
-            14 => 11,  // Yellow
-            15 => 15,  // White
-        ];
-
-        $ansiFg = $vgaToAnsi256[$fg] ?? 7;
-        $ansiBg = $vgaToAnsi256[$bg] ?? 0;
+        $ansiFg = $this->vgaToAnsi256[$fg] ?? 7;
+        $ansiBg = $this->vgaToAnsi256[$bg] ?? 0;
 
         return sprintf("\033[38;5;%d;48;5;%dm", $ansiFg, $ansiBg);
+    }
+
+    private function rgbToAnsi256(ColorInterface $color): int
+    {
+        $r = $color->red();
+        $g = $color->green();
+        $b = $color->blue();
+
+        if ($r === $g && $g === $b) {
+            if ($r < 8) {
+                return 16;
+            }
+            if ($r > 248) {
+                return 231;
+            }
+            return (int) round((($r - 8) / 247) * 24) + 232;
+        }
+
+        $r6 = (int) round($r / 255 * 5);
+        $g6 = (int) round($g / 255 * 5);
+        $b6 = (int) round($b / 255 * 5);
+        return 16 + (36 * $r6) + (6 * $g6) + $b6;
     }
 
     public function flushIfNeeded(): void
@@ -715,5 +682,12 @@ class TerminalScreenWriter implements ScreenWriterInterface
     public function getCurrentAttribute(): int
     {
         return $this->currentAttribute;
+    }
+
+    public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void
+    {
+        $this->videoTypeInfo = $videoTypeInfo;
+        $this->resolveTerminalDimensions();
+        $this->updateGraphicScaling($videoTypeInfo);
     }
 }

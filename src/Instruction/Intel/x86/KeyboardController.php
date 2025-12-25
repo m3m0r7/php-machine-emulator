@@ -58,8 +58,15 @@ class KeyboardController
             // Fallback to stdin
             try {
                 $byte = $runtime->option()->IO()->input()->byte();
-                if ($byte !== null) {
-                    $this->enqueueScancode($byte);
+                if ($byte !== null && $byte !== 0) {
+                    // Convert LF to CR for terminal compatibility
+                    if ($byte === 0x0A) {
+                        $byte = 0x0D;
+                    }
+                    $scanCode = $this->scanCodeForAscii($byte & 0xFF);
+                    if ($scanCode !== null) {
+                        $this->enqueueScancode($scanCode);
+                    }
                 }
             } catch (\Throwable) {
                 // ignore input failures
@@ -122,6 +129,18 @@ class KeyboardController
             // Only process one key at a time
             return;
         }
+    }
+
+    private function scanCodeForAscii(int $ascii): ?int
+    {
+        return match ($ascii & 0xFF) {
+            0x0D => 0x1C, // Enter
+            0x1B => 0x01, // Esc
+            0x08 => 0x0E, // Backspace
+            0x09 => 0x0F, // Tab
+            0x20 => 0x39, // Space
+            default => null,
+        };
     }
 
     public function readStatus(): int

@@ -10,6 +10,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Cmos;
 use PHPMachineEmulator\Instruction\Intel\x86\KeyboardController;
 use PHPMachineEmulator\Instruction\Intel\x86\PicState;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * CPU context for x86/x64 emulation.
@@ -99,6 +100,9 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
      * MXCSR (SSE control/status).
      */
     private int $mxcsr = 0x1F80;
+
+    /** @var array<int, UInt64|int> */
+    private array $msr = [];
 
     public function __construct()
     {
@@ -237,6 +241,36 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function isCompatibilityMode(): bool
     {
         return $this->compatibilityMode;
+    }
+
+    /**
+     * Ensure compatibility mode reflects the cached CS descriptor in IA-32e.
+     * This guards against transient mis-sync when CS cache is updated.
+     */
+    public function syncCompatibilityModeWithCs(): void
+    {
+        if (!$this->longMode) {
+            return;
+        }
+
+        $cached = $this->getCachedSegmentDescriptor(RegisterType::CS);
+        if (!is_array($cached) || !array_key_exists('long', $cached)) {
+            return;
+        }
+
+        $shouldCompat = !($cached['long'] ?? false);
+        if ($shouldCompat === $this->compatibilityMode) {
+            return;
+        }
+
+        $this->compatibilityMode = $shouldCompat;
+        if ($shouldCompat) {
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 32;
+        } else {
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 64;
+        }
     }
 
     public function setAddressSizeOverride(bool $flag = true): void
@@ -628,6 +662,17 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function setMxcsr(int $mxcsr): void
     {
         $this->mxcsr = $mxcsr & 0xFFFFFFFF;
+    }
+
+    public function readMsr(int $index): UInt64
+    {
+        $value = $this->msr[$index] ?? 0;
+        return $value instanceof UInt64 ? $value : UInt64::of($value);
+    }
+
+    public function writeMsr(int $index, UInt64|int $value): void
+    {
+        $this->msr[$index] = $value instanceof UInt64 ? $value : UInt64::of($value);
     }
 
     private function initXmm(): void
