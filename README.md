@@ -130,7 +130,7 @@ require __DIR__ . '/vendor/autoload.php';
 use PHPMachineEmulator\ArchitectureType;
 use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\BootType;
-use PHPMachineEmulator\Display\Writer\TerminalScreenWriterFactory;
+use PHPMachineEmulator\Display\Writer\WindowScreenWriterFactory;
 use PHPMachineEmulator\LogicBoard\CPU\CPUContext;
 use PHPMachineEmulator\LogicBoard\Display\DisplayContext;
 use PHPMachineEmulator\LogicBoard\ExternalDevice\ExternalDeviceContext;
@@ -151,7 +151,7 @@ $logicBoard = new LogicBoard(
     memoryContext: new MemoryContext(),
     cpuContext: new CPUContext(architectureType: ArchitectureType::Intel_x86),
     networkContext: new NetworkContext(),
-    displayContext: new DisplayContext(new TerminalScreenWriterFactory()),
+    displayContext: new DisplayContext(new WindowScreenWriterFactory()),
     storageContext: new StorageContext(new StorageInfo(0x10000)),
     mediaContext: new MediaContext(new MediaInfo($bootStream, BootType::BOOT_SIGNATURE)),
     externalDeviceContext: new ExternalDeviceContext(),
@@ -261,7 +261,7 @@ require __DIR__ . '/vendor/autoload.php';
 use PHPMachineEmulator\ArchitectureType;
 use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\BootType;
-use PHPMachineEmulator\Display\Writer\TerminalScreenWriterFactory;
+use PHPMachineEmulator\Display\Writer\WindowScreenWriterFactory;
 use PHPMachineEmulator\LogicBoard\CPU\CPUContext;
 use PHPMachineEmulator\LogicBoard\Display\DisplayContext;
 use PHPMachineEmulator\LogicBoard\ExternalDevice\ExternalDeviceContext;
@@ -282,7 +282,7 @@ $logicBoard = new LogicBoard(
     memoryContext: new MemoryContext(),
     cpuContext: new CPUContext(architectureType: ArchitectureType::Intel_x86),
     networkContext: new NetworkContext(),
-    displayContext: new DisplayContext(new TerminalScreenWriterFactory()),
+    displayContext: new DisplayContext(new WindowScreenWriterFactory()),
     storageContext: new StorageContext(new StorageInfo(0x10000)),
     mediaContext: new MediaContext(new MediaInfo($bootStream, BootType::BOOT_SIGNATURE)),
     externalDeviceContext: new ExternalDeviceContext(),
@@ -296,9 +296,6 @@ try {
     exit($e->getCode());
 }
 ```
-
-<img src="./doc/demo_triangle.png">
-
 
 4. Run an emulator
 
