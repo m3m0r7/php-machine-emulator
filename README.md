@@ -320,10 +320,15 @@ Space for tracking the MikeOS boot/run status.
 
 <img src="./doc/demo_mikeos.png">
 <img src="./doc/demo_mikeos_fisher_man.png">
+<img src="./doc/demo_mikeos_keyboard.png">
 
 ## TinyCore
 
 <img src="./doc/demo_tinycore.png">
+
+## MS-DOS
+
+<img src="./doc/demo_ms_dos.png">
 
 ## Ubuntu (GRUB)
 
