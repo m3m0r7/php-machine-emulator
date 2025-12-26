@@ -182,6 +182,19 @@ class InstructionExecutor implements InstructionExecutorInterface
 
                 if (!$canExtend || count($peekBytes) >= 15 || $memory->isEOF()) {
                     if ($lastException !== null) {
+                        $cs = $memoryAccessor->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                        $bytesStr = implode(' ', array_map(
+                            static fn (int $b): string => sprintf('%02X', $b & 0xFF),
+                            $peekBytes
+                        ));
+                        $runtime->option()->logger()->error(sprintf(
+                            'Decode failed at CS:IP=%04X:%08X bytes=%s len=%d last=%s',
+                            $cs,
+                            $startPos & 0xFFFFFFFF,
+                            $bytesStr,
+                            count($peekBytes),
+                            $lastException->getMessage()
+                        ));
                         throw $lastException;
                     }
                     throw new NotFoundInstructionException('No found instruction (decode failed)');
@@ -545,6 +558,11 @@ class InstructionExecutor implements InstructionExecutorInterface
             $cpu = $runtime->context()->cpu();
             $ma = $runtime->memoryAccessor();
             $ip = $runtime->memory()->offset();
+            $faultIp = $ip;
+            $opcodeLen = count($opcodes);
+            if ($opcodeLen > 0) {
+                $faultIp = ($ip - $opcodeLen) & 0xFFFFFFFF;
+            }
             $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
             $cr2 = $ma->readControlRegister(2);
 
@@ -567,7 +585,7 @@ class InstructionExecutor implements InstructionExecutorInterface
             if ($runtime->interruptDeliveryHandler()->raiseFault(
                 $runtime,
                 $e->vector(),
-                $runtime->memory()->offset(),
+                $faultIp,
                 $e->errorCode()
             )) {
                 return ExecutionStatus::SUCCESS;
@@ -653,7 +671,7 @@ class InstructionExecutor implements InstructionExecutorInterface
         $this->hitCount = [];
         $this->translationBlocks = [];
         $this->debug?->resetTraceCache();
-        $this->patternedInstructionsList->invalidateCaches();
+        $this->patternedInstructionsList?->invalidateCaches();
     }
 
     /**

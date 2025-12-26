@@ -53,6 +53,11 @@ class Group6 implements InstructionInterface
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             // 10-byte pseudo-descriptor: 2-byte limit + 8-byte base
             $this->writeMemory64($runtime, $address + 2, $base);
+        } elseif ($cpu->operandSize() === 16) {
+            // 6-byte pseudo-descriptor (16-bit operand size): 2-byte limit + 3-byte base
+            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
+            $this->writeMemory8($runtime, $address + 4, ($base >> 16) & 0xFF);
+            $this->writeMemory8($runtime, $address + 5, 0);
         } else {
             // 6-byte pseudo-descriptor: 2-byte limit + 4-byte base
             $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
@@ -71,6 +76,11 @@ class Group6 implements InstructionInterface
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             // 10-byte pseudo-descriptor: 2-byte limit + 8-byte base
             $this->writeMemory64($runtime, $address + 2, $base);
+        } elseif ($cpu->operandSize() === 16) {
+            // 6-byte pseudo-descriptor (16-bit operand size): 2-byte limit + 3-byte base
+            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
+            $this->writeMemory8($runtime, $address + 4, ($base >> 16) & 0xFF);
+            $this->writeMemory8($runtime, $address + 5, 0);
         } else {
             // 6-byte pseudo-descriptor: 2-byte limit + 4-byte base
             $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
@@ -86,6 +96,9 @@ class Group6 implements InstructionInterface
         $limit = $this->readMemory16($runtime, $address);
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             $base = $this->readMemory64($runtime, $address + 2)->toInt();
+        } elseif ($cpu->operandSize() === 16) {
+            $base = $this->readMemory16($runtime, $address + 2);
+            $base |= ($this->readMemory8($runtime, $address + 4) << 16) & 0xFF0000;
         } else {
             $base = $this->readMemory16($runtime, $address + 2);
             $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
@@ -134,6 +147,9 @@ class Group6 implements InstructionInterface
         $limit = $this->readMemory16($runtime, $address);
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             $base = $this->readMemory64($runtime, $address + 2)->toInt();
+        } elseif ($cpu->operandSize() === 16) {
+            $base = $this->readMemory16($runtime, $address + 2);
+            $base |= ($this->readMemory8($runtime, $address + 4) << 16) & 0xFF0000;
         } else {
             $base = $this->readMemory16($runtime, $address + 2);
             $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;

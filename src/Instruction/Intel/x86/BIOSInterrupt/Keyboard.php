@@ -207,6 +207,29 @@ class Keyboard implements InterruptInterface
             }
         }
 
+        if (!$this->useSDL) {
+            $byte = $runtime->option()->IO()->input()->byte();
+            if ($byte !== null && $byte !== 0) {
+                // Convert LF to CR for terminal compatibility
+                if ($byte === 0x0A) {
+                    $byte = 0x0D;
+                }
+                $scanCode = $this->scanCodeForAscii($byte & 0xFF);
+                $keyboard->enqueueKey($scanCode & 0xFF, $byte & 0xFF);
+                $key = $keyboard->peekKey();
+                if ($key !== null) {
+                    $keyCode = ($key['scancode'] << 8) | $key['ascii'];
+                    $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
+                    $runtime->memoryAccessor()->setZeroFlag(false);
+                    $runtime->option()->logger()->debug(sprintf(
+                        'INT 16h: key check - polled, keyCode=0x%04X, ZF=0',
+                        $keyCode
+                    ));
+                    return;
+                }
+            }
+        }
+
         // No key available
         // Set ZF - no key available
         $runtime->memoryAccessor()->setZeroFlag(true);

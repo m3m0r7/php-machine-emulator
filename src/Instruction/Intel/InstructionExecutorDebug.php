@@ -61,6 +61,7 @@ final class InstructionExecutorDebug
 
     private int $stopOnRspBelowThreshold;
     private int $stopOnCflowToBelowThreshold;
+    private int $stopOnIpDropBelowThreshold;
     private int $zeroOpcodeLoopLimit;
     private int $stackPreviewOnIpStopBytes;
     private int $dumpCodeOnIpStopLength;
@@ -104,6 +105,7 @@ final class InstructionExecutorDebug
         $this->traceCflowLimit = $debugContext->traceCflowLimit();
         $this->stopOnRspBelowThreshold = $debugContext->stopOnRspBelowThreshold();
         $this->stopOnCflowToBelowThreshold = $debugContext->stopOnCflowToBelowThreshold();
+        $this->stopOnIpDropBelowThreshold = $debugContext->stopOnIpDropBelowThreshold();
         $this->zeroOpcodeLoopLimit = $debugContext->zeroOpcodeLoopLimit();
         $this->stackPreviewOnIpStopBytes = $debugContext->stackPreviewOnIpStopBytes();
         $this->dumpCodeOnIpStopLength = $debugContext->dumpCodeOnIpStopLength();
@@ -279,6 +281,22 @@ final class InstructionExecutorDebug
             (int) (($dsCached['base'] ?? 0) & 0xFFFFFFFF),
             (int) (($ssCached['base'] ?? 0) & 0xFFFFFFFF),
         ));
+
+        $runtime->option()->logger()->warning(sprintf(
+            'TRACE_IP: regs EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X FL[CF=%d ZF=%d SF=%d OF=%d]',
+            $ma->fetch(RegisterType::EAX)->asBytesBySize(32),
+            $ma->fetch(RegisterType::EBX)->asBytesBySize(32),
+            $ma->fetch(RegisterType::ECX)->asBytesBySize(32),
+            $ma->fetch(RegisterType::EDX)->asBytesBySize(32),
+            $ma->fetch(RegisterType::ESI)->asBytesBySize(32),
+            $ma->fetch(RegisterType::EDI)->asBytesBySize(32),
+            $ma->fetch(RegisterType::EBP)->asBytesBySize(32),
+            $ma->fetch(RegisterType::ESP)->asBytesBySize(32),
+            $ma->shouldCarryFlag() ? 1 : 0,
+            $ma->shouldZeroFlag() ? 1 : 0,
+            $ma->shouldSignFlag() ? 1 : 0,
+            $ma->shouldOverflowFlag() ? 1 : 0,
+        ));
     }
 
     public function maybeTraceControlFlowTarget(
@@ -340,6 +358,59 @@ final class InstructionExecutorDebug
         ?InstructionInterface $prevInstruction,
         ?array $prevOpcodes,
     ): void {
+        if ($this->stopOnIpDropBelowThreshold > 0) {
+            $maskedIp = $ip & 0xFFFFFFFF;
+            $maskedPrev = $prevIp & 0xFFFFFFFF;
+            if ($maskedPrev >= $this->stopOnIpDropBelowThreshold && $maskedIp < $this->stopOnIpDropBelowThreshold) {
+                $cpu = $runtime->context()->cpu();
+                $ma = $runtime->memoryAccessor();
+                $edi = $ma->fetch(RegisterType::EDI)->asBytesBySize(32);
+                $ds = $ma->fetch(RegisterType::DS)->asByte() & 0xFFFF;
+                $dsCached = $cpu->getCachedSegmentDescriptor(RegisterType::DS);
+                $offsetMask = $cpu->addressSize() === 32 ? 0xFFFFFFFF : 0xFFFF;
+                $dsBase = $cpu->isProtectedMode()
+                    ? (int) (($dsCached['base'] ?? 0) & 0xFFFFFFFF)
+                    : (int) (($ds << 4) & 0xFFFFF);
+                $linearMask = $cpu->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+                $linear = ($dsBase + (($edi + 0x10) & $offsetMask)) & $linearMask;
+                $memPreview = 'n/a';
+                $memory = $runtime->memory();
+                $savedOffset = $memory->offset();
+                try {
+                    $memory->setOffset($linear);
+                    $memPreview = sprintf('%02X%02X%02X%02X', $memory->byte() & 0xFF, $memory->byte() & 0xFF, $memory->byte() & 0xFF, $memory->byte() & 0xFF);
+                } catch (\Throwable) {
+                    $memPreview = 'err';
+                } finally {
+                    $memory->setOffset($savedOffset);
+                }
+                $prevOpcodeStr = $prevOpcodes === null
+                    ? 'n/a'
+                    : implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $prevOpcodes));
+                $prevInstructionName = $prevInstruction === null
+                    ? 'n/a'
+                    : (preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($prevInstruction)) ?? 'n/a');
+                $runtime->option()->logger()->warning(sprintf(
+                    'STOP_IP_DROP: prevIP=0x%08X ip=0x%08X threshold=0x%08X PM=%d PG=%d LM=%d op=%d addr=%d A20=%d CS=0x%04X prevIns=%s prevOp=%s EDI=%08X mem[DS:EDI+0x10]=0x%s',
+                    $maskedPrev,
+                    $maskedIp,
+                    $this->stopOnIpDropBelowThreshold & 0xFFFFFFFF,
+                    $cpu->isProtectedMode() ? 1 : 0,
+                    $cpu->isPagingEnabled() ? 1 : 0,
+                    $cpu->isLongMode() ? 1 : 0,
+                    $cpu->operandSize(),
+                    $cpu->addressSize(),
+                    $cpu->isA20Enabled() ? 1 : 0,
+                    $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF,
+                    $prevInstructionName,
+                    $prevOpcodeStr,
+                    $edi,
+                    $memPreview,
+                ));
+                throw new HaltException('Stopped by PHPME_STOP_ON_IP_DROP_BELOW');
+            }
+        }
+
         $masked = $ip & 0xFFFFFFFF;
         if ($this->stopIpSet === [] || !isset($this->stopIpSet[$masked])) {
             return;
@@ -379,6 +450,59 @@ final class InstructionExecutorDebug
             $prevIp & 0xFFFFFFFF,
             $prevInstructionName,
             $prevOpcodeStr,
+        ));
+        $runtime->option()->logger()->warning(sprintf(
+            'STOP_AT_IP: regs EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X',
+            $ma->fetch(RegisterType::EAX)->asBytesBySize(32),
+            $ma->fetch(RegisterType::EBX)->asBytesBySize(32),
+            $ma->fetch(RegisterType::ECX)->asBytesBySize(32),
+            $ma->fetch(RegisterType::EDX)->asBytesBySize(32),
+            $ma->fetch(RegisterType::ESI)->asBytesBySize(32),
+            $ma->fetch(RegisterType::EDI)->asBytesBySize(32),
+            $ma->fetch(RegisterType::EBP)->asBytesBySize(32),
+            $ma->fetch(RegisterType::ESP)->asBytesBySize(32),
+        ));
+        $edi = $ma->fetch(RegisterType::EDI)->asBytesBySize(32);
+        $eax = $ma->fetch(RegisterType::EAX)->asBytesBySize(32);
+        $esi = $ma->fetch(RegisterType::ESI)->asBytesBySize(32);
+        $edx = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
+        $ds = $ma->fetch(RegisterType::DS)->asByte() & 0xFFFF;
+        $dsCached = $cpu->getCachedSegmentDescriptor(RegisterType::DS);
+        $offsetMask = $cpu->addressSize() === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $dsBase = $cpu->isProtectedMode()
+            ? (int) (($dsCached['base'] ?? 0) & 0xFFFFFFFF)
+            : (int) (($ds << 4) & 0xFFFFF);
+        $linearMask = $cpu->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $memory = $runtime->memory();
+        $savedOffset = $memory->offset();
+        $peekDword = function (int $linear) use ($memory, $savedOffset): string {
+            try {
+                $memory->setOffset($linear);
+                return sprintf(
+                    '%02X%02X%02X%02X',
+                    $memory->byte() & 0xFF,
+                    $memory->byte() & 0xFF,
+                    $memory->byte() & 0xFF,
+                    $memory->byte() & 0xFF
+                );
+            } catch (\Throwable) {
+                return 'err';
+            } finally {
+                $memory->setOffset($savedOffset);
+            }
+        };
+        $ediLinear = ($dsBase + (($edi + 0x10) & $offsetMask)) & $linearMask;
+        $eaxLinear = ($dsBase + (($eax + 0x0C) & $offsetMask)) & $linearMask;
+        $esiLinear = ($dsBase + ($esi & $offsetMask)) & $linearMask;
+        $edxLinear = ($dsBase + ($edx & $offsetMask)) & $linearMask;
+        $runtime->option()->logger()->warning(sprintf(
+            'STOP_AT_IP: mem[DS:EDI+0x10]=0x%s mem[DS:EAX+0x0C]=0x%s mem[DS:ESI]=0x%s mem[DS:EDX]=0x%s (DS=0x%04X base=0x%08X)',
+            $peekDword($ediLinear),
+            $peekDword($eaxLinear),
+            $peekDword($esiLinear),
+            $peekDword($edxLinear),
+            $ds,
+            $dsBase & 0xFFFFFFFF,
         ));
 
         if ($this->stackPreviewOnIpStopBytes > 0) {

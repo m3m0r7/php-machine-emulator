@@ -20,6 +20,7 @@ final class TraceDebugConfig
         public readonly bool $stopOnSetVideoMode = false,
         public readonly bool $stopOnVbeSetMode = false,
         public readonly bool $stopOnInt16Wait = false,
+        public readonly bool $traceInterruptFlag = false,
     ) {
     }
 }

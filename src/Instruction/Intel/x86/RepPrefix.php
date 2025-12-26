@@ -49,7 +49,8 @@ class RepPrefix implements InstructionInterface
 
     public function opcodes(): array
     {
-        return [0xF3, 0xF2];
+        // REP/REPNZ can appear after other legacy prefixes; accept them in any order.
+        return $this->applyPrefixes([0xF3, 0xF2]);
     }
 
     private function shouldTraceGrubCfgCopy(RuntimeInterface $runtime): bool
@@ -63,6 +64,8 @@ class RepPrefix implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        // Apply any legacy prefixes that were placed before REP/REPNZ in the opcode stream.
+        $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $cpu = $runtime->context()->cpu();
         $iterationContext = $cpu->iteration();
 
@@ -148,6 +151,10 @@ class RepPrefix implements InstructionInterface
                     }
                 }
             }
+            $lastOpcodes = $executor->lastOpcodes();
+            if ($isBulkOptimizable && $lastOpcodes !== null && $this->hasLegacyPrefix($lastOpcodes)) {
+                $isBulkOptimizable = false;
+            }
 
             // Bulk optimization - only for instructions that do not depend on ZF (MOVS/STOS/LODS/INS/OUTS).
             // CMPS/SCAS are handled in the standard per-iteration loop to preserve exact REP semantics.
@@ -216,6 +223,20 @@ class RepPrefix implements InstructionInterface
         });
 
         return ExecutionStatus::CONTINUE;
+    }
+
+    /**
+     * Detect legacy prefixes (operand/address/segment/lock) in the opcode stream.
+     */
+    private function hasLegacyPrefix(array $opcodes): bool
+    {
+        foreach ($opcodes as $byte) {
+            $b = $byte & 0xFF;
+            if (in_array($b, [0x66, 0x67, 0xF0, 0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65], true)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

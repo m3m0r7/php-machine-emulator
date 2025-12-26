@@ -328,6 +328,7 @@ Space for tracking the MikeOS boot/run status.
 
 Space for tracking the Ubuntu GRUB boot status.
 
+<img src="./doc/demo_tinycore.png">
 <img src="./doc/demo_ubuntu_grub.png">
 
 # LICENSE

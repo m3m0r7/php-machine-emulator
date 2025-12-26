@@ -5,6 +5,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
 
+use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -13,6 +14,7 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 class Iret implements InstructionInterface
 {
     use Instructable;
+
 
     public function opcodes(): array
     {
@@ -51,6 +53,11 @@ class Iret implements InstructionInterface
                 $newSsQ = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
                 $ma->write16Bit(RegisterType::SS, $newSsQ & 0xFFFF);
                 $ma->writeBySize(RegisterType::ESP, $newRsp, 64);
+
+                $ssDesc = $this->readSegmentDescriptor($runtime, $newSsQ & 0xFFFF);
+                if ($ssDesc !== null && ($ssDesc['present'] ?? false)) {
+                    $runtime->context()->cpu()->cacheSegmentDescriptor(RegisterType::SS, $ssDesc);
+                }
             }
 
             $this->writeCodeSegment($runtime, $targetCs, $nextCpl, $descriptor);
@@ -111,9 +118,51 @@ class Iret implements InstructionInterface
         }
 
         $ip = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
-        // CS selectors are always 16-bit, even when operand size is 32-bit.
-        $cs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+        // In 32-bit IRET, CS is popped as a 32-bit value (selector in low 16 bits).
+        $csValue = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+        $cs = $csValue & 0xFFFF;
         $flags = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+
+        $descriptor = null;
+        $nextCpl = null;
+        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        if ($cpu->isProtectedMode()) {
+            try {
+                $descriptor = $this->resolveCodeDescriptor($runtime, $cs);
+                $nextCpl = $this->computeCplForTransfer($runtime, $cs, $descriptor);
+            } catch (FaultException $e) {
+                $vector = $ip & 0xFFFFFFFF;
+                $isVectorFrame = $opSize === 32 && $vector <= 0x1F && ($e->vector() & 0xFF) === 0x0D;
+                if (!$isVectorFrame) {
+                    throw $e;
+                }
+
+                $origIp = $ip;
+                $origCsValue = $csValue;
+                $origFlags = $flags;
+
+                $ipCandidate = $flags & $mask;
+                $csCandidateValue = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+                $flagsCandidate = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+                $csCandidate = $csCandidateValue & 0xFFFF;
+
+                try {
+                    $descriptor = $this->resolveCodeDescriptor($runtime, $csCandidate);
+                    $nextCpl = $this->computeCplForTransfer($runtime, $csCandidate, $descriptor);
+                    $ip = $ipCandidate;
+                    $csValue = $csCandidateValue;
+                    $cs = $csCandidate;
+                    $flags = $flagsCandidate;
+                } catch (FaultException) {
+                    $ma->push(RegisterType::ESP, $flagsCandidate, $opSize);
+                    $ma->push(RegisterType::ESP, $csCandidateValue, $opSize);
+                    $ma->push(RegisterType::ESP, $origFlags, $opSize);
+                    $ma->push(RegisterType::ESP, $origCsValue, $opSize);
+                    $ma->push(RegisterType::ESP, $origIp, $opSize);
+                    throw $e;
+                }
+            }
+        }
 
         if ($cpu->isProtectedMode() && (($flags & (1 << 14)) !== 0)) {
             // Task switch via IRET when NT set: use backlink from current TSS.
@@ -126,23 +175,22 @@ class Iret implements InstructionInterface
             }
         }
 
-        $descriptor = null;
-        $nextCpl = null;
-        if ($cpu->isProtectedMode()) {
-            $descriptor = $this->resolveCodeDescriptor($runtime, $cs);
-            $nextCpl = $this->computeCplForTransfer($runtime, $cs, $descriptor);
-        }
-
         $newCpl = $cs & 0x3;
-        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $returningToOuter = $cpu->isProtectedMode()
             && ($newCpl > $cpu->cpl());
 
         if ($returningToOuter) {
             $newEsp = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
-            $newSs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
-            $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
+            // In 32-bit IRET, SS is also popped as a 32-bit value.
+            $newSsValue = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
+            $newSs = $newSsValue & 0xFFFF;
+            $ma->write16Bit(RegisterType::SS, $newSs);
             $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $opSize);
+
+            $ssDesc = $this->readSegmentDescriptor($runtime, $newSs & 0xFFFF);
+            if ($ssDesc !== null && ($ssDesc['present'] ?? false)) {
+                $runtime->context()->cpu()->cacheSegmentDescriptor(RegisterType::SS, $ssDesc);
+            }
         }
 
         $this->writeCodeSegment($runtime, $cs, $nextCpl, $descriptor);

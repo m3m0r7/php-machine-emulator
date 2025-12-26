@@ -22,6 +22,9 @@ class KeyboardReaderStream implements StreamReaderInterface
         if (!is_resource($this->resource)) {
             throw new StreamReaderException('The parameter is not a resource');
         }
+
+        // Keep keyboard polling non-blocking to avoid stalling the emulator loop.
+        @stream_set_blocking($this->resource, false);
     }
 
     public function offset(): int

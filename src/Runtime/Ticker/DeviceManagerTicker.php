@@ -95,6 +95,9 @@ class DeviceManagerTicker implements TickerInterface
         // Check if input is available (non-blocking)
         // For emulated streams in tests, always try to read when waiting
         $byte = $input->byte();
+        if ($byte === null || $byte === 0) {
+            return;
+        }
         if ($byte !== null) {
             // Convert LF to CR for terminal compatibility
             if ($byte === 0x0A) {

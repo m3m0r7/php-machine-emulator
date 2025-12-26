@@ -56,21 +56,7 @@ class KeyboardController
 
         if (empty($this->queue)) {
             // Fallback to stdin
-            try {
-                $byte = $runtime->option()->IO()->input()->byte();
-                if ($byte !== null && $byte !== 0) {
-                    // Convert LF to CR for terminal compatibility
-                    if ($byte === 0x0A) {
-                        $byte = 0x0D;
-                    }
-                    $scanCode = $this->scanCodeForAscii($byte & 0xFF);
-                    if ($scanCode !== null) {
-                        $this->enqueueScancode($scanCode);
-                    }
-                }
-            } catch (\Throwable) {
-                // ignore input failures
-            }
+            $this->pollStdinInput($runtime);
         }
 
         if (empty($this->queue)) {
@@ -131,6 +117,30 @@ class KeyboardController
         }
     }
 
+    private function pollStdinInput(RuntimeInterface $runtime): void
+    {
+        $screenWriter = $runtime->context()->screen()->screenWriter();
+        if ($screenWriter instanceof WindowScreenWriter) {
+            return;
+        }
+
+        try {
+            $byte = $runtime->option()->IO()->input()->byte();
+            if ($byte !== null && $byte !== 0) {
+                // Convert LF to CR for terminal compatibility
+                if ($byte === 0x0A) {
+                    $byte = 0x0D;
+                }
+                $scanCode = $this->scanCodeForAscii($byte & 0xFF);
+                if ($scanCode !== null) {
+                    $this->enqueueScancode($scanCode);
+                }
+            }
+        } catch (\Throwable) {
+            // ignore input failures
+        }
+    }
+
     private function scanCodeForAscii(int $ascii): ?int
     {
         return match ($ascii & 0xFF) {
@@ -171,6 +181,9 @@ class KeyboardController
         // Poll SDL input if queue is empty
         if (empty($this->queue)) {
             $this->pollSDLInput($runtime);
+        }
+        if (empty($this->queue)) {
+            $this->pollStdinInput($runtime);
         }
         return $this->readStatus();
     }

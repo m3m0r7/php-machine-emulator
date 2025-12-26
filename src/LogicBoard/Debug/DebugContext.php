@@ -27,6 +27,7 @@ final class DebugContext implements DebugContextInterface
         private array $stopCflowToSet = [],
         private int $stopOnRspBelowThreshold = 0,
         private int $stopOnCflowToBelowThreshold = 0,
+        private int $stopOnIpDropBelowThreshold = 0,
         private int $zeroOpcodeLoopLimit = 0,
         private int $stackPreviewOnIpStopBytes = 0,
         private int $dumpCodeOnIpStopLength = 0,
@@ -124,6 +125,11 @@ final class DebugContext implements DebugContextInterface
     public function stopOnCflowToBelowThreshold(): int
     {
         return $this->stopOnCflowToBelowThreshold;
+    }
+
+    public function stopOnIpDropBelowThreshold(): int
+    {
+        return $this->stopOnIpDropBelowThreshold;
     }
 
     public function zeroOpcodeLoopLimit(): int

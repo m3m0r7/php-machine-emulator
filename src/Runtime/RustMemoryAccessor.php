@@ -561,6 +561,18 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         }
     }
 
+    private function invalidateInstructionCachesOnWrite(int $linear, int $bytes): void
+    {
+        if ($bytes <= 0) {
+            return;
+        }
+
+        $this->runtime
+            ->architectureProvider()
+            ->instructionExecutor()
+            ->invalidateCachesIfExecutedPageOverlaps($linear, $bytes);
+    }
+
     /**
      * Process observers after a write operation.
      */
@@ -692,6 +704,10 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $previousValue = $this->ffi->memory_accessor_fetch($this->handle, $address);
         $this->ffi->memory_accessor_write_by_size($this->handle, $address, $value ?? 0, $size);
         $this->postProcessWhenWrote($address, $previousValue, $value);
+        if (!$this->isRegisterAddress($address)) {
+            $bytes = intdiv($size, 8);
+            $this->invalidateInstructionCachesOnWrite($address, $bytes);
+        }
 
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
             if ($this->stopOnRspZero === null) {
@@ -961,6 +977,33 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
     public function setInterruptFlag(bool $which): self
     {
+        $trace = $this->runtime->logicBoard()->debug()->trace()->traceInterruptFlag ?? false;
+        if ($trace) {
+            $prev = $this->shouldInterruptFlag();
+            if ($prev !== $which) {
+                $executor = $this->runtime->architectureProvider()->instructionExecutor();
+                $lastInstruction = $executor->lastInstruction();
+                $lastOpcodes = $executor->lastOpcodes();
+                $bytesStr = $lastOpcodes === null
+                    ? 'n/a'
+                    : implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $lastOpcodes));
+                $cs = $this->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                $ip = $this->runtime->memory()->offset() & 0xFFFFFFFF;
+                $mnemonic = $lastInstruction === null
+                    ? 'n/a'
+                    : (preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($lastInstruction)) ?? 'insn');
+
+                $this->runtime->option()->logger()->info(sprintf(
+                    'IF %d->%d at CS:IP=%04X:%08X last=%s bytes=%s',
+                    $prev ? 1 : 0,
+                    $which ? 1 : 0,
+                    $cs,
+                    $ip,
+                    $mnemonic,
+                    $bytesStr,
+                ));
+            }
+        }
         $this->ffi->memory_accessor_set_interrupt_flag($this->handle, $which);
         return $this;
     }
@@ -1065,6 +1108,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     {
         $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 32, $value);
         $this->ffi->memory_accessor_write_physical_32($this->handle, $address, $value);
+        $this->invalidateInstructionCachesOnWrite($address, 4);
     }
 
     /**
@@ -1074,6 +1118,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     {
         $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 64, $value);
         $this->ffi->memory_accessor_write_physical_64($this->handle, $address, $value);
+        $this->invalidateInstructionCachesOnWrite($address, 8);
     }
 
     /**
@@ -1177,6 +1222,12 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         }
 
         if ($cpu->isProtectedMode()) {
+            $ss = $this->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+            $descriptor = $this->segmentDescriptor($ss);
+            $segDefault = is_array($descriptor) ? ($descriptor['default'] ?? null) : null;
+            if ($segDefault === 32 || $segDefault === 16) {
+                return (int) $segDefault;
+            }
             return $cpu->defaultOperandSize() === 32 ? 32 : 16;
         }
 
@@ -1279,6 +1330,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $dpl = ($b5 >> 5) & 0x3;
         $type = $b5 & 0x0F;
         $executable = ($type & 0x08) !== 0;
+        $default = ($b6 & 0x40) !== 0 ? 32 : 16;
 
         return [
             'base' => $baseAddr & 0xFFFFFFFF,
@@ -1287,6 +1339,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             'dpl' => $dpl,
             'type' => $type,
             'executable' => $executable,
+            'default' => $default,
         ];
     }
 
@@ -1413,6 +1466,9 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         if ($error === 0 && $this->shouldPostProcessLinearWrite($linear, 1)) {
             $this->postProcessLinearWrite($linear, $value & 0xFF, 1);
         }
+        if ($error === 0) {
+            $this->invalidateInstructionCachesOnWrite($linear, 1);
+        }
         return $error;
     }
 
@@ -1435,6 +1491,9 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         );
         if ($error === 0 && $this->shouldPostProcessLinearWrite($linear, 2)) {
             $this->postProcessLinearWrite($linear, $masked, 2);
+        }
+        if ($error === 0) {
+            $this->invalidateInstructionCachesOnWrite($linear, 2);
         }
         return $error;
     }
@@ -1459,6 +1518,9 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         if ($error === 0 && $this->shouldPostProcessLinearWrite($linear, 4)) {
             $this->postProcessLinearWrite($linear, $masked, 4);
         }
+        if ($error === 0) {
+            $this->invalidateInstructionCachesOnWrite($linear, 4);
+        }
         return $error;
     }
 
@@ -1481,6 +1543,9 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         if ($error === 0 && $this->shouldPostProcessLinearWrite($linear, 8)) {
             $this->postProcessLinearWrite($linear, $value, 8);
         }
+        if ($error === 0) {
+            $this->invalidateInstructionCachesOnWrite($linear, 8);
+        }
         return $error;
     }
 
@@ -1492,5 +1557,6 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 16, $value);
         $this->maybeLogMsDosBootWrite('phys', $address, 16, $value);
         $this->ffi->memory_accessor_write_physical_16($this->handle, $address, $value & 0xFFFF);
+        $this->invalidateInstructionCachesOnWrite($address, 2);
     }
 }

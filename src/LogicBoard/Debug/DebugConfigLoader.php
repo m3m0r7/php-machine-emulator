@@ -44,6 +44,7 @@ final class DebugConfigLoader
             stopCflowToSet: $executionConfig['stopCflowToSet'],
             stopOnRspBelowThreshold: $executionConfig['stopOnRspBelowThreshold'],
             stopOnCflowToBelowThreshold: $executionConfig['stopOnCflowToBelowThreshold'],
+            stopOnIpDropBelowThreshold: $executionConfig['stopOnIpDropBelowThreshold'],
             zeroOpcodeLoopLimit: $executionConfig['zeroOpcodeLoopLimit'],
             stackPreviewOnIpStopBytes: $executionConfig['stackPreviewOnIpStopBytes'],
             dumpCodeOnIpStopLength: $executionConfig['dumpCodeOnIpStopLength'],
@@ -103,6 +104,7 @@ final class DebugConfigLoader
             'stopCflowToSet' => $this->parser->parseIntSet($data['stop_cflow_to'] ?? []),
             'stopOnRspBelowThreshold' => $this->parser->parseInt($data['stop_on_rsp_below_threshold'] ?? null) ?? 0,
             'stopOnCflowToBelowThreshold' => $this->parser->parseInt($data['stop_on_cflow_to_below_threshold'] ?? null) ?? 0,
+            'stopOnIpDropBelowThreshold' => $this->parser->parseInt($data['stop_on_ip_drop_below_threshold'] ?? null) ?? 0,
             'zeroOpcodeLoopLimit' => $this->parser->parseInt($data['zero_opcode_loop_limit'] ?? null) ?? 0,
             'stackPreviewOnIpStopBytes' => $this->parser->parseInt($data['stack_preview_on_ip_stop_bytes'] ?? null) ?? 0,
             'dumpCodeOnIpStopLength' => $this->parser->parseInt($data['dump_code_on_ip_stop_length'] ?? null) ?? 0,
@@ -222,6 +224,7 @@ final class DebugConfigLoader
             stopOnSetVideoMode: $this->parser->parseBool($data['stop_on_set_video_mode'] ?? false),
             stopOnVbeSetMode: $this->parser->parseBool($data['stop_on_vbe_setmode'] ?? false),
             stopOnInt16Wait: $this->parser->parseBool($data['stop_on_int16_wait'] ?? false),
+            traceInterruptFlag: $this->parser->parseBool($data['trace_interrupt_flag'] ?? false),
         );
     }
 

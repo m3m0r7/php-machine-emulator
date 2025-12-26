@@ -93,6 +93,9 @@ class BIOS
         // 9. Initialize boot segment (CS register) - should be last before boot
         $this->initializeBootSegment();
 
+        // BIOS typically enables interrupts before handing control to the boot loader.
+        $this->runtime()->memoryAccessor()->setInterruptFlag(true);
+
         $this->machine->option()->logger()->info('BIOS initialization completed');
     }
 

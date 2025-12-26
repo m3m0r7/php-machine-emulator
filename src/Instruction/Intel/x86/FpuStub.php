@@ -55,17 +55,14 @@ class FpuStub implements InstructionInterface
      */
     private function handleGenericFpu(RuntimeInterface $runtime, MemoryStreamInterface $memory): ExecutionStatus
     {
-        $next = $memory->byte();
-        $mod = ($next >> 6) & 0x3;
-        $rm = $next & 0x7;
-
-        if ($mod === 0b11) {
+        $modrm = $memory->byteAsModRegRM();
+        if (ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER) {
             // Register-to-register form, no additional bytes
             return ExecutionStatus::SUCCESS;
         }
 
-        // Memory operand form - consume displacement bytes
-        $this->consumeRmBytes($memory, $mod, $rm);
+        // Memory operand form - consume SIB/displacement bytes per address size
+        $this->rmLinearAddress($runtime, $memory, $modrm);
 
         return ExecutionStatus::SUCCESS;
     }
@@ -75,7 +72,6 @@ class FpuStub implements InstructionInterface
         $next = $memory->byte();
         $mod = ($next >> 6) & 0x3;
         $reg = ($next >> 3) & 0x7;
-        $rm = $next & 0x7;
 
         if ($mod === 0b11) {
             return ExecutionStatus::SUCCESS; // register-only forms ignored
@@ -90,7 +86,7 @@ class FpuStub implements InstructionInterface
             $addr = $this->rmLinearAddressFromModrm($runtime, $memory, $next);
             $this->writeMemory16($runtime, $addr, 0x037F); // default control word
         } else {
-            $this->consumeRmBytes($memory, $mod, $rm);
+            $this->rmLinearAddressFromModrm($runtime, $memory, $next);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -106,8 +102,9 @@ class FpuStub implements InstructionInterface
         }
 
         $mod = ($next >> 6) & 0x3;
-        $rm = $next & 0x7;
-        $this->consumeRmBytes($memory, $mod, $rm);
+        if ($mod !== 0b11) {
+            $this->rmLinearAddressFromModrm($runtime, $memory, $next);
+        }
         return ExecutionStatus::SUCCESS;
     }
 
@@ -116,7 +113,6 @@ class FpuStub implements InstructionInterface
         $next = $memory->byte();
         $mod = ($next >> 6) & 0x3;
         $reg = ($next >> 3) & 0x7;
-        $rm = $next & 0x7;
 
         if ($mod === 0b11) {
             return ExecutionStatus::SUCCESS; // ignore register forms
@@ -135,7 +131,7 @@ class FpuStub implements InstructionInterface
                 $this->readMemory8($runtime, ($addr + $i) & 0xFFFFFFFF);
             }
         } else {
-            $this->consumeRmBytes($memory, $mod, $rm);
+            $this->rmLinearAddressFromModrm($runtime, $memory, $next);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -152,7 +148,6 @@ class FpuStub implements InstructionInterface
 
         $mod = ($next >> 6) & 0x3;
         $reg = ($next >> 3) & 0x7;
-        $rm = $next & 0x7;
 
         if ($mod !== 0b11 && $reg === 4) {
             // FNSTSW m2byte
@@ -161,7 +156,9 @@ class FpuStub implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $this->consumeRmBytes($memory, $mod, $rm);
+        if ($mod !== 0b11) {
+            $this->rmLinearAddressFromModrm($runtime, $memory, $next);
+        }
         return ExecutionStatus::SUCCESS;
     }
 
@@ -169,16 +166,6 @@ class FpuStub implements InstructionInterface
     {
         $modrm = $memory->modRegRM($modrmByte);
         return $this->rmLinearAddress($runtime, $memory, $modrm);
-    }
-
-    private function consumeRmBytes(MemoryStreamInterface $memory, int $mod, int $rm): void
-    {
-        // Best-effort discard of displacement.
-        if ($mod === 0b01) {
-            $memory->byte();
-        } elseif ($mod === 0b10 || ($mod === 0b00 && $rm === 0b110)) {
-            $memory->short();
-        }
     }
 
     private function assertFpuAvailable(RuntimeInterface $runtime): void

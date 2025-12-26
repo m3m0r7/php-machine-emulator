@@ -396,10 +396,11 @@ class Int_ implements InstructionInterface
                 return;
             }
 
-            // Gate type must be interrupt/trap gate (0xE/0xF)
+            // Gate type must be interrupt/trap gate (16/32-bit) or task gate.
             $gateType = ($typeAttr >> 8) & 0x1F;
-            $isInterruptGate = $gateType === 0xE;
-            $isTrapGate = $gateType === 0xF;
+            $is16bitGate = $gateType === 0x6 || $gateType === 0x7;
+            $isInterruptGate = $gateType === 0xE || $gateType === 0x6;
+            $isTrapGate = $gateType === 0xF || $gateType === 0x7;
             $isTaskGate = $gateType === 0x5;
             if (!($isInterruptGate || $isTrapGate || $isTaskGate)) {
                 return;
@@ -415,7 +416,10 @@ class Int_ implements InstructionInterface
                 return;
             }
 
-            $offset = (($offsetHigh & 0xFFFF) << 16) | ($offsetLow & 0xFFFF);
+            $gateOperandSize = $is16bitGate ? 16 : 32;
+            $offset = $is16bitGate
+                ? ($offsetLow & 0xFFFF)
+                : ((($offsetHigh & 0xFFFF) << 16) | ($offsetLow & 0xFFFF));
 
             // Validate target code segment descriptor
             $targetDesc = $this->readSegmentDescriptor($runtime, $selector);
@@ -426,13 +430,13 @@ class Int_ implements InstructionInterface
                 throw new FaultException(0x0D, $selector, sprintf('IDT target selector 0x%04X is not executable', $selector));
             }
 
-            $operandSize = $runtime->context()->cpu()->operandSize();
+            $operandSize = $gateOperandSize;
             $currentCpl = $runtime->context()->cpu()->cpl();
             $targetCpl = $targetDesc['dpl'];
             $privilegeChange = $targetCpl < $currentCpl;
 
             $oldSs = $runtime->memoryAccessor()->fetch(RegisterType::SS)->asByte();
-            $oldEsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize($operandSize);
+            $oldEsp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(32);
             $mask = $operandSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
             if ($privilegeChange) {
@@ -460,6 +464,11 @@ class Int_ implements InstructionInterface
                 $ma = $runtime->memoryAccessor();
                 $ma->write16Bit(RegisterType::SS, $newSs & 0xFFFF);
                 $ma->writeBySize(RegisterType::ESP, $newEsp & $mask, $operandSize);
+
+                $ssDesc = $this->readSegmentDescriptor($runtime, $newSs & 0xFFFF);
+                if ($ssDesc !== null && ($ssDesc['present'] ?? false)) {
+                    $runtime->context()->cpu()->cacheSegmentDescriptor(RegisterType::SS, $ssDesc);
+                }
             }
 
             // Push EFLAGS, CS, EIP
@@ -477,14 +486,15 @@ class Int_ implements InstructionInterface
 
             if ($privilegeChange) {
                 // On privilege change, old SS/ESP are pushed after loading the new stack.
-                $ma->push(RegisterType::ESP, $oldSs, 16);
-                $ma->push(RegisterType::ESP, $oldEsp, $operandSize);
+                // In 32-bit gates, SS is pushed as a 32-bit value (selector in low 16 bits).
+                $ma->push(RegisterType::ESP, $oldSs, $operandSize);
+                $ma->push(RegisterType::ESP, $oldEsp & $mask, $operandSize);
             }
 
             $ma->push(RegisterType::ESP, $flags, $operandSize);
-            // CS selector is always 16-bit.
-            $ma->push(RegisterType::ESP, $ma->fetch(RegisterType::CS)->asByte(), 16);
-            $ma->push(RegisterType::ESP, $returnIp, $operandSize);
+            // In 32-bit gates, CS is pushed as a 32-bit value (selector in low 16 bits).
+            $ma->push(RegisterType::ESP, $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF, $operandSize);
+            $ma->push(RegisterType::ESP, $returnIp & $mask, $operandSize);
             if ($errorCode !== null) {
                 $ma->push(RegisterType::ESP, $errorCode & 0xFFFF, $operandSize);
             }

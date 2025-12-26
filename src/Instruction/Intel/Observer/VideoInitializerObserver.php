@@ -39,9 +39,11 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
         $height = ($videoSettingAddress >> 32) & 0xFFFF;
         $videoType = $videoSettingAddress & 0xFF;
 
-        $videoTypeInfo = $runtime
-            ->video()
-            ->supportedVideoModes()[$videoType];
+        $videoModes = $runtime->video()->supportedVideoModes();
+        $videoTypeInfo = $videoModes[$videoType] ?? $videoModes[0x03] ?? null;
+        if ($videoTypeInfo === null) {
+            return;
+        }
 
         // NOTE: Fallback to predefined size if header was not set.
         $width = $width === 0 ? $videoTypeInfo->width : $width;
@@ -49,7 +51,7 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
 
         // NOTE: Clear the screen with a tiny bootstrap text area (mode 0x00) to avoid rendering an
         // enormous frame when switching video modes during boot.
-        $bootstrapVideoType = $runtime->video()->supportedVideoModes()[0x00] ?? $videoTypeInfo;
+        $bootstrapVideoType = $videoModes[0x00] ?? $videoTypeInfo;
         $clearWidth = $bootstrapVideoType->width;
         $clearHeight = $bootstrapVideoType->height;
 

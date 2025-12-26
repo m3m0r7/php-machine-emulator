@@ -46,6 +46,8 @@ interface DebugContextInterface
 
     public function stopOnCflowToBelowThreshold(): int;
 
+    public function stopOnIpDropBelowThreshold(): int;
+
     public function zeroOpcodeLoopLimit(): int;
 
     public function stackPreviewOnIpStopBytes(): int;

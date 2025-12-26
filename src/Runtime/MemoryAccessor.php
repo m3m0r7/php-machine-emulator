@@ -169,6 +169,7 @@ class MemoryAccessor implements MemoryAccessorInterface
             $this->writeToMemory($address + $i, ($value >> ($i * 8)) & 0xFF);
         }
         $this->postProcessWhenWrote($address, $previousValue, $value);
+        $this->invalidateInstructionCachesOnWrite($address, $bytes);
 
         return $this;
     }
@@ -253,6 +254,18 @@ class MemoryAccessor implements MemoryAccessorInterface
                 : ($previousValue & 0b11111111),
             $wroteValue,
         );
+    }
+
+    private function invalidateInstructionCachesOnWrite(int $address, int $bytes): void
+    {
+        if ($bytes <= 0) {
+            return;
+        }
+
+        $this->runtime
+            ->architectureProvider()
+            ->instructionExecutor()
+            ->invalidateCachesIfExecutedPageOverlaps($address, $bytes);
     }
 
     public function updateFlags(int|null $value, int $size = 16): self
@@ -405,6 +418,30 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function setInterruptFlag(bool $which): self
     {
+        $trace = $this->runtime->logicBoard()->debug()->trace()->traceInterruptFlag ?? false;
+        if ($trace && $this->interruptFlag !== $which) {
+            $executor = $this->runtime->architectureProvider()->instructionExecutor();
+            $lastInstruction = $executor->lastInstruction();
+            $lastOpcodes = $executor->lastOpcodes();
+            $bytesStr = $lastOpcodes === null
+                ? 'n/a'
+                : implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $lastOpcodes));
+            $cs = $this->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+            $ip = $this->runtime->memory()->offset() & 0xFFFFFFFF;
+            $mnemonic = $lastInstruction === null
+                ? 'n/a'
+                : (preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($lastInstruction)) ?? 'insn');
+
+            $this->runtime->option()->logger()->info(sprintf(
+                'IF %d->%d at CS:IP=%04X:%08X last=%s bytes=%s',
+                $this->interruptFlag ? 1 : 0,
+                $which ? 1 : 0,
+                $cs,
+                $ip,
+                $mnemonic,
+                $bytesStr,
+            ));
+        }
         $this->interruptFlag = $which;
         return $this;
     }
@@ -709,6 +746,12 @@ class MemoryAccessor implements MemoryAccessorInterface
         }
 
         if ($cpu->isProtectedMode()) {
+            $ss = $this->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+            $descriptor = $this->segmentDescriptor($ss);
+            $segDefault = is_array($descriptor) ? ($descriptor['default'] ?? null) : null;
+            if ($segDefault === 32 || $segDefault === 16) {
+                return (int) $segDefault;
+            }
             return $cpu->defaultOperandSize() === 32 ? 32 : 16;
         }
 
@@ -784,6 +827,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         for ($i = 0; $i < 4; $i++) {
             $this->writeToMemory($address + $i, ($value >> ($i * 8)) & 0xFF);
         }
+        $this->invalidateInstructionCachesOnWrite($address, 4);
     }
 
     public function writePhysical64(int $address, int $value): void
@@ -833,6 +877,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $physical = $linear & $linearMask;
         $this->writeToMemory($physical, $value & 0xFF);
+        $this->invalidateInstructionCachesOnWrite($linear, 1);
         return 0;
     }
 
@@ -841,6 +886,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $physical = $linear & $linearMask;
         $this->writeToMemory($physical, $value & 0xFF);
         $this->writeToMemory($physical + 1, ($value >> 8) & 0xFF);
+        $this->invalidateInstructionCachesOnWrite($linear, 2);
         return 0;
     }
 
@@ -862,6 +908,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $this->writeToMemory($address, $value & 0xFF);
         $this->writeToMemory($address + 1, ($value >> 8) & 0xFF);
+        $this->invalidateInstructionCachesOnWrite($address, 2);
     }
 
     private function segmentDescriptor(int $selector): ?array
@@ -907,6 +954,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $dpl = ($b5 >> 5) & 0x3;
         $type = $b5 & 0x0F;
         $executable = ($type & 0x08) !== 0;
+        $default = ($b6 & 0x40) !== 0 ? 32 : 16;
 
         return [
             'base' => $baseAddr & 0xFFFFFFFF,
@@ -915,6 +963,7 @@ class MemoryAccessor implements MemoryAccessorInterface
             'dpl' => $dpl,
             'type' => $type,
             'executable' => $executable,
+            'default' => $default,
         ];
     }
 }

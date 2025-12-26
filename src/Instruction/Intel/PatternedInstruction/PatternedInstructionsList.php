@@ -71,6 +71,7 @@ class PatternedInstructionsList
             $this->register(new LzmaBitTreeDecodePattern($this->debugConfig->traceHotPatterns));
             $this->register(new LzmaLiteralDecodeMatchPattern($this->debugConfig->traceHotPatterns));
         }
+        $this->register(new UdivmoddiPattern($this->debugConfig->traceHotPatterns));
         $this->register(new MemsetDwordLoopPattern($this->debugConfig->traceHotPatterns));
         $this->register(new MemmoveBackwardLoopPattern($this->debugConfig->traceHotPatterns));
         $this->register(new MovsbLoopPattern($this->debugConfig->traceHotPatterns));
