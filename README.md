@@ -321,11 +321,14 @@ Space for tracking the MikeOS boot/run status.
 <img src="./doc/demo_mikeos.png">
 <img src="./doc/demo_mikeos_fisher_man.png">
 
+## TinyCore
+
+<img src="./doc/demo_tinycore.png">
+
 ## Ubuntu (GRUB)
 
 Space for tracking the Ubuntu GRUB boot status.
 
-<img src="./doc/demo_tinycore.png">
 <img src="./doc/demo_ubuntu_grub.png">
 
 # LICENSE
