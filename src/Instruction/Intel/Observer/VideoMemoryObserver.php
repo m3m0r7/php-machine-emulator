@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\Observer;
 
 use PHPMachineEmulator\Display\Pixel\Color;
+use PHPMachineEmulator\Display\Pixel\VgaPaletteColor;
 use PHPMachineEmulator\Display\Writer\ScreenWriterInterface;
 use PHPMachineEmulator\Instruction\Intel\Service\VideoMemoryService;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -14,18 +15,8 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 class VideoMemoryObserver implements MemoryAccessorObserverInterface
 {
     protected ?ScreenWriterInterface $writer = null;
-
-    /** @var array<int, array{x: int, y: int, color: int}> Buffered pixel writes */
-    protected array $pixelBuffer = [];
-
-    /** @var int Maximum pixels to buffer before flush */
-    protected const BUFFER_SIZE = 512;
-
-    /** @var float Last flush time */
-    protected float $lastFlushTime = 0.0;
-
-    /** @var float Minimum interval between flushes (seconds) */
-    protected const FLUSH_INTERVAL = 5000;
+    /** @var array<int, Color> */
+    private array $colorCache = [];
 
     public function addressRange(): ?array
     {
@@ -42,37 +33,8 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
             return true;
         }
 
-        // Graphics mode (0xA0000-0xB7FFF): use original ES:DI check
-        // In protected mode, use EDI directly (segment base is defined by GDT, usually 0)
-        // In real mode, use ES:DI
-        if ($runtime->context()->cpu()->isProtectedMode()) {
-            $edi = $runtime
-                ->memoryAccessor()
-                ->fetch(
-                    ($runtime->register())::addressBy(RegisterType::EDI),
-                )
-                ->asByte();
-            return $address === $edi;
-        }
-
-        // Real mode: ES:DI
-        $esBase = $runtime
-            ->memoryAccessor()
-            ->fetch(
-                ($runtime->register())::addressBy(RegisterType::ES),
-            )
-            ->asByte() << 4;
-
-        $di = $runtime
-            ->memoryAccessor()
-            ->fetch(
-                ($runtime->register())::addressBy(RegisterType::EDI),
-            )
-            ->asByte();
-
-        $linear = $di + $esBase;
-
-        return $address === $linear;
+        // Graphics mode (0xA0000-0xB7FFF): any write in range maps to VRAM
+        return true;
     }
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): void
@@ -141,49 +103,19 @@ class VideoMemoryObserver implements MemoryAccessorObserverInterface
         $x = $videoMemoryOffset % $width;
         $y = (int) ($videoMemoryOffset / $width);
 
-        // Buffer the pixel write instead of immediate rendering
-        $this->pixelBuffer[] = [
-            'x' => $x,
-            'y' => $y,
-            'color' => $textColor & 0b1111,
-        ];
-
-        // Flush if buffer is full or enough time has passed
-        $now = microtime(true);
-        if (count($this->pixelBuffer) >= self::BUFFER_SIZE
-            || ($now - $this->lastFlushTime) >= self::FLUSH_INTERVAL
-        ) {
-            $this->flushBuffer();
-        }
+        $this->writer->dot(
+            $x,
+            $y,
+            $this->colorForAnsi($textColor),
+        );
     }
 
-    /**
-     * Flush buffered pixels to the screen.
-     */
-    public function flushBuffer(): void
+    private function colorForAnsi(int $color): Color
     {
-        if ($this->writer === null || empty($this->pixelBuffer)) {
-            return;
+        $index = $color & 0x0F;
+        if (!isset($this->colorCache[$index])) {
+            $this->colorCache[$index] = VgaPaletteColor::fromIndex($index)->toColor();
         }
-
-        foreach ($this->pixelBuffer as $pixel) {
-            $this->writer->dot(
-                $pixel['x'],
-                $pixel['y'],
-                Color::fromANSI($pixel['color']),
-            );
-        }
-
-        $this->writer->flushIfNeeded();
-        $this->pixelBuffer = [];
-        $this->lastFlushTime = microtime(true);
-    }
-
-    /**
-     * Force flush remaining pixels (call at frame end or shutdown).
-     */
-    public function forceFlush(): void
-    {
-        $this->flushBuffer();
+        return $this->colorCache[$index];
     }
 }

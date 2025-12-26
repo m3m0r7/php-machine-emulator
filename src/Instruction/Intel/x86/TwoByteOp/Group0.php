@@ -10,8 +10,8 @@ use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -30,35 +30,35 @@ class Group0 implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
 
         return match ($modrm->registerOrOPCode()) {
-            0b000 => $this->sldt($runtime, $reader, $modrm),
-            0b001 => $this->str($runtime, $reader, $modrm),
-            0b010 => $this->lldt($runtime, $reader, $modrm),
-            0b011 => $this->ltr($runtime, $reader, $modrm),
+            0b000 => $this->sldt($runtime, $memory, $modrm),
+            0b001 => $this->str($runtime, $memory, $modrm),
+            0b010 => $this->lldt($runtime, $memory, $modrm),
+            0b011 => $this->ltr($runtime, $memory, $modrm),
             default => ExecutionStatus::SUCCESS,
         };
     }
 
-    private function sldt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function sldt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $selector = $runtime->context()->cpu()->ldtr()['selector'] ?? 0;
-        $this->writeRm16($runtime, $reader, $modrm, $selector);
+        $this->writeRm16($runtime, $memory, $modrm, $selector);
         return ExecutionStatus::SUCCESS;
     }
 
-    private function str(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function str(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $selector = $runtime->context()->cpu()->taskRegister()['selector'] ?? 0;
-        $this->writeRm16($runtime, $reader, $modrm, $selector);
+        $this->writeRm16($runtime, $memory, $modrm, $selector);
         return ExecutionStatus::SUCCESS;
     }
 
-    private function lldt(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function lldt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $selector = $this->readRm16($runtime, $reader, $modrm);
+        $selector = $this->readRm16($runtime, $memory, $modrm);
 
         if (!$runtime->context()->cpu()->isProtectedMode()) {
             return ExecutionStatus::SUCCESS;
@@ -88,9 +88,9 @@ class Group0 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    private function ltr(RuntimeInterface $runtime, EnhanceStreamReader $reader, ModRegRMInterface $modrm): ExecutionStatus
+    private function ltr(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
-        $selector = $this->readRm16($runtime, $reader, $modrm);
+        $selector = $this->readRm16($runtime, $memory, $modrm);
 
         if (!$runtime->context()->cpu()->isProtectedMode()) {
             return ExecutionStatus::SUCCESS;

@@ -8,7 +8,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class MovImmToRm implements InstructionInterface
@@ -24,8 +23,8 @@ class MovImmToRm implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $enhancedStreamReader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
         $size = $runtime->context()->cpu()->operandSize();
 
         // Intel spec says reg field should be 0, but some code may use other values
@@ -43,26 +42,26 @@ class MovImmToRm implements InstructionInterface
         if ($opcode === 0xC6) {
             if ($isRegister) {
                 // Register mode: just read immediate and write to register
-                $value = $enhancedStreamReader->streamReader()->byte();
+                $value = $memory->byte();
                 $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $value);
             } else {
                 // Memory mode: first calculate the address (this consumes any displacement bytes)
-                $linearAddress = $this->rmLinearAddress($runtime, $enhancedStreamReader, $modRegRM);
+                $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
                 // Then read the immediate value
-                $value = $enhancedStreamReader->streamReader()->byte();
+                $value = $memory->byte();
                 // Write the value to the calculated address
                 $this->writeMemory8($runtime, $linearAddress, $value);
             }
         } else {
             if ($isRegister) {
                 // Register mode: just read immediate and write to register
-                $value = $size === 32 ? $enhancedStreamReader->dword() : $enhancedStreamReader->short();
+                $value = $size === 32 ? $memory->dword() : $memory->short();
                 $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $value, $size);
             } else {
                 // Memory mode: first calculate the address (this consumes any displacement bytes)
-                $linearAddress = $this->rmLinearAddress($runtime, $enhancedStreamReader, $modRegRM);
+                $linearAddress = $this->rmLinearAddress($runtime, $memory, $modRegRM);
                 // Then read the immediate value
-                $value = $size === 32 ? $enhancedStreamReader->dword() : $enhancedStreamReader->short();
+                $value = $size === 32 ? $memory->dword() : $memory->short();
                 // Write the value to the calculated address
                 if ($size === 32) {
                     $this->writeMemory32($runtime, $linearAddress, $value);

@@ -39,4 +39,9 @@ class TestInstructionExecutor implements InstructionExecutorInterface
     {
         // No caching in test executor
     }
+
+    public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
+    {
+        // No caching in test executor
+    }
 }

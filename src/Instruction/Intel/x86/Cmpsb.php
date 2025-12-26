@@ -38,6 +38,7 @@ class Cmpsb implements InstructionInterface
 
         $calc = $left - $right;
         $result = $calc & 0xFF;
+        $af = (($left & 0x0F) < ($right & 0x0F));
         // OF for CMP/CMPS: set if signs of operands differ and result sign equals subtrahend sign
         $signA = ($left >> 7) & 1;
         $signB = ($right >> 7) & 1;
@@ -46,7 +47,8 @@ class Cmpsb implements InstructionInterface
         $runtime->memoryAccessor()
             ->updateFlags($result, 8)
             ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
 
         $step = $this->stepForElement($runtime, 1);
         $this->writeIndex($runtime, RegisterType::ESI, $si + $step);

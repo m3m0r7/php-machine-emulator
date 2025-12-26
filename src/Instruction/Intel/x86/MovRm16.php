@@ -7,7 +7,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class MovRm16 implements InstructionInterface
@@ -22,12 +21,12 @@ class MovRm16 implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $enhancedStreamReader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $size = $runtime->context()->cpu()->operandSize();
 
-        $value = $this->readRm($runtime, $enhancedStreamReader, $modRegRM, $size);
+        $value = $this->readRm($runtime, $memory, $modRegRM, $size);
 
         $regCode = $modRegRM->registerOrOPCode();
 

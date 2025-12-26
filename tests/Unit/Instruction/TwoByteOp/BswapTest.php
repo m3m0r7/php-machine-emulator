@@ -7,6 +7,7 @@ namespace Tests\Unit\Instruction\TwoByteOp;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bswap;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Tests for BSWAP instruction.
@@ -148,6 +149,35 @@ class BswapTest extends TwoByteOpTestCase
         $this->executeBswap(0xC8);
 
         $this->assertSame(0xFFFFFFFF, $this->getRegister(RegisterType::EAX));
+    }
+
+    // ========================================
+    // Long mode 64-bit Tests
+    // ========================================
+
+    public function testBswapRax64Bit(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::EAX, 0x0123456789ABCDEF, 64);
+
+        $this->executeBswap(0xC8);
+
+        $this->assertSame('0xefcdab8967452301', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+    }
+
+    public function testBswapR8dWithRexB(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x01); // REX.B
+
+        $this->setRegister(RegisterType::R8, 0x11223344, 64);
+
+        // Opcode selects reg=0; with REX.B this becomes R8D.
+        $this->executeBswap(0xC8);
+
+        $this->assertSame('0x0000000044332211', UInt64::of($this->getRegister(RegisterType::R8, 64))->toHex());
     }
 
     private function executeBswap(int $opcode): void

@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class Movsw implements InstructionInterface
 {
@@ -23,20 +24,43 @@ class Movsw implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opSize = $runtime->context()->cpu()->operandSize();
-        $width = $opSize === 32 ? 4 : 2;
+        $width = match ($opSize) {
+            16 => 2,
+            32 => 4,
+            64 => 8,
+            default => 2,
+        };
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $di = $this->readIndex($runtime, RegisterType::EDI);
 
         $sourceSegment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
 
         $address = $this->segmentOffsetAddress($runtime, $sourceSegment, $si);
-        $value = $opSize === 32
-            ? $this->readMemory32($runtime, $address)
-            : $this->readMemory16($runtime, $address);
+        $value = match ($opSize) {
+            16 => $this->readMemory16($runtime, $address),
+            32 => $this->readMemory32($runtime, $address),
+            64 => $this->readMemory64($runtime, $address),
+            default => $this->readMemory16($runtime, $address),
+        };
 
-        $destAddress = $this->translateLinearWithMmio($runtime, $this->segmentOffsetAddress($runtime, RegisterType::ES, $di), true);
-        $runtime->memoryAccessor()->allocate($destAddress, $width, safe: false);
-        $runtime->memoryAccessor()->writeBySize($destAddress, $value, $opSize);
+        $destLinear = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
+        // Linear framebuffer writes (e.g. VBE LFB at 0xE0000000) must go through MMIO handling.
+        if ($destLinear >= 0xE0000000 && $destLinear < 0xE1000000) {
+            match ($opSize) {
+                16 => $this->writeMemory16($runtime, $destLinear, is_int($value) ? $value : $value->toInt()),
+                32 => $this->writeMemory32($runtime, $destLinear, is_int($value) ? $value : $value->toInt()),
+                64 => $this->writeMemory64($runtime, $destLinear, $value),
+                default => $this->writeMemory16($runtime, $destLinear, is_int($value) ? $value : $value->toInt()),
+            };
+        } else {
+            $destAddress = $this->translateLinearWithMmio($runtime, $destLinear, true);
+            $runtime->memoryAccessor()->allocate($destAddress, $width, safe: false);
+            $runtime->memoryAccessor()->writeBySize(
+                $destAddress,
+                $value instanceof UInt64 ? $value->toInt() : $value,
+                $opSize
+            );
+        }
 
         $step = $this->stepForElement($runtime, $width);
         $this->writeIndex($runtime, RegisterType::ESI, $si + $step);

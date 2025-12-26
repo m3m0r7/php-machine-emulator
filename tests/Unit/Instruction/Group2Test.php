@@ -106,12 +106,32 @@ class Group2Test extends InstructionTestCase
 
     public function testShlByZeroDoesNotChangeValue(): void
     {
-        // SHL EAX, 0 should not change the value
+        // SHL EAX, 0 should not change the value or flags
+        $this->memoryAccessor->updateFlags(0, 32); // ZF=1
+        $this->setCarryFlag(true); // CF=1
+
         $this->setRegister(RegisterType::EAX, 0xDEADBEEF);
         $this->setRegister(RegisterType::ECX, 0x00);
         $this->executeBytes([0xD3, 0xE0]); // SHL EAX, CL (CL=0)
 
         $this->assertSame(0xDEADBEEF, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getCarryFlag());
+        $this->assertTrue($this->getZeroFlag());
+    }
+
+    public function testShrByZeroDoesNotChangeValueOrFlags(): void
+    {
+        // SHR EAX, 0 should not change the value or flags
+        $this->memoryAccessor->updateFlags(0, 32); // ZF=1
+        $this->setCarryFlag(true); // CF=1
+
+        $this->setRegister(RegisterType::EAX, 0xDEADBEEF);
+        $this->setRegister(RegisterType::ECX, 0x00);
+        $this->executeBytes([0xD3, 0xE8]); // SHR EAX, CL (CL=0)
+
+        $this->assertSame(0xDEADBEEF, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->getCarryFlag());
+        $this->assertTrue($this->getZeroFlag());
     }
 
     public function testShlShiftCountMaskedTo5Bits(): void

@@ -45,9 +45,19 @@ class StreamReaderProxy implements StreamReaderProxyInterface
         return $this->stream->short();
     }
 
+    public function signedShort(): int
+    {
+        return $this->stream->signedShort();
+    }
+
     public function dword(): int
     {
         return $this->stream->dword();
+    }
+
+    public function signedDword(): int
+    {
+        return $this->stream->signedDword();
     }
 
     public function read(int $length): string

@@ -8,7 +8,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class MovImm8 implements InstructionInterface
@@ -24,15 +23,15 @@ class MovImm8 implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
         $register = $this->registersAndOPCodes()[$opcode];
         $opSize = $runtime->context()->cpu()->operandSize();
 
         if ($opcode >= 0xB8) {
             // NOTE: move instruction for Xx registers, respect operand size
             $value = $opSize === 32
-                ? $enhancedStreamReader->dword()
-                : $enhancedStreamReader->short();
+                ? $memory->dword()
+                : $memory->short();
 
             $runtime
                 ->memoryAccessor()
@@ -43,7 +42,7 @@ class MovImm8 implements InstructionInterface
 
         if ($opcode >= 0xB4) {
             // NOTE: move instruction for high-bit registers (AH/CH/DH/BH)
-            $value = $enhancedStreamReader->streamReader()->byte();
+            $value = $memory->byte();
             $runtime
                 ->memoryAccessor()
                 ->writeToHighBit(
@@ -59,8 +58,7 @@ class MovImm8 implements InstructionInterface
             ->memoryAccessor()
             ->writeToLowBit(
                 $register,
-                $enhancedStreamReader
-                    ->streamReader()
+                $memory
                     ->byte(),
             );
 

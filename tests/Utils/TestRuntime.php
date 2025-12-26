@@ -34,12 +34,16 @@ class TestRuntime implements RuntimeInterface
     private MemoryStream $memoryStream;
     private Register $register;
     private \PHPMachineEmulator\OptionInterface $option;
+    private LogicBoardInterface $logicBoard;
+    private BootableStreamInterface $bootStream;
 
-    public function __construct(int $memorySize = 0x10000)
+    public function __construct(int $memorySize = 0x10000, ?BootableStreamInterface $bootStream = null)
     {
         $this->context = new TestRuntimeContext();
         $this->register = new Register();
         $this->option = new TestOption();
+        $this->bootStream = $bootStream ?? new TestBootableStream();
+        $this->logicBoard = new TestLogicBoard($this->bootStream);
 
         $observers = new MemoryAccessorObserverCollection();
         $this->memoryAccessor = new MemoryAccessor($this, $observers);
@@ -124,12 +128,12 @@ class TestRuntime implements RuntimeInterface
 
     public function bootStream(): BootableStreamInterface
     {
-        return new TestBootableStream();
+        return $this->bootStream;
     }
 
     public function logicBoard(): LogicBoardInterface
     {
-        return new TestLogicBoard();
+        return $this->logicBoard;
     }
 
     public function services(): ServiceCollectionInterface

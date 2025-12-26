@@ -22,9 +22,6 @@ class Rdmsr implements InstructionInterface
 {
     use Instructable;
 
-    /** @var array<int, UInt64|int> */
-    private static array $msr = [];
-
     public function opcodes(): array
     {
         return $this->applyPrefixes([[0x0F, 0x32]]);
@@ -39,10 +36,8 @@ class Rdmsr implements InstructionInterface
 
         $ma = $runtime->memoryAccessor();
         $ecx = $ma->fetch(RegisterType::ECX)->asBytesBySize(32);
-        $value = self::$msr[$ecx] ?? UInt64::zero();
-        if (!$value instanceof UInt64) {
-            $value = UInt64::of($value);
-        }
+        $cpu = $runtime->context()->cpu();
+        $value = $cpu->readMsr($ecx);
 
         if ($ecx === 0x10) { // TSC MSR
             $value = UInt64::of((int) (microtime(true) * 1_000_000));
@@ -51,8 +46,7 @@ class Rdmsr implements InstructionInterface
         } elseif ($ecx === 0xC0000080) { // EFER
             $value = UInt64::of($ma->readEfer());
         } elseif (in_array($ecx, [0x174, 0x175, 0x176], true)) { // SYSENTER_CS/ESP/EIP
-            $stored = self::$msr[$ecx] ?? 0;
-            $value = $stored instanceof UInt64 ? $stored : UInt64::of($stored);
+            $value = $cpu->readMsr($ecx);
         }
 
         $this->writeRegisterBySize($runtime, RegisterType::EAX, $value->low32(), 32);
@@ -61,14 +55,4 @@ class Rdmsr implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    public static function writeMsr(int $index, UInt64|int $value): void
-    {
-        self::$msr[$index] = $value instanceof UInt64 ? $value : UInt64::of($value);
-    }
-
-    public static function readMsr(int $index): UInt64
-    {
-        $value = self::$msr[$index] ?? 0;
-        return $value instanceof UInt64 ? $value : UInt64::of($value);
-    }
 }

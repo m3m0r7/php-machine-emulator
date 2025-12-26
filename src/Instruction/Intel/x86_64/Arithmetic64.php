@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * 64-bit arithmetic instructions (ADD, SUB, CMP, AND, OR, XOR).
@@ -96,26 +97,26 @@ class Arithmetic64 implements InstructionInterface
      */
     private function processRmReg(RuntimeInterface $runtime, string $operation, int $size): ExecutionStatus
     {
-        $reader = $this->enhanceReader($runtime);
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $this->enhanceReader($runtime);
+        $modRegRM = $memory->byteAsModRegRM();
         $cpu = $runtime->context()->cpu();
 
         // Read source from reg field
-        $regCode = $modRegRM->register();
+        $regCode = $modRegRM->registerOrOPCode();
         if ($cpu->rexR()) {
             $regCode |= 0b1000;
         }
         $src = $this->readReg64($runtime, $regCode, $size);
 
         // Read destination from r/m field
-        $dst = $this->readRm64($runtime, $reader, $modRegRM, $size);
+        $dst = $this->readRm64($runtime, $memory, $modRegRM, $size);
 
         // Perform operation
         $result = $this->performOperation($runtime, $operation, $dst, $src, $size);
 
         // Write result (except for CMP)
         if ($operation !== 'CMP') {
-            $this->writeRm64($runtime, $reader, $modRegRM, $result, $size);
+            $this->writeRm64($runtime, $memory, $modRegRM, $result, $size);
         }
 
         return ExecutionStatus::SUCCESS;
@@ -126,15 +127,15 @@ class Arithmetic64 implements InstructionInterface
      */
     private function processRegRm(RuntimeInterface $runtime, string $operation, int $size): ExecutionStatus
     {
-        $reader = $this->enhanceReader($runtime);
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $this->enhanceReader($runtime);
+        $modRegRM = $memory->byteAsModRegRM();
         $cpu = $runtime->context()->cpu();
 
         // Read source from r/m field
-        $src = $this->readRm64($runtime, $reader, $modRegRM, $size);
+        $src = $this->readRm64($runtime, $memory, $modRegRM, $size);
 
         // Read destination from reg field
-        $regCode = $modRegRM->register();
+        $regCode = $modRegRM->registerOrOPCode();
         if ($cpu->rexR()) {
             $regCode |= 0b1000;
         }
@@ -156,13 +157,13 @@ class Arithmetic64 implements InstructionInterface
      */
     private function processRaxImm(RuntimeInterface $runtime, string $operation, int $size): ExecutionStatus
     {
-        $reader = $this->enhanceReader($runtime);
+        $memory = $this->enhanceReader($runtime);
 
         // Read RAX
         $dst = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($size);
 
         // Read immediate (32-bit, sign-extended for 64-bit)
-        $imm32 = $reader->int32();
+        $imm32 = $memory->dword();
         if ($size === 64) {
             $src = $this->signExtendImm32($imm32);
         } else {
@@ -190,8 +191,73 @@ class Arithmetic64 implements InstructionInterface
      */
     private function performOperation(RuntimeInterface $runtime, string $operation, int $dst, int $src, int $size): int
     {
-        $mask = $size === 64 ? 0xFFFFFFFFFFFFFFFF : 0xFFFFFFFF;
-        $signBit = $size === 64 ? 0x8000000000000000 : 0x80000000;
+        $ma = $runtime->memoryAccessor();
+
+        // 64-bit operations must not rely on native PHP int overflow behavior.
+        if ($size === 64) {
+            $dstU = UInt64::of($dst);
+            $srcU = UInt64::of($src);
+
+            $resultU = match ($operation) {
+                'ADD' => $dstU->add($srcU),
+                'SUB', 'CMP' => $dstU->sub($srcU),
+                'AND' => $dstU->and($srcU),
+                'OR' => $dstU->or($srcU),
+                'XOR' => $dstU->xor($srcU),
+                default => $dstU,
+            };
+
+            // Common flags (ZF/SF/PF)
+            $ma->setZeroFlag($resultU->isZero());
+            $ma->setSignFlag($resultU->isNegativeSigned());
+
+            $lowByte = $resultU->low32() & 0xFF;
+            $ones = 0;
+            for ($i = 0; $i < 8; $i++) {
+                $ones += ($lowByte >> $i) & 1;
+            }
+            $ma->setParityFlag(($ones % 2) === 0);
+
+            if (in_array($operation, ['ADD', 'SUB', 'CMP'], true)) {
+                $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+
+                if ($operation === 'ADD') {
+                    // CF: unsigned carry out
+                    $ma->setCarryFlag($resultU->lt($dstU));
+                    // OF: (dst ^ res) & (src ^ res) & sign != 0
+                    $overflow = !$dstU
+                        ->xor($resultU)
+                        ->and($srcU->xor($resultU))
+                        ->and($signMask)
+                        ->isZero();
+                    $ma->setOverflowFlag($overflow);
+                } else {
+                    // CF: unsigned borrow
+                    $ma->setCarryFlag($dstU->lt($srcU));
+                    // OF: (dst ^ src) & (dst ^ res) & sign != 0
+                    $overflow = !$dstU
+                        ->xor($srcU)
+                        ->and($dstU->xor($resultU))
+                        ->and($signMask)
+                        ->isZero();
+                    $ma->setOverflowFlag($overflow);
+                }
+
+                // AF: carry/borrow from bit 3
+                $af = !$dstU->xor($srcU)->xor($resultU)->and(0x10)->isZero();
+                $ma->setAuxiliaryCarryFlag($af);
+            } else {
+                // Logical ops clear CF/OF and (for this emulator) clear AF.
+                $ma->setCarryFlag(false);
+                $ma->setOverflowFlag(false);
+                $ma->setAuxiliaryCarryFlag(false);
+            }
+
+            return $resultU->toInt();
+        }
+
+        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $signBit = $size === 32 ? 0x80000000 : 0x8000;
 
         $result = match ($operation) {
             'ADD' => ($dst + $src) & $mask,
@@ -199,58 +265,43 @@ class Arithmetic64 implements InstructionInterface
             'AND' => ($dst & $src) & $mask,
             'OR' => ($dst | $src) & $mask,
             'XOR' => ($dst ^ $src) & $mask,
-            default => $dst,
+            default => $dst & $mask,
         };
 
-        // Set flags
-        $memAccessor = $runtime->memoryAccessor();
+        // Common flags (ZF/SF/PF)
+        $ma->setZeroFlag(($result & $mask) === 0);
+        $ma->setSignFlag(($result & $signBit) !== 0);
 
-        // Zero flag
-        $memAccessor->shouldZeroFlag($result === 0);
-
-        // Sign flag
-        $memAccessor->shouldSignFlag(($result & $signBit) !== 0);
-
-        // Parity flag (based on low 8 bits)
         $lowByte = $result & 0xFF;
         $ones = 0;
         for ($i = 0; $i < 8; $i++) {
-            if (($lowByte >> $i) & 1) {
-                $ones++;
-            }
+            $ones += ($lowByte >> $i) & 1;
         }
-        $memAccessor->shouldParityFlag(($ones % 2) === 0);
+        $ma->setParityFlag(($ones % 2) === 0);
 
-        // Carry and Overflow flags (for ADD/SUB/CMP)
         if (in_array($operation, ['ADD', 'SUB', 'CMP'], true)) {
             if ($operation === 'ADD') {
-                // Carry: result < dst (unsigned overflow)
-                $memAccessor->shouldCarryFlag($result < ($dst & $mask));
-
-                // Overflow: sign of result differs from expected
-                $dstSign = ($dst & $signBit) !== 0;
-                $srcSign = ($src & $signBit) !== 0;
-                $resSign = ($result & $signBit) !== 0;
-                $overflow = ($dstSign === $srcSign) && ($resSign !== $dstSign);
-                $memAccessor->shouldOverflowFlag($overflow);
+                $ma->setCarryFlag(($dst + $src) > $mask);
+                $dstSign = (($dst & $signBit) !== 0);
+                $srcSign = (($src & $signBit) !== 0);
+                $resSign = (($result & $signBit) !== 0);
+                $ma->setOverflowFlag(($dstSign === $srcSign) && ($resSign !== $dstSign));
+                $ma->setAuxiliaryCarryFlag((($dst & 0x0F) + ($src & 0x0F)) > 0x0F);
             } else {
-                // SUB/CMP: Carry if borrow occurred (dst < src unsigned)
-                $memAccessor->shouldCarryFlag(($dst & $mask) < ($src & $mask));
-
-                // Overflow: sign changed unexpectedly
-                $dstSign = ($dst & $signBit) !== 0;
-                $srcSign = ($src & $signBit) !== 0;
-                $resSign = ($result & $signBit) !== 0;
-                $overflow = ($dstSign !== $srcSign) && ($resSign === $srcSign);
-                $memAccessor->shouldOverflowFlag($overflow);
+                $ma->setCarryFlag(($dst & $mask) < ($src & $mask));
+                $dstSign = (($dst & $signBit) !== 0);
+                $srcSign = (($src & $signBit) !== 0);
+                $resSign = (($result & $signBit) !== 0);
+                $ma->setOverflowFlag(($dstSign !== $srcSign) && ($resSign === $srcSign));
+                $ma->setAuxiliaryCarryFlag((($dst & 0x0F) - ($src & 0x0F)) < 0);
             }
         } else {
-            // Logical operations clear CF and OF
-            $memAccessor->shouldCarryFlag(false);
-            $memAccessor->shouldOverflowFlag(false);
+            $ma->setCarryFlag(false);
+            $ma->setOverflowFlag(false);
+            $ma->setAuxiliaryCarryFlag(false);
         }
 
-        return $result;
+        return $result & $mask;
     }
 
     /**
@@ -281,9 +332,10 @@ class Arithmetic64 implements InstructionInterface
      */
     private function signExtendImm32(int $value): int
     {
+        $value &= 0xFFFFFFFF;
         if (($value & 0x80000000) !== 0) {
-            return $value | 0xFFFFFFFF00000000;
+            return $value | (-1 << 32);
         }
-        return $value & 0xFFFFFFFF;
+        return $value;
     }
 }

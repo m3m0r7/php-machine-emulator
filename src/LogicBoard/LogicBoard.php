@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\LogicBoard;
 
 use PHPMachineEmulator\LogicBoard\CPU\CPUContextInterface;
+use PHPMachineEmulator\LogicBoard\Debug\DebugConfigLoader;
+use PHPMachineEmulator\LogicBoard\Debug\DebugContext;
+use PHPMachineEmulator\LogicBoard\Debug\DebugContextInterface;
 use PHPMachineEmulator\LogicBoard\Display\DisplayContextInterface;
 use PHPMachineEmulator\LogicBoard\ExternalDevice\ExternalDeviceContextInterface;
 use PHPMachineEmulator\LogicBoard\Media\MediaContextInterface;
@@ -14,6 +17,8 @@ use PHPMachineEmulator\LogicBoard\Storage\StorageContextInterface;
 
 class LogicBoard implements LogicBoardInterface
 {
+    protected DebugContextInterface $debugContext;
+
     public function __construct(
         protected MemoryContextInterface $memoryContext,
         protected CPUContextInterface $cpuContext,
@@ -22,7 +27,11 @@ class LogicBoard implements LogicBoardInterface
         protected StorageContextInterface $storageContext,
         protected MediaContextInterface $mediaContext,
         protected ExternalDeviceContextInterface $externalDeviceContext,
+        ?DebugContextInterface $debugContext = null,
     ) {
+        $this->debugContext = $debugContext
+            ?? (new DebugConfigLoader())->load()
+            ?? new DebugContext();
     }
 
     public function memory(): MemoryContextInterface
@@ -58,5 +67,10 @@ class LogicBoard implements LogicBoardInterface
     public function externalDevice(): ExternalDeviceContextInterface
     {
         return $this->externalDeviceContext;
+    }
+
+    public function debug(): DebugContextInterface
+    {
+        return $this->debugContext;
     }
 }

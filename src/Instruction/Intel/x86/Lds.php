@@ -9,7 +9,6 @@ use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -32,15 +31,16 @@ class Lds implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException('LDS/LES does not support register-direct addressing');
         }
 
-        // Get the memory address
-        [$address] = $this->effectiveAddressInfo($runtime, $reader, $modRegRM);
+        // Get the linear address of the far pointer operand.
+        // LDS/LES use normal ModR/M addressing rules including segment overrides.
+        $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
 
         $size = $runtime->context()->cpu()->operandSize();
         $ma = $runtime->memoryAccessor();
@@ -65,6 +65,27 @@ class Lds implements InstructionInterface
             ($runtime->register())::addressBy($segmentReg),
             $segment,
         );
+
+        // Maintain hidden segment cache for protected/unreal and real-mode semantics.
+        $cpu = $runtime->context()->cpu();
+        if ($cpu->isProtectedMode() && $segment !== 0) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $segment);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $cpu->cacheSegmentDescriptor($segmentReg, $descriptor);
+            }
+        }
+        if (!$cpu->isProtectedMode()) {
+            $cpu->cacheSegmentDescriptor($segmentReg, [
+                'base' => (($segment << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

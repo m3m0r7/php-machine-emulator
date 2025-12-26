@@ -10,6 +10,7 @@ use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Stream\ISO\ISOBootImageStream;
 
 class BIOS
 {
@@ -92,6 +93,9 @@ class BIOS
         // 9. Initialize boot segment (CS register) - should be last before boot
         $this->initializeBootSegment();
 
+        // BIOS typically enables interrupts before handing control to the boot loader.
+        $this->runtime()->memoryAccessor()->setInterruptFlag(true);
+
         $this->machine->option()->logger()->info('BIOS initialization completed');
     }
 
@@ -173,9 +177,10 @@ class BIOS
         // Bit 6-7: Number of floppy drives - 1
         // Bit 9-11: Number of serial ports
         // Bit 14-15: Number of parallel ports
-        $equipmentFlags = 0x0021;  // Floppy present, 80x25 color, 1 floppy
-        $equipmentFlags |= (2 << 9);   // 2 serial ports (COM1, COM2)
-        $equipmentFlags |= (1 << 14);  // 1 parallel port (LPT1)
+        // Report minimal hardware during early boot.
+        // DOS uses these counts to probe INT 14h/17h; we currently don't emulate UART/LPT,
+        // so advertise none to avoid calling into uninitialized device vectors.
+        $equipmentFlags = 0x0021;  // Floppy present, 80x25 color, 1 floppy, no serial/LPT
         $mem->writeBySize(0x410, $equipmentFlags, 16);
 
         // 0x412: Reserved (manufacturing test)
@@ -471,13 +476,15 @@ class BIOS
         $defaultSegment = 0xF000;
         $defaultOffset = 0xFF53;
 
-        // Initialize all 256 interrupt vectors to point to default handler
+        // Initialize all 256 interrupt vectors to point to default handler.
+        // Use physical writes here because low IVT addresses (0x0000-0x000D)
+        // overlap with the internal register address space.
         for ($vector = 0; $vector < 256; $vector++) {
             $address = $vector * 4;
             // Store offset (low word)
-            $mem->writeBySize($address, $defaultOffset, 16);
+            $mem->writePhysical16($address, $defaultOffset);
             // Store segment (high word)
-            $mem->writeBySize($address + 2, $defaultSegment, 16);
+            $mem->writePhysical16($address + 2, $defaultSegment);
         }
 
         $this->machine->option()->logger()->debug(
@@ -634,6 +641,13 @@ class BIOS
         $mem->writeBySize(RegisterType::ESI, 0x00000000, 32);
         $mem->writeBySize(RegisterType::EDI, 0x00000000, 32);
         $mem->writeBySize(RegisterType::EBP, 0x00000000, 32);
+
+        // Boot drive number (DL).
+        // For El Torito no-emulation CD boots, BIOS typically passes DL=0xE0 (first CD-ROM).
+        $bootStream = $this->machine->logicBoard()->media()->primary()->stream();
+        if ($bootStream instanceof ISOBootImageStream && $bootStream->isNoEmulation()) {
+            $mem->writeToLowBit(RegisterType::EDX, 0xE0);
+        }
 
         $this->machine->option()->logger()->debug(
             'BIOS: Initialized segment registers DS=ES=SS=FS=GS=0, SP=0xFFFE'

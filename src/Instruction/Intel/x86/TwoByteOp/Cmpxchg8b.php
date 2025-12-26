@@ -11,7 +11,6 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -31,8 +30,8 @@ class Cmpxchg8b implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
 
         if (ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException('CMPXCHG8B requires memory operand');
@@ -42,7 +41,7 @@ class Cmpxchg8b implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modrm);
+        $address = $this->rmLinearAddress($runtime, $memory, $modrm);
         $low = $this->readMemory32($runtime, $address);
         $high = $this->readMemory32($runtime, $address + 4);
 

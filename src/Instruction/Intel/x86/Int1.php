@@ -35,11 +35,15 @@ class Int1 implements InstructionInterface
 
         // Raise interrupt vector 1 (debug exception)
         $returnIp = $runtime->memory()->offset();
-        // TODO: Here implementation is invalid, because always true. you need to read memory directly.
-//        $intHandler = $runtime->instructionList->instructionList()[Int_::class] ?? null;
-//        if ($intHandler instanceof Int_) {
-//            $intHandler->raise($runtime, 1, $returnIp, null);
-//        }
+        try {
+            $handler = $this->instructionList->findInstruction(0xCD);
+        } catch (\Throwable) {
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($handler instanceof Int_) {
+            $handler->raiseSoftware($runtime, 1, $returnIp, null);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

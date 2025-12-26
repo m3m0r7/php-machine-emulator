@@ -8,7 +8,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class MovMoffset implements InstructionInterface
@@ -24,10 +23,10 @@ class MovMoffset implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
         $offset = $runtime->context()->cpu()->addressSize() === 32
-            ? $enhancedStreamReader->dword()
-            : $enhancedStreamReader->short();
+            ? $memory->dword()
+            : $memory->short();
         $opSize = $runtime->context()->cpu()->operandSize();
         $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
         $linearOffset = $this->segmentOffsetAddress($runtime, $segment, $offset);

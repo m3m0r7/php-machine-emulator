@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movzx;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movsx;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Tests for MOVZX and MOVSX instructions.
@@ -206,6 +207,52 @@ class MovzxMovsxTest extends TwoByteOpTestCase
         $this->executeTwoByteOpWith($this->movsx, 0xBE, [0xC1]);
 
         $this->assertSame(0xFF80, $this->getRegister(RegisterType::EAX, 16));
+    }
+
+    // ========================================
+    // Long mode 64-bit Tests
+    // ========================================
+
+    public function testMovzxR64R8(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::ECX, 0x000000AB, 64); // CL = 0xAB
+        $this->setRegister(RegisterType::EAX, -1, 64);
+
+        // MOVZX RAX, CL
+        $this->executeTwoByteOpWith($this->movzx, 0xB6, [0xC1]);
+
+        $this->assertSame('0x00000000000000ab', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+    }
+
+    public function testMovsxR64R8Negative(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::ECX, 0x00000080, 64); // CL = 0x80 (-128)
+        $this->setRegister(RegisterType::EAX, 0, 64);
+
+        // MOVSX RAX, CL
+        $this->executeTwoByteOpWith($this->movsx, 0xBE, [0xC1]);
+
+        $this->assertSame('0xffffffffffffff80', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+    }
+
+    public function testMovzxUsesSplWhenRexPresent(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W (also disables AH/CH/DH/BH)
+
+        // RSP low byte (SPL) = 0xAB
+        $this->setRegister(RegisterType::ESP, 0x00000000000000AB, 64);
+
+        // MOVZX RAX, SPL (ModRM: 11 000 100 = 0xC4)
+        $this->executeTwoByteOpWith($this->movzx, 0xB6, [0xC4]);
+
+        $this->assertSame('0x00000000000000ab', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
     }
 
     // ========================================

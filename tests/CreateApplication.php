@@ -11,6 +11,7 @@ use PHPMachineEmulator\IO\Buffer;
 use PHPMachineEmulator\IO\IO;
 use PHPMachineEmulator\IO\StdIn;
 use PHPMachineEmulator\LogicBoard\CPU\CPUContext;
+use PHPMachineEmulator\LogicBoard\Debug\DebugContext;
 use PHPMachineEmulator\LogicBoard\Display\DisplayContext;
 use PHPMachineEmulator\LogicBoard\ExternalDevice\ExternalDeviceContext;
 use PHPMachineEmulator\LogicBoard\LogicBoard;
@@ -81,6 +82,7 @@ trait CreateApplication
             storageContext: new StorageContext(new StorageInfo(0x10000)),
             mediaContext: new MediaContext(new MediaInfo($bootStream, $bootType)),
             externalDeviceContext: new ExternalDeviceContext(),
+            debugContext: new DebugContext(),
         );
     }
 }

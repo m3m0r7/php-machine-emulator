@@ -11,8 +11,12 @@ class TerminalScreenWriterFactory implements ScreenWriterFactoryInterface
 {
     private ?ScreenWriterInterface $created = null;
 
+    public function __construct(private ?TerminalScreenWriterOption $option = null)
+    {
+    }
+
     public function create(RuntimeInterface $runtime, VideoTypeInfo $videoTypeInfo): ScreenWriterInterface
     {
-        return $this->created ??= new TerminalScreenWriter($runtime, $videoTypeInfo);
+        return $this->created ??= new TerminalScreenWriter($runtime, $videoTypeInfo, $this->option);
     }
 }

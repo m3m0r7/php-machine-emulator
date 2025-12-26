@@ -256,6 +256,26 @@ class IncDecTest extends InstructionTestCase
         $this->assertTrue($this->getCarryFlag());
     }
 
+    public function testIncSetsAuxiliaryCarryFlagOnNibbleWrap(): void
+    {
+        $this->memoryAccessor->setAuxiliaryCarryFlag(false);
+        $this->setRegister(RegisterType::EAX, 0x0000000F);
+        $this->executeBytes([0x40]); // INC EAX
+
+        $this->assertSame(0x00000010, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->memoryAccessor->shouldAuxiliaryCarryFlag());
+    }
+
+    public function testIncClearsAuxiliaryCarryFlagWhenNoNibbleCarry(): void
+    {
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true);
+        $this->setRegister(RegisterType::EAX, 0x0000000E);
+        $this->executeBytes([0x40]); // INC EAX
+
+        $this->assertSame(0x0000000F, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->memoryAccessor->shouldAuxiliaryCarryFlag());
+    }
+
     public function testDecDoesNotAffectCarryFlag(): void
     {
         // Clear carry flag before DEC
@@ -265,6 +285,26 @@ class IncDecTest extends InstructionTestCase
 
         // Carry flag should remain clear (DEC doesn't touch CF)
         $this->assertFalse($this->getCarryFlag());
+    }
+
+    public function testDecSetsAuxiliaryCarryFlagOnNibbleBorrow(): void
+    {
+        $this->memoryAccessor->setAuxiliaryCarryFlag(false);
+        $this->setRegister(RegisterType::EAX, 0x00000010);
+        $this->executeBytes([0x48]); // DEC EAX
+
+        $this->assertSame(0x0000000F, $this->getRegister(RegisterType::EAX));
+        $this->assertTrue($this->memoryAccessor->shouldAuxiliaryCarryFlag());
+    }
+
+    public function testDecClearsAuxiliaryCarryFlagWhenNoNibbleBorrow(): void
+    {
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true);
+        $this->setRegister(RegisterType::EAX, 0x00000011);
+        $this->executeBytes([0x48]); // DEC EAX
+
+        $this->assertSame(0x00000010, $this->getRegister(RegisterType::EAX));
+        $this->assertFalse($this->memoryAccessor->shouldAuxiliaryCarryFlag());
     }
 
     public function testIncPreservesCarryFlagWhenClear(): void

@@ -205,6 +205,28 @@ class CmpRegRmTest extends InstructionTestCase
         $this->assertFalse($this->getCarryFlag());
     }
 
+    public function testCmpSetsAuxiliaryCarryFlagOnNibbleBorrow(): void
+    {
+        // 0x10 - 0x01 = 0x0F (borrow from bit 4 -> AF=1)
+        $this->memoryAccessor->setAuxiliaryCarryFlag(false);
+        $this->setRegister(RegisterType::EAX, 0x00000010);
+        $this->setRegister(RegisterType::ECX, 0x00000001);
+        $this->executeBytes([0x39, 0xC8]); // CMP EAX, ECX
+
+        $this->assertTrue($this->memoryAccessor->shouldAuxiliaryCarryFlag());
+    }
+
+    public function testCmpClearsAuxiliaryCarryFlagWhenNoNibbleBorrow(): void
+    {
+        // 0x11 - 0x01 = 0x10 (no borrow from bit 4 -> AF=0)
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true);
+        $this->setRegister(RegisterType::EAX, 0x00000011);
+        $this->setRegister(RegisterType::ECX, 0x00000001);
+        $this->executeBytes([0x39, 0xC8]); // CMP EAX, ECX
+
+        $this->assertFalse($this->memoryAccessor->shouldAuxiliaryCarryFlag());
+    }
+
     // ========================================
     // Edge Cases
     // ========================================

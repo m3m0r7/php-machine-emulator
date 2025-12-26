@@ -8,6 +8,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Cmpxchg;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Xadd;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Tests for CMPXCHG and XADD instructions.
@@ -199,6 +200,58 @@ class CmpxchgXaddTest extends TwoByteOpTestCase
     }
 
     // ========================================
+    // Long mode 64-bit Tests
+    // ========================================
+
+    public function testCmpxchgR64R64Equal(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::EAX, 0x1122334455667788, 64); // RAX
+        $this->setRegister(RegisterType::ECX, 0x1122334455667788, 64); // RCX (dest)
+        $this->setRegister(RegisterType::EBX, -1, 64); // RBX (src)
+
+        // CMPXCHG RCX, RBX => ModRM reg=RBX(3), r/m=RCX(1) => 0xD9
+        $this->executeCmpxchg64([0xD9]);
+
+        $this->assertSame('0xffffffffffffffff', UInt64::of($this->getRegister(RegisterType::ECX, 64))->toHex());
+        $this->assertSame('0x1122334455667788', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+        $this->assertTrue($this->getZeroFlag());
+    }
+
+    public function testCmpxchgR64R64NotEqual(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        $this->setRegister(RegisterType::EAX, 0x0000000000000001, 64); // RAX
+        $this->setRegister(RegisterType::ECX, 0x1122334455667788, 64); // RCX (dest)
+        $this->setRegister(RegisterType::EBX, 0x99, 64); // RBX (src)
+
+        $this->executeCmpxchg64([0xD9]);
+
+        $this->assertSame('0x1122334455667788', UInt64::of($this->getRegister(RegisterType::ECX, 64))->toHex()); // dest unchanged
+        $this->assertSame('0x1122334455667788', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex()); // RAX loaded
+        $this->assertFalse($this->getZeroFlag());
+    }
+
+    public function testXaddR64R64(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        // XADD RCX, RBX: RCX = RCX + RBX, RBX = old RCX
+        $this->setRegister(RegisterType::ECX, 0x10, 64);
+        $this->setRegister(RegisterType::EBX, 0x5, 64);
+
+        $this->executeXadd64([0xD9]);
+
+        $this->assertSame(0x15, $this->getRegister(RegisterType::ECX, 64));
+        $this->assertSame(0x10, $this->getRegister(RegisterType::EBX, 64));
+    }
+
+    // ========================================
     // Helper methods
     // ========================================
 
@@ -243,6 +296,28 @@ class CmpxchgXaddTest extends TwoByteOpTestCase
         $this->memoryStream->setOffset(0);
 
         $opcodeKey = (0x0F << 8) | 0xC0;
+        $this->xadd->process($this->runtime, [$opcodeKey]);
+    }
+
+    private function executeCmpxchg64(array $operandBytes): void
+    {
+        $this->memoryStream->setOffset(0);
+        $code = implode('', array_map('chr', $operandBytes));
+        $this->memoryStream->write($code);
+        $this->memoryStream->setOffset(0);
+
+        $opcodeKey = (0x0F << 8) | 0xB1;
+        $this->cmpxchg->process($this->runtime, [$opcodeKey]);
+    }
+
+    private function executeXadd64(array $operandBytes): void
+    {
+        $this->memoryStream->setOffset(0);
+        $code = implode('', array_map('chr', $operandBytes));
+        $this->memoryStream->write($code);
+        $this->memoryStream->setOffset(0);
+
+        $opcodeKey = (0x0F << 8) | 0xC1;
         $this->xadd->process($this->runtime, [$opcodeKey]);
     }
 }

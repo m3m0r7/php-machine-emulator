@@ -32,6 +32,7 @@ class Scasb implements InstructionInterface
 
         $calc = $al - $value;
         $result = $calc & 0xFF;
+        $af = (($al & 0x0F) < ($value & 0x0F));
         // OF for CMP/SCAS: set if signs of operands differ and result sign equals subtrahend sign
         $signA = ($al >> 7) & 1;
         $signB = ($value >> 7) & 1;
@@ -40,7 +41,8 @@ class Scasb implements InstructionInterface
         $runtime->memoryAccessor()
             ->updateFlags($result, 8)
             ->setCarryFlag($calc < 0)
-            ->setOverflowFlag($of);
+            ->setOverflowFlag($of)
+            ->setAuxiliaryCarryFlag($af);
 
         $step = $this->stepForElement($runtime, 1);
         $this->writeIndex($runtime, RegisterType::EDI, $di + $step);

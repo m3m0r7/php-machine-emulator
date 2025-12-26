@@ -6,27 +6,24 @@ namespace PHPMachineEmulator\Instruction\Intel\Observer;
 
 use PHPMachineEmulator\Display\Cursor;
 use PHPMachineEmulator\Display\CursorInterface;
-use PHPMachineEmulator\Display\Pixel\Color;
+use PHPMachineEmulator\Display\Pixel\VgaPaletteColor;
 use PHPMachineEmulator\Runtime\MemoryAccessorObserverInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class VideoInitializerObserver implements MemoryAccessorObserverInterface
 {
     protected ?CursorInterface $cursor = null;
-    protected ?int $cachedVideoTypeFlagAddress = null;
 
     public function addressRange(): ?array
     {
-        // This observer watches a single specific address
-        // Return null to indicate dynamic address (depends on runtime)
-        return null;
+        // Video type flag is stored at a fixed address.
+        $addr = 0xFF0000;
+        return ['min' => $addr, 'max' => $addr];
     }
 
     public function shouldMatch(RuntimeInterface $runtime, int $address, ?int $previousValue, ?int $nextValue): bool
     {
-        // Cache the video type flag address to avoid repeated lookups
-        $this->cachedVideoTypeFlagAddress ??= $runtime->video()->videoTypeFlagAddress();
-        return $address === $this->cachedVideoTypeFlagAddress;
+        return $address === $runtime->video()->videoTypeFlagAddress();
     }
 
     public function observe(RuntimeInterface $runtime, int $address, int|null $previousValue, int|null $nextValue): void
@@ -42,9 +39,11 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
         $height = ($videoSettingAddress >> 32) & 0xFFFF;
         $videoType = $videoSettingAddress & 0xFF;
 
-        $videoTypeInfo = $runtime
-            ->video()
-            ->supportedVideoModes()[$videoType];
+        $videoModes = $runtime->video()->supportedVideoModes();
+        $videoTypeInfo = $videoModes[$videoType] ?? $videoModes[0x03] ?? null;
+        if ($videoTypeInfo === null) {
+            return;
+        }
 
         // NOTE: Fallback to predefined size if header was not set.
         $width = $width === 0 ? $videoTypeInfo->width : $width;
@@ -52,16 +51,17 @@ class VideoInitializerObserver implements MemoryAccessorObserverInterface
 
         // NOTE: Clear the screen with a tiny bootstrap text area (mode 0x00) to avoid rendering an
         // enormous frame when switching video modes during boot.
-        $bootstrapVideoType = $runtime->video()->supportedVideoModes()[0x00] ?? $videoTypeInfo;
+        $bootstrapVideoType = $videoModes[0x00] ?? $videoTypeInfo;
         $clearWidth = $bootstrapVideoType->width;
         $clearHeight = $bootstrapVideoType->height;
 
         $screenWriter = $runtime->context()->screen()->screenWriter();
         $this->cursor ??= new Cursor($screenWriter);
+        $black = VgaPaletteColor::Black->toColor();
 
         for ($y = 0; $y < $clearHeight; $y++) {
             for ($x = 0; $x < $clearWidth; $x++) {
-                $screenWriter->dot($x, $y, Color::asBlack());
+                $screenWriter->dot($x, $y, $black);
             }
         }
 

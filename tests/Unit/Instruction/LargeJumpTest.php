@@ -258,4 +258,39 @@ class LargeJumpTest extends InstructionTestCase
 
         $this->assertSame(ExecutionStatus::SUCCESS, $result);
     }
+
+    public function testFarJumpInProtectedModeCachesCsDescriptor(): void
+    {
+        $this->setProtectedMode32();
+
+        // Build a minimal GDT with a flat 32-bit code segment at selector 0x0008.
+        $gdtBase = 0x2000;
+        $this->cpuContext->setGdtr($gdtBase, 0x0F); // 2 descriptors (16 bytes) - 1
+
+        // Null descriptor (all zeros)
+        for ($i = 0; $i < 8; $i++) {
+            $this->writeMemory($gdtBase + $i, 0x00, 8);
+        }
+
+        // Code descriptor: base=0, limit=4GB, present, D=1, G=1 (0x9A, 0xCF)
+        $codeDesc = [0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00];
+        foreach ($codeDesc as $i => $b) {
+            $this->writeMemory($gdtBase + 8 + $i, $b, 8);
+        }
+
+        // JMP FAR ptr16:32 to 0x0008:0x1234
+        $this->executeBytes([0xEA, 0x34, 0x12, 0x00, 0x00, 0x08, 0x00]);
+
+        $this->assertSame(0x0008, $this->getRegister(RegisterType::CS, 16));
+        $this->assertSame(0x1234, $this->memoryStream->offset());
+
+        $cached = $this->cpuContext->getCachedSegmentDescriptor(RegisterType::CS);
+        $this->assertIsArray($cached);
+        $this->assertSame(0x00000000, $cached['base']);
+        $this->assertSame(0xFFFFFFFF, $cached['limit']);
+        $this->assertTrue((bool) $cached['present']);
+        $this->assertSame(32, $cached['default']);
+        $this->assertSame(32, $this->cpuContext->defaultOperandSize());
+        $this->assertSame(32, $this->cpuContext->defaultAddressSize());
+    }
 }

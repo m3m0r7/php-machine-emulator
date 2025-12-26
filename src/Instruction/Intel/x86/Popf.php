@@ -21,9 +21,14 @@ class Popf implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $hasOperandSizeOverridePrefix = in_array(self::PREFIX_OPERAND_SIZE, $opcodes, true);
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $ma = $runtime->memoryAccessor();
-        $size = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+        $size = $cpu->operandSize();
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $size = $hasOperandSizeOverridePrefix ? 16 : 64;
+        }
         $flags = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
 
         // Restore flags directly without using updateFlags
@@ -35,9 +40,9 @@ class Popf implements InstructionInterface
         $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
         $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);
 
-        if ($runtime->context()->cpu()->isProtectedMode()) {
-            $cpl = $runtime->context()->cpu()->cpl();
-            $iopl = $runtime->context()->cpu()->iopl();
+        if ($cpu->isProtectedMode()) {
+            $cpl = $cpu->cpl();
+            $iopl = $cpu->iopl();
 
             // IF change allowed only if CPL <= IOPL; otherwise preserve current IF.
             $newIf = ($flags & (1 << 9)) !== 0;
@@ -47,12 +52,12 @@ class Popf implements InstructionInterface
 
             // IOPL change only at CPL==0.
             if ($cpl === 0) {
-                $runtime->context()->cpu()->setIopl(($flags >> 12) & 0x3);
+                $cpu->setIopl(($flags >> 12) & 0x3);
             }
 
             // NT change allowed only at CPL==0, otherwise preserve.
             if ($cpl === 0) {
-                $runtime->context()->cpu()->setNt(($flags & (1 << 14)) !== 0);
+                $cpu->setNt(($flags & (1 << 14)) !== 0);
             }
         } else {
             $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);

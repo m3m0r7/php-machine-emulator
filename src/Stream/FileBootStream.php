@@ -33,9 +33,19 @@ class FileBootStream implements BootableStreamInterface
         return $this->fileStream->short();
     }
 
+    public function signedShort(): int
+    {
+        return $this->fileStream->signedShort();
+    }
+
     public function dword(): int
     {
         return $this->fileStream->dword();
+    }
+
+    public function signedDword(): int
+    {
+        return $this->fileStream->signedDword();
     }
 
     public function read(int $length): string

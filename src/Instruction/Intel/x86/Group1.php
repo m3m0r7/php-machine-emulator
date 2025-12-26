@@ -8,14 +8,42 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
+use PHPMachineEmulator\Instruction\Intel\Register;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class Group1 implements InstructionInterface
 {
     use Instructable;
+
+    private function rmGprRegisterType(RuntimeInterface $runtime, ModRegRMInterface $modRegRM): RegisterType
+    {
+        $cpu = $runtime->context()->cpu();
+        return Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
+    }
+
+    private function readRm8Register(RuntimeInterface $runtime, ModRegRMInterface $modRegRM): int
+    {
+        $cpu = $runtime->context()->cpu();
+        if ($cpu->isLongMode()) {
+            return $this->read8BitRegister64($runtime, $modRegRM->registerOrMemoryAddress(), $cpu->hasRex(), $cpu->rexB());
+        }
+        return $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress());
+    }
+
+    private function writeRm8Register(RuntimeInterface $runtime, ModRegRMInterface $modRegRM, int $value): void
+    {
+        $cpu = $runtime->context()->cpu();
+        if ($cpu->isLongMode()) {
+            $this->write8BitRegister64($runtime, $modRegRM->registerOrMemoryAddress(), $value, $cpu->hasRex(), $cpu->rexB());
+            return;
+        }
+        $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $value);
+    }
 
     public function opcodes(): array
     {
@@ -27,32 +55,32 @@ class Group1 implements InstructionInterface
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
         $ip = $runtime->memory()->offset();
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $enhancedStreamReader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $size = $runtime->context()->cpu()->operandSize();
         $isReg = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
 
         // For memory operands, consume displacement BEFORE reading immediate
         // x86 encoding order: opcode, modrm, displacement, immediate
-        $linearAddr = !$isReg ? $this->rmLinearAddress($runtime, $enhancedStreamReader, $modRegRM) : 0;
+        $linearAddr = !$isReg ? $this->rmLinearAddress($runtime, $memory, $modRegRM) : 0;
 
         // NOW read the immediate value (after displacement has been consumed)
         $operand = $this->isSignExtendedWordOperation($opcode)
-            ? $enhancedStreamReader->streamReader()->signedByte()
+            ? $memory->signedByte()
             : ($this->isByteOperation($opcode)
-                ? $enhancedStreamReader->streamReader()->byte()
-                : ($size === 32 ? $enhancedStreamReader->dword() : $enhancedStreamReader->short()));
+                ? $memory->byte()
+                : ($size === 16 ? $memory->short() : $memory->signedDword()));
 
         match ($modRegRM->digit()) {
-            0x0 => $this->add($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x1 => $this->or($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x2 => $this->adc($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x3 => $this->sbb($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x4 => $this->and($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x5 => $this->sub($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x6 => $this->xor($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
-            0x7 => $this->cmp($runtime, $enhancedStreamReader, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x0 => $this->add($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x1 => $this->or($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x2 => $this->adc($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x3 => $this->sbb($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x4 => $this->and($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x5 => $this->sub($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x6 => $this->xor($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
+            0x7 => $this->cmp($runtime, $memory, $modRegRM, $opcode, $operand, $size, $isReg, $linearAddr),
         };
 
         return ExecutionStatus::SUCCESS;
@@ -68,17 +96,31 @@ class Group1 implements InstructionInterface
         return $opcode === 0x83;
     }
 
-    protected function add(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    private function updateCommonFlags64(RuntimeInterface $runtime, UInt64 $result): void
+    {
+        $ma = $runtime->memoryAccessor();
+        $ma->setZeroFlag($result->isZero());
+        $ma->setSignFlag($result->isNegativeSigned());
+
+        $lowByte = $result->low32() & 0xFF;
+        $ones = 0;
+        for ($i = 0; $i < 8; $i++) {
+            $ones += ($lowByte >> $i) & 1;
+        }
+        $ma->setParityFlag(($ones % 2) === 0);
+    }
+
+    protected function add(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $original = $isReg
-                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                ? $this->readRm8Register($runtime, $modRegRM)
                 : $this->readMemory8($runtime, $linearAddr);
             $op = $operand & 0xFF;
             $result = $original + $op;
             $maskedResult = $result & 0xFF;
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult);
+                $this->writeRm8Register($runtime, $modRegRM, $maskedResult);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $maskedResult);
             }
@@ -98,10 +140,43 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $regType = $this->rmGprRegisterType($runtime, $modRegRM);
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $regType, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->add($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $regType, $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+
+            $ma->setCarryFlag($resultU->lt($leftU));
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($resultU)
+                ->and($opU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+            $af = (($leftU->low32() & 0x0F) + ($opU->low32() & 0x0F)) > 0x0F;
+            $ma->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $signBit = $opSize === 32 ? 31 : 15;
+        $regType = $this->rmGprRegisterType($runtime, $modRegRM);
         $original = $isReg
-            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $regType, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
 
         // For sign-extended operand, convert to unsigned for proper carry detection
@@ -110,7 +185,7 @@ class Group1 implements InstructionInterface
         $maskedResult = $result & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult, $opSize);
+            $this->writeRegisterBySize($runtime, $regType, $maskedResult, $opSize);
         } else {
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearAddr, $maskedResult);
@@ -134,15 +209,15 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function or(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function or(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $original = $isReg
-                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                ? $this->readRm8Register($runtime, $modRegRM)
                 : $this->readMemory8($runtime, $linearAddr);
             $result = $original | ($operand & 0xFF);
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                $this->writeRm8Register($runtime, $modRegRM, $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
@@ -155,14 +230,39 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $regType = $this->rmGprRegisterType($runtime, $modRegRM);
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $regType, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->or($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $regType, $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+            $ma->setCarryFlag(false);
+            $ma->setOverflowFlag(false);
+            $ma->setAuxiliaryCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $regType = $this->rmGprRegisterType($runtime, $modRegRM);
         $left = $isReg
-            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $regType, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
         $result = ($left | $operand) & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+            $this->writeRegisterBySize($runtime, $regType, $result, $opSize);
         } else {
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearAddr, $result);
@@ -179,19 +279,19 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function adc(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function adc(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         $carry = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
-                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                ? $this->readRm8Register($runtime, $modRegRM)
                 : $this->readMemory8($runtime, $linearAddr);
             $op = $operand & 0xFF;
             $result = $left + $op + $carry;
             $maskedResult = $result & 0xFF;
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult);
+                $this->writeRm8Register($runtime, $modRegRM, $maskedResult);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $maskedResult);
             }
@@ -211,17 +311,56 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $regType = $this->rmGprRegisterType($runtime, $modRegRM);
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $regType, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $tempU = $leftU->add($opU);
+            $resultU = $tempU->add($carry);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $regType, $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+
+            $carry1 = $tempU->lt($leftU);
+            $carry2 = $carry !== 0 && $resultU->lt($tempU);
+            $ma->setCarryFlag($carry1 || $carry2);
+
+            $srcU = $opU->add($carry);
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($resultU)
+                ->and($srcU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+
+            $af = (($leftU->low32() & 0x0F) + ($opU->low32() & 0x0F) + $carry) > 0x0F;
+            $ma->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $signBit = $opSize === 32 ? 31 : 15;
+        $regType = $this->rmGprRegisterType($runtime, $modRegRM);
         $left = $isReg
-            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $regType, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
         $unsignedOperand = $operand & $mask;
         $result = $left + $unsignedOperand + $carry;
         $maskedResult = $result & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $maskedResult, $opSize);
+            $this->writeRegisterBySize($runtime, $regType, $maskedResult, $opSize);
         } else {
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearAddr, $maskedResult);
@@ -245,19 +384,19 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function sbb(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function sbb(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         $borrow = $runtime->memoryAccessor()->shouldCarryFlag() ? 1 : 0;
 
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
-                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                ? $this->readRm8Register($runtime, $modRegRM)
                 : $this->readMemory8($runtime, $linearAddr);
             $op = $operand & 0xFF;
             $calc = $left - $op - $borrow;
             $result = $calc & 0xFF;
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                $this->writeRm8Register($runtime, $modRegRM, $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
@@ -277,10 +416,49 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $regType = $this->rmGprRegisterType($runtime, $modRegRM);
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $regType, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $tempU = $leftU->sub($opU);
+            $resultU = $tempU->sub($borrow);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $regType, $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+
+            $borrow1 = $leftU->lt($opU);
+            $borrow2 = $borrow !== 0 && $tempU->lt($borrow);
+            $ma->setCarryFlag($borrow1 || $borrow2);
+
+            $srcU = $opU->add($borrow);
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($srcU)
+                ->and($leftU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+
+            $af = (($leftU->low32() & 0x0F) < (($opU->low32() & 0x0F) + $borrow));
+            $ma->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $signBit = $opSize === 32 ? 31 : 15;
+        $regType = $this->rmGprRegisterType($runtime, $modRegRM);
         $left = $isReg
-            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $regType, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
         // Convert sign-extended operand to unsigned for proper borrow calculation
         $unsignedOperand = $operand & $mask;
@@ -288,7 +466,7 @@ class Group1 implements InstructionInterface
         $result = $calc & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+            $this->writeRegisterBySize($runtime, $regType, $result, $opSize);
         } else {
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearAddr, $result);
@@ -312,15 +490,15 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function and(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function and(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
-                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                ? $this->readRm8Register($runtime, $modRegRM)
                 : $this->readMemory8($runtime, $linearAddr);
             $result = $left & ($operand & 0xFF);
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                $this->writeRm8Register($runtime, $modRegRM, $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
@@ -333,14 +511,39 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $regType = $this->rmGprRegisterType($runtime, $modRegRM);
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $regType, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->and($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $regType, $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+            $ma->setCarryFlag(false);
+            $ma->setOverflowFlag(false);
+            $ma->setAuxiliaryCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $regType = $this->rmGprRegisterType($runtime, $modRegRM);
         $left = $isReg
-            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $regType, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
         $result = ($left & $operand) & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+            $this->writeRegisterBySize($runtime, $regType, $result, $opSize);
         } else {
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearAddr, $result);
@@ -357,17 +560,17 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function sub(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function sub(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
-                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                ? $this->readRm8Register($runtime, $modRegRM)
                 : $this->readMemory8($runtime, $linearAddr);
             $op = $operand & 0xFF;
             $calc = $left - $op;
             $result = $calc & 0xFF;
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                $this->writeRm8Register($runtime, $modRegRM, $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
@@ -387,10 +590,44 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $regType = $this->rmGprRegisterType($runtime, $modRegRM);
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $regType, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->sub($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $regType, $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+
+            $ma->setCarryFlag($leftU->lt($opU));
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($opU)
+                ->and($leftU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+
+            $af = (($leftU->low32() & 0x0F) < ($opU->low32() & 0x0F));
+            $ma->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $signBit = $opSize === 32 ? 31 : 15;
+        $regType = $this->rmGprRegisterType($runtime, $modRegRM);
         $left = $isReg
-            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $regType, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
         // Convert sign-extended operand to unsigned for proper borrow calculation
         $unsignedOperand = $operand & $mask;
@@ -398,7 +635,7 @@ class Group1 implements InstructionInterface
         $result = $calc & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+            $this->writeRegisterBySize($runtime, $regType, $result, $opSize);
         } else {
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearAddr, $result);
@@ -422,15 +659,15 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function xor(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function xor(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
-                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                ? $this->readRm8Register($runtime, $modRegRM)
                 : $this->readMemory8($runtime, $linearAddr);
             $result = $left ^ ($operand & 0xFF);
             if ($isReg) {
-                $this->write8BitRegister($runtime, $modRegRM->registerOrMemoryAddress(), $result);
+                $this->writeRm8Register($runtime, $modRegRM, $result);
             } else {
                 $this->writeMemory8($runtime, $linearAddr, $result);
             }
@@ -443,14 +680,39 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $regType = $this->rmGprRegisterType($runtime, $modRegRM);
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $regType, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->xor($opU);
+
+            if ($isReg) {
+                $this->writeRegisterBySize($runtime, $regType, $resultU->toInt(), 64);
+            } else {
+                $this->writeMemory64($runtime, $linearAddr, $resultU);
+            }
+
+            $this->updateCommonFlags64($runtime, $resultU);
+            $ma->setCarryFlag(false);
+            $ma->setOverflowFlag(false);
+            $ma->setAuxiliaryCarryFlag(false);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $regType = $this->rmGprRegisterType($runtime, $modRegRM);
         $left = $isReg
-            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $regType, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
         $result = ($left ^ $operand) & $mask;
 
         if ($isReg) {
-            $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $opSize);
+            $this->writeRegisterBySize($runtime, $regType, $result, $opSize);
         } else {
             if ($opSize === 32) {
                 $this->writeMemory32($runtime, $linearAddr, $result);
@@ -467,14 +729,26 @@ class Group1 implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 
-    protected function cmp(RuntimeInterface $runtime, EnhanceStreamReader $streamReader, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
+    protected function cmp(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM, int $opcode, int $operand, int $opSize, bool $isReg, int $linearAddr): ExecutionStatus
     {
         if ($this->isByteOperation($opcode)) {
             $left = $isReg
-                ? $this->read8BitRegister($runtime, $modRegRM->registerOrMemoryAddress())
+                ? $this->readRm8Register($runtime, $modRegRM)
                 : $this->readMemory8($runtime, $linearAddr);
             $left &= 0xFF;
             $op = $operand & 0xFF;
+
+            // Debug: check if this is the flag check at CS:0x137
+            $debugIP = $runtime->memory()->offset();
+            if ($debugIP >= 0x9FAF0 && $debugIP <= 0x9FB00 && $op === 0x00) {
+                $segOverride = $runtime->context()->cpu()->segmentOverride();
+                $cs = $runtime->memoryAccessor()->fetch(\PHPMachineEmulator\Instruction\RegisterType::CS)->asByte();
+                $runtime->option()->logger()->warning(sprintf(
+                    'CMP DEBUG: afterIP=0x%05X linearAddr=0x%05X left=0x%02X isReg=%d segOverride=%s CS=0x%04X',
+                    $debugIP, $linearAddr, $left, $isReg ? 1 : 0, $segOverride?->name ?? 'none', $cs
+                ));
+            }
+
             $calc = $left - $op;
             $result = $calc & 0xFF;
             // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
@@ -495,10 +769,38 @@ class Group1 implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        if ($opSize === 64) {
+            $ma = $runtime->memoryAccessor();
+            $regType = $this->rmGprRegisterType($runtime, $modRegRM);
+            $leftU = $isReg
+                ? UInt64::of($this->readRegisterBySize($runtime, $regType, 64))
+                : $this->readMemory64($runtime, $linearAddr);
+            $opU = UInt64::of($operand);
+
+            $resultU = $leftU->sub($opU);
+
+            $this->updateCommonFlags64($runtime, $resultU);
+            $ma->setCarryFlag($leftU->lt($opU));
+
+            $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+            $overflow = !$leftU
+                ->xor($opU)
+                ->and($leftU->xor($resultU))
+                ->and($signMask)
+                ->isZero();
+            $ma->setOverflowFlag($overflow);
+
+            $af = (($leftU->low32() & 0x0F) < ($opU->low32() & 0x0F));
+            $ma->setAuxiliaryCarryFlag($af);
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $signBit = $opSize === 32 ? 31 : 15;
+        $regType = $this->rmGprRegisterType($runtime, $modRegRM);
         $left = $isReg
-            ? $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $opSize)
+            ? $this->readRegisterBySize($runtime, $regType, $opSize)
             : ($opSize === 32 ? $this->readMemory32($runtime, $linearAddr) : $this->readMemory16($runtime, $linearAddr));
         // Convert sign-extended operand to unsigned for proper borrow calculation
         $unsignedOperand = $operand & $mask;

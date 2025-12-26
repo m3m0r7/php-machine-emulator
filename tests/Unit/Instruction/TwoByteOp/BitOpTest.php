@@ -7,6 +7,7 @@ namespace Tests\Unit\Instruction\TwoByteOp;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\BitOp;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Tests for BT, BTS, BTR, BTC instructions.
@@ -261,6 +262,58 @@ class BitOpTest extends TwoByteOpTestCase
         $this->executeBitOp(0xAB, [0xC8]);
 
         $this->assertSame(0x8000, $this->getRegister(RegisterType::EAX, 16));
+    }
+
+    // ========================================
+    // Long mode 64-bit Tests
+    // ========================================
+
+    public function testBt64BitHighBit(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        // BT RAX, RCX (ModRM 0xC8)
+        $this->setRegister(RegisterType::EAX, PHP_INT_MIN, 64); // bit 63 set
+        $this->setRegister(RegisterType::ECX, 63, 64);
+
+        $this->executeBitOp(0xA3, [0xC8]);
+
+        $this->assertTrue($this->getCarryFlag());
+    }
+
+    public function testBts64BitSetsBit63(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        // BTS RAX, RCX (ModRM 0xC8)
+        $this->setRegister(RegisterType::EAX, 0, 64);
+        $this->setRegister(RegisterType::ECX, 63, 64);
+
+        $this->executeBitOp(0xAB, [0xC8]);
+
+        $this->assertSame('0x8000000000000000', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+        $this->assertFalse($this->getCarryFlag()); // old bit was 0
+    }
+
+    public function testBt64BitMemoryUsesBitIndexToSelectQword(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setRex(0x08); // REX.W
+
+        // Base address in RAX
+        $this->setRegister(RegisterType::EAX, 0x2000, 64);
+
+        // Bit 65 => qword index 1, bit 1
+        $this->setRegister(RegisterType::ECX, 65, 64);
+        $this->writeMemory(0x2000, 0, 64);
+        $this->writeMemory(0x2008, 0x2, 64); // bit 1 set
+
+        // BT [RAX], RCX (ModRM: 00 001 000 = 0x08)
+        $this->executeBitOp(0xA3, [0x08]);
+
+        $this->assertTrue($this->getCarryFlag());
     }
 
     // ========================================

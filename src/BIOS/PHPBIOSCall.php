@@ -98,8 +98,8 @@ class PHPBIOSCall implements InstructionInterface
                 ->process($runtime),
             BIOSInterrupt::COMBOOT_INTERRUPT => throw new NotImplementedException('INT 22h (COMBOOT API) is not implemented'),
             BIOSInterrupt::DOS_TERMINATE_INTERRUPT => null,
-            BIOSInterrupt::DOS_INTERRUPT => ($this->interruptInstances[Dos::class] ??= new Dos($this->instructionList))
-                ->process($runtime, 0xCD),
+            BIOSInterrupt::DOS_INTERRUPT => ($this->interruptInstances[Dos::class] ??= new Dos())
+                ->process($runtime, [0xCD]),
         };
 
         if ($operand === BIOSInterrupt::DOS_TERMINATE_INTERRUPT) {

@@ -8,14 +8,17 @@ use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\CbwCwd;
 use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Tests for CBW, CWDE, CWD, and CDQ instructions
  *
  * 0x98 in 16-bit mode: CBW  - Sign-extend AL to AX
  * 0x98 in 32-bit mode: CWDE - Sign-extend AX to EAX
+ * 0x98 in 64-bit mode: CDQE - Sign-extend EAX to RAX
  * 0x99 in 16-bit mode: CWD  - Sign-extend AX to DX:AX
  * 0x99 in 32-bit mode: CDQ  - Sign-extend EAX to EDX:EAX
+ * 0x99 in 64-bit mode: CQO  - Sign-extend RAX to RDX:RAX
  *
  * These instructions do not affect any flags.
  */
@@ -382,5 +385,37 @@ class CbwCwdTest extends InstructionTestCase
         $this->assertTrue($this->getCarryFlag());
         $this->assertFalse($this->getZeroFlag());
         $this->assertTrue($this->getSignFlag());
+    }
+
+    // ========================================
+    // 64-bit Mode (CDQE/CQO)
+    // ========================================
+
+    public function testCdqeSignExtendsEaxToRax(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setCompatibilityMode(false);
+        $this->cpuContext->setRex(0x8); // REX.W => operandSize=64
+
+        $this->setRegister(RegisterType::EAX, 0x80000001, 32);
+
+        $this->executeBytes([0x98]);
+
+        $this->assertSame('0xffffffff80000001', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
+    }
+
+    public function testCqoSignExtendsRaxToRdxRax(): void
+    {
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setCompatibilityMode(false);
+        $this->cpuContext->setRex(0x8); // REX.W => operandSize=64
+
+        $this->setRegister(RegisterType::EAX, -1, 64); // 0xffffffffffffffff
+        $this->setRegister(RegisterType::EDX, 0, 64);
+
+        $this->executeBytes([0x99]);
+
+        $this->assertSame('0xffffffffffffffff', UInt64::of($this->getRegister(RegisterType::EDX, 64))->toHex());
+        $this->assertSame('0xffffffffffffffff', UInt64::of($this->getRegister(RegisterType::EAX, 64))->toHex());
     }
 }

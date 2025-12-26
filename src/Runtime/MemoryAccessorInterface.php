@@ -46,6 +46,7 @@ interface MemoryAccessorInterface
     public function setInterruptFlag(bool $which): self;
 
     public function writeEfer(int $value): void;
+    public function readEfer(): int;
 
     // Physical memory access
     public function readPhysical8(int $address): int;

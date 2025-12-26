@@ -7,7 +7,6 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -32,11 +31,11 @@ class Arpl implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         // ARPL always works on 16-bit operands even when the default operand size is 32-bit.
-        $dest = $this->readRm16($runtime, $reader, $modRegRM) & 0xFFFF;
+        $dest = $this->readRm16($runtime, $memory, $modRegRM) & 0xFFFF;
         $src = $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), 16) & 0xFFFF;
 
         $destRpl = $dest & 0x3;
@@ -46,7 +45,7 @@ class Arpl implements InstructionInterface
 
         if ($destRpl < $srcRpl) {
             $newVal = ($dest & ~0x3) | $srcRpl;
-            $this->writeRm($runtime, $reader, $modRegRM, $newVal, 16);
+            $this->writeRm($runtime, $memory, $modRegRM, $newVal, 16);
             $ma->setZeroFlag(true);
         } else {
             $ma->setZeroFlag(false);

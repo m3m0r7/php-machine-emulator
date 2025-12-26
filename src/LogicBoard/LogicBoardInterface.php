@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\LogicBoard;
 
 use PHPMachineEmulator\LogicBoard\CPU\CPUContextInterface;
+use PHPMachineEmulator\LogicBoard\Debug\DebugContextInterface;
 use PHPMachineEmulator\LogicBoard\Display\DisplayContextInterface;
 use PHPMachineEmulator\LogicBoard\ExternalDevice\ExternalDeviceContextInterface;
 use PHPMachineEmulator\LogicBoard\Media\MediaContextInterface;
@@ -27,4 +28,6 @@ interface LogicBoardInterface
     public function media(): MediaContextInterface;
 
     public function externalDevice(): ExternalDeviceContextInterface;
+
+    public function debug(): DebugContextInterface;
 }
