@@ -380,7 +380,7 @@ class RepPrefix implements InstructionInterface
             $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
             $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
             $ip = $runtime->memory()->offset();
-            $runtime->option()->logger()->warning(sprintf(
+            $runtime->option()->logger()->debug(sprintf(
                 'REP MOVSB to 0x0700: IP=0x%05X DS=0x%04X ES=0x%04X SI=0x%04X DI=0x%04X src=0x%05X dst=0x%05X count=%d',
                 $ip, $ds, $es, $si, $di, $srcSegOff, $dstSegOff, $count
             ));
@@ -389,7 +389,7 @@ class RepPrefix implements InstructionInterface
             for ($j = 0; $j < 8; $j++) {
                 $srcData[] = sprintf('%02X', $this->readMemory8($runtime, $srcSegOff + $j));
             }
-            $runtime->option()->logger()->warning(sprintf(
+            $runtime->option()->logger()->debug(sprintf(
                 'REP MOVSB source data: %s',
                 implode(' ', $srcData)
             ));
@@ -398,19 +398,19 @@ class RepPrefix implements InstructionInterface
         if ($srcSegOff >= 0x0700 && $srcSegOff < 0x0D00 && $dstSegOff >= 0x9F000) {
             $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
             $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
-            $runtime->option()->logger()->warning(sprintf(
+            $runtime->option()->logger()->debug(sprintf(
                 'REP MOVSB RELOC: DS=0x%04X ES=0x%04X SI=0x%04X DI=0x%04X src=0x%05X dst=0x%05X count=%d',
                 $ds, $es, $si, $di, $srcSegOff, $dstSegOff, $count
             ));
             // Check value at absolute 0x0837 (where MOV [CS:0x137] wrote 0x01)
             $srcVal = $this->readMemory8($runtime, 0x0837);
-            $runtime->option()->logger()->warning(sprintf(
+            $runtime->option()->logger()->debug(sprintf(
                 'REP MOVSB RELOC: mem[0x0837]=0x%02X (expected 0x01)',
                 $srcVal
             ));
             // Also check destination 0x9F977 before copy
             $dstVal = $this->readMemory8($runtime, 0x9F977);
-            $runtime->option()->logger()->warning(sprintf(
+            $runtime->option()->logger()->debug(sprintf(
                 'REP MOVSB RELOC: mem[0x9F977]=0x%02X before copy',
                 $dstVal
             ));
@@ -583,10 +583,10 @@ class RepPrefix implements InstructionInterface
         // Check after copy
         if ($checkAfterCopy) {
             $dstValAfter = $this->readMemory8($runtime, 0x9F977);
-            $runtime->option()->logger()->warning(sprintf(
-                'REP MOVSB RELOC: mem[0x9F977]=0x%02X after copy',
-                $dstValAfter
-            ));
+                $runtime->option()->logger()->debug(sprintf(
+                    'REP MOVSB RELOC: mem[0x9F977]=0x%02X after copy',
+                    $dstValAfter
+                ));
         }
 
         return ExecutionStatus::SUCCESS;

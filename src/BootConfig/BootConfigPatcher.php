@@ -11,6 +11,7 @@ final class BootConfigPatcher
     private bool $enabled = true;
     private bool $patchGrubPlatform = true;
     private bool $disableLoadfontUnicode = true;
+    private bool $disableDosCdromDrivers = true;
     private ?int $timeoutOverride = 1;
 
     public function __construct(?BootConfigPatchConfig $config = null)
@@ -19,6 +20,7 @@ final class BootConfigPatcher
         $this->enabled = $config->enabled;
         $this->patchGrubPlatform = $config->patchGrubPlatform;
         $this->disableLoadfontUnicode = $config->disableLoadfontUnicode;
+        $this->disableDosCdromDrivers = $config->disableDosCdromDrivers;
         $this->timeoutOverride = $config->timeoutOverride;
     }
 
@@ -28,7 +30,9 @@ final class BootConfigPatcher
             return new BootConfigPatchResult($data, []);
         }
 
-        if (!$this->looksLikeGrubConfig($data)) {
+        $looksGrub = $this->looksLikeGrubConfig($data);
+        $looksDos = $this->looksLikeDosConfig($data);
+        if (!$looksGrub && !$looksDos) {
             return new BootConfigPatchResult($data, []);
         }
 
@@ -36,7 +40,7 @@ final class BootConfigPatcher
         $patched = $data;
         $applied = [];
 
-        if ($this->patchGrubPlatform) {
+        if ($looksGrub && $this->patchGrubPlatform) {
             $patched = $this->commentOutStandaloneDirective(
                 $patched,
                 'grub_platform',
@@ -46,12 +50,16 @@ final class BootConfigPatcher
             );
         }
 
-        if ($this->disableLoadfontUnicode) {
+        if ($looksGrub && $this->disableLoadfontUnicode) {
             $patched = $this->commentOutLoadfontUnicode($patched, $applied);
         }
 
-        if ($this->timeoutOverride !== null) {
+        if ($looksGrub && $this->timeoutOverride !== null) {
             $patched = $this->overrideTimeout($patched, $this->timeoutOverride, $applied);
+        }
+
+        if ($looksDos && $this->disableDosCdromDrivers) {
+            $patched = $this->disableDosCdromDrivers($patched, $applied);
         }
 
         if ($patched !== $data) {
@@ -67,6 +75,11 @@ final class BootConfigPatcher
             return false;
         }
         return str_contains($data, 'set timeout=');
+    }
+
+    private function looksLikeDosConfig(string $data): bool
+    {
+        return stripos($data, 'DEVICE=') !== false || stripos($data, 'MSCDEX') !== false;
     }
 
     /**
@@ -147,6 +160,90 @@ final class BootConfigPatcher
 
         if (is_string($patched) && $patched !== $data) {
             $applied[] = 'timeout';
+            return $patched;
+        }
+
+        return $data;
+    }
+
+    /**
+     * @param array<int,string> $applied
+     */
+    private function disableDosCdromDrivers(string $data, array &$applied): string
+    {
+        $patched = $data;
+        $patched = $this->commentOutDosDriverLine($patched, '\\bCD[0-9]\\.SYS\\b', $applied, 'dos_cd_sys');
+        $patched = $this->commentOutDosDriverLine($patched, '\\bMSCDEX\\.EXE\\b', $applied, 'dos_mscdex');
+        $patched = $this->commentOutDosDriverLine($patched, '\\bHIMEM\\.SYS\\b', $applied, 'dos_himem');
+
+        $cdCount = 0;
+        $patched = preg_replace_callback(
+            '/\\bCD([0-9])\\.SYS\\b/i',
+            static fn(array $m): string => 'CD' . ($m[1] ?? '') . '.SY_',
+            $patched,
+            -1,
+            $cdCount,
+        );
+        if ($cdCount > 0) {
+            $applied[] = 'dos_cd_sys';
+        }
+
+        $mscCount = 0;
+        $patched = preg_replace(
+            '/\\bMSCDEX\\.EXE\\b/i',
+            'MSCDEX.EX_',
+            $patched,
+            -1,
+            $mscCount,
+        );
+        if ($mscCount > 0) {
+            $applied[] = 'dos_mscdex';
+        }
+
+        $himemCount = 0;
+        $patched = preg_replace(
+            '/\\bHIMEM\\.SYS\\b/i',
+            'HIMEM.SY_',
+            $patched,
+            -1,
+            $himemCount,
+        );
+        if ($himemCount > 0) {
+            $applied[] = 'dos_himem';
+        }
+        return $patched;
+    }
+
+    /**
+     * Comment out any line containing the given DOS driver pattern.
+     *
+     * @param array<int,string> $applied
+     */
+    private function commentOutDosDriverLine(
+        string $data,
+        string $pattern,
+        array &$applied,
+        string $ruleName
+    ): string {
+        $count = 0;
+        $regex = '/^[^\\r\\n]*' . $pattern . '[^\\r\\n]*/mi';
+        $patched = preg_replace_callback(
+            $regex,
+            static function (array $m): string {
+                $line = $m[0];
+                $len = strlen($line);
+                if ($len >= 4) {
+                    return 'REM ' . substr($line, 4);
+                }
+                return str_pad('REM ', $len, ' ');
+            },
+            $data,
+            -1,
+            $count,
+        );
+
+        if ($count > 0 && is_string($patched)) {
+            $applied[] = $ruleName;
             return $patched;
         }
 

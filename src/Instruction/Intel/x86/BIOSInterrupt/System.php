@@ -34,6 +34,7 @@ class System implements InterruptInterface
             0x24 => $this->a20($runtime),
             0x86 => $this->wait($runtime),
             0x87 => $this->moveExtendedMemory($runtime),
+            0x41 => $this->waitOnExternalEvent($runtime),
             default => $this->unsupported($runtime, $ah),
         };
     }
@@ -117,6 +118,16 @@ class System implements InterruptInterface
     {
         // In emulation, we just return immediately (no real delay)
         $ma = $runtime->memoryAccessor();
+        $ma->setCarryFlag(false);
+    }
+
+    /**
+     * INT 15h AH=41h - Wait on external event (best-effort stub).
+     */
+    private function waitOnExternalEvent(RuntimeInterface $runtime): void
+    {
+        $ma = $runtime->memoryAccessor();
+        $ma->writeToHighBit(RegisterType::EAX, 0x00);
         $ma->setCarryFlag(false);
     }
 

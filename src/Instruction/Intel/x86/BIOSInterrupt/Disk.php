@@ -7,6 +7,7 @@ use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\BootConfig\BootConfigPatcher;
 use PHPMachineEmulator\Disk\HardDisk;
 use PHPMachineEmulator\Exception\HaltException;
+use PHPMachineEmulator\Instruction\Intel\Service\VideoMemoryService;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Exception\StreamReaderException;
@@ -31,6 +32,7 @@ class Disk implements InterruptInterface
     private ?array $stopOnInt13ReadLbaSet = null;
     private ?BootConfigPatcher $bootConfigPatcher = null;
     private bool $bootConfigPatchAnnounced = false;
+    private bool $bootImagePatched = false;
 
     public function __construct(protected RuntimeInterface $runtime)
     {
@@ -88,13 +90,15 @@ class Disk implements InterruptInterface
         $pg = $cpu->isPagingEnabled() ? 1 : 0;
         $lm = $cpu->isLongMode() ? 1 : 0;
         $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+        $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
         $linearIp = $runtime->memory()->offset() & 0xFFFFFFFF;
 
         $runtime->option()->logger()->warning(sprintf(
-            'INT 13h %s: LBA=%d sectors=%d buf=0x%08X cdrom=%d PM=%d PG=%d LM=%d CS=0x%04X linearIP=0x%08X (%d/%d)',
+            'INT 13h %s: LBA=%d sectors=%d DL=0x%02X buf=0x%08X cdrom=%d PM=%d PG=%d LM=%d CS=0x%04X linearIP=0x%08X (%d/%d)',
             $kind,
             $lba,
             $sectorCount,
+            $dl,
             $bufferAddress & 0xFFFFFFFF,
             $isCdrom ? 1 : 0,
             $pm,
@@ -220,7 +224,7 @@ class Disk implements InterruptInterface
         }
 
         // Use appropriate geometry based on drive type
-        if ($dl < 0x80) {
+        if ($this->isFloppyDrive($runtime, $dl)) {
             // 1.44MB floppy geometry
             $heads = self::FLOPPY_HEADS;
             $sectors = self::FLOPPY_SECTORS_PER_TRACK;
@@ -240,8 +244,16 @@ class Disk implements InterruptInterface
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::ECX, $cylinders - 1);    // CH (max cylinder number)
 
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::EDX, $heads - 1);    // DH (max head number)
-        $driveCount = $dl < 0x80 ? $this->floppyDriveCount($runtime) : $this->hardDriveCount($runtime);
+        $driveCount = $this->isFloppyDrive($runtime, $dl)
+            ? $this->floppyDriveCount($runtime)
+            : $this->hardDriveCount($runtime);
         $runtime->memoryAccessor()->writeToLowBit(RegisterType::EDX, $driveCount & 0xFF);  // DL = number of drives
+
+        // Return diskette parameter table pointer for floppies (INT 13h AH=08).
+        if ($this->isFloppyDrive($runtime, $dl)) {
+            $runtime->memoryAccessor()->write16Bit(RegisterType::ES, 0xF000);
+            $runtime->memoryAccessor()->write16Bit(RegisterType::EDI, 0xFE00);
+        }
 
         $runtime->memoryAccessor()->setCarryFlag(false);
     }
@@ -289,6 +301,10 @@ class Disk implements InterruptInterface
             return;
         }
 
+        if ($bootStream instanceof ISOBootImageStream) {
+            $this->maybePatchBootImage($runtime, $bootStream);
+        }
+
         $cylinder = (($cl >> 6) & 0x03) << 8;
         $cylinder |= $ch;
         $sector = $cl & 0x3F;
@@ -299,8 +315,8 @@ class Disk implements InterruptInterface
             return;
         }
 
-        // For floppy emulation (DL < 0x80), use 1.44MB floppy geometry
-        if ($dl < 0x80) {
+        // For floppy emulation, use 1.44MB floppy geometry
+        if ($this->isFloppyDrive($runtime, $dl)) {
             $sectorsPerTrack = self::FLOPPY_SECTORS_PER_TRACK;
             $headsPerCylinder = self::FLOPPY_HEADS;
             $cylinders = self::FLOPPY_CYLINDERS;
@@ -371,6 +387,10 @@ class Disk implements InterruptInterface
             $bootStream->setOffset($savedBootOffset);
             $this->fail($runtime, 0x20);
             return;
+        }
+
+        if ($bootStream instanceof ISOBootImageStream) {
+            $data = $this->maybePatchBootConfigData($runtime, $data, $lba, self::SECTOR_SIZE);
         }
 
         $this->writeBlockToMemory($runtime, $bufferAddress, $data);
@@ -464,6 +484,10 @@ class Disk implements InterruptInterface
         if ($bootStream === null) {
             $this->fail($runtime, 0x20);
             return;
+        }
+
+        if ($bootStream instanceof ISOBootImageStream) {
+            $this->maybePatchBootImage($runtime, $bootStream);
         }
 
         // Check if this is a No Emulation CD-ROM boot
@@ -572,7 +596,7 @@ class Disk implements InterruptInterface
                 return;
             }
 
-            $data = $this->maybePatchBootConfigData($runtime, $data);
+            $data = $this->maybePatchBootConfigData($runtime, $data, $lba, self::CD_SECTOR_SIZE);
 
             // Write data to memory - ISOLINUX manages its own memory layout
             // and uses INT 13h to load additional sectors to specific addresses
@@ -628,6 +652,10 @@ class Disk implements InterruptInterface
             return;
         }
 
+        if ($bootStream instanceof ISOBootImageStream) {
+            $data = $this->maybePatchBootConfigData($runtime, $data, $lba, self::SECTOR_SIZE);
+        }
+
         $this->writeBlockToMemory($runtime, $bufferAddress, $data);
 
         $bootStream->setOffset($savedBootOffset);
@@ -656,13 +684,17 @@ class Disk implements InterruptInterface
             return;
         }
 
+        $len = strlen($data);
+        $videoMin = VideoMemoryService::VIDEO_MEMORY_ADDRESS_STARTED;
+        $videoMax = VideoMemoryService::VIDEO_MEMORY_ADDRESS_ENDED;
+        $overlapsVideo = $address <= $videoMax && ($address + $len - 1) >= $videoMin;
+
         $memory = $runtime->memory();
-        if ($memory instanceof \PHPMachineEmulator\Stream\RustMemoryStream) {
+        if (!$overlapsVideo && method_exists($memory, 'copyFromString')) {
             $memory->copyFromString($data, $address);
             return;
         }
 
-        $len = strlen($data);
         $runtime->memoryAccessor()->allocate($address, $len, safe: false);
         for ($i = 0; $i < $len; $i++) {
             $runtime->memoryAccessor()->writeRawByte($address + $i, ord($data[$i]));
@@ -675,11 +707,18 @@ class Disk implements InterruptInterface
         $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
         $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($addressSize);
         $buffer = $this->segmentRegisterLinearAddress($runtime, RegisterType::DS, $si, $addressSize);
+        $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
+
+        if (!$this->isValidBiosDrive($runtime, $dl)) {
+            $this->fail($runtime, 0x01);
+            return;
+        }
 
         // Decide logical sector size based on media type.
         // El Torito no-emulation CD boots should expose 2048-byte logical sectors.
         $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
         $isCdRom = ($bootStream instanceof ISOBootImageStream) && $bootStream->isNoEmulation();
+        $isFloppy = $this->isFloppyDrive($runtime, $dl);
 
         $bytesPerSector = $isCdRom ? self::CD_SECTOR_SIZE : self::SECTOR_SIZE;
 
@@ -708,14 +747,26 @@ class Disk implements InterruptInterface
             $ma->writeRawByte($buffer + $i, 0);
         }
 
-        $cylinders = 1024;
-        $heads = self::HEADS_PER_CYLINDER;
-        $sectors = self::SECTORS_PER_TRACK;
+        if ($isFloppy) {
+            $cylinders = self::FLOPPY_CYLINDERS;
+            $heads = self::FLOPPY_HEADS;
+            $sectors = self::FLOPPY_SECTORS_PER_TRACK;
+        } else {
+            $cylinders = 1024;
+            $heads = self::HEADS_PER_CYLINDER;
+            $sectors = self::SECTORS_PER_TRACK;
+        }
 
         // Estimate total sector count. For CD-ROM, use the ISO size; otherwise keep a sane default.
         if ($isCdRom) {
             $isoSize = $bootStream->iso()->fileSize();
             $totalSectors = (int) max(1, intdiv($isoSize, $bytesPerSector));
+        } elseif ($isFloppy) {
+            $totalSectors = $cylinders * $heads * $sectors;
+            if ($bootStream instanceof ISOBootImageStream) {
+                $bootBytes = $bootStream->bootImage()->size();
+                $totalSectors = (int) max(1, (int) ceil($bootBytes / self::SECTOR_SIZE));
+            }
         } else {
             $totalSectors = 0x0010_0000; // ~512MB worth
         }
@@ -836,7 +887,7 @@ class Disk implements InterruptInterface
         }
 
         // Use appropriate geometry based on drive type
-        if ($dl < 0x80) {
+        if ($this->isFloppyDrive($runtime, $dl)) {
             $sectorsPerTrack = self::FLOPPY_SECTORS_PER_TRACK;
             $headsPerCylinder = self::FLOPPY_HEADS;
             $cylinders = self::FLOPPY_CYLINDERS;
@@ -898,7 +949,7 @@ class Disk implements InterruptInterface
             return;
         }
 
-        if ($dl >= 0x80) {
+        if (!$this->isFloppyDrive($runtime, $dl)) {
             // Hard disk - return type 3
             $ma->writeToHighBit(RegisterType::EAX, 0x03);
             // CX:DX = number of 512-byte sectors
@@ -944,14 +995,17 @@ class Disk implements InterruptInterface
             if ($dl < $count) {
                 return true;
             }
-
-            // El Torito floppy emulation can appear as a non-standard "virtual" drive number
-            // even though the BDA equipment flags only represent up to 4 physical floppies.
-            return $dl === self::ELTORITO_EMULATED_FLOPPY_DRIVE && $this->isElToritoFloppyEmulation($runtime);
+            return $dl === self::ELTORITO_EMULATED_FLOPPY_DRIVE
+                && $this->isElToritoFloppyEmulation($runtime);
         }
 
         $count = $this->hardDriveCount($runtime);
         return ($dl - 0x80) < $count;
+    }
+
+    private function isFloppyDrive(RuntimeInterface $runtime, int $dl): bool
+    {
+        return $dl < 0x80;
     }
 
     private function isElToritoFloppyEmulation(RuntimeInterface $runtime): bool
@@ -1029,7 +1083,10 @@ class Disk implements InterruptInterface
             $writeWord($buffer + 8, 0x0000);  // device spec packet segment (none)
             $writeWord($buffer + 10, 0x0000); // device spec packet offset (none)
             $writeWord($buffer + 12, $bootImage->loadSegment());
-            $writeWord($buffer + 14, $bootImage->catalogSectorCount());
+            $sectorCount = $bootImage->isNoEmulation()
+                ? $bootImage->catalogSectorCount()
+                : (int) ceil($bootImage->size() / self::SECTOR_SIZE);
+            $writeWord($buffer + 14, $sectorCount);
 
             $runtime->option()->logger()->debug(sprintf(
                 'INT 13h GET BOOT INFO: DL=0x%02X media=0x%02X LBA=%d loadSeg=0x%04X sectors=%d buffer=0x%05X',
@@ -1037,7 +1094,7 @@ class Disk implements InterruptInterface
                 $bootImage->mediaType(),
                 $catalogLba,
                 $bootImage->loadSegment(),
-                $bootImage->catalogSectorCount(),
+                $sectorCount,
                 $buffer
             ));
 
@@ -1059,7 +1116,21 @@ class Disk implements InterruptInterface
 
     private function fail(RuntimeInterface $runtime, int $status): void
     {
-        $runtime->option()->logger()->error(sprintf('INT 13h failed with status 0x%02X', $status));
+        $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
+        $ah = $ax->asHighBit();
+        $dl = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asLowBit();
+        $logger = $runtime->option()->logger();
+        $message = sprintf(
+            'INT 13h failed with status 0x%02X (AH=0x%02X DL=0x%02X)',
+            $status,
+            $ah,
+            $dl
+        );
+        if ($status === 0x01) {
+            $logger->debug($message);
+        } else {
+            $logger->error($message);
+        }
         $runtime->memoryAccessor()->writeToHighBit(RegisterType::EAX, $status);
         $runtime->memoryAccessor()->setCarryFlag(true);
     }
@@ -1156,8 +1227,178 @@ class Disk implements InterruptInterface
         return $this->bootConfigPatcher;
     }
 
-    private function maybePatchBootConfigData(RuntimeInterface $runtime, string $data): string
+    private function maybePatchBootImage(RuntimeInterface $runtime, ISOBootImageStream $bootStream): void
     {
+        if ($this->bootImagePatched) {
+            return;
+        }
+
+        if ($bootStream->isNoEmulation()) {
+            $this->bootImagePatched = true;
+            return;
+        }
+
+        if (!$runtime->logicBoard()->debug()->bootConfig()->disableDosCdromDrivers) {
+            $this->bootImagePatched = true;
+            return;
+        }
+
+        $bootImage = $bootStream->bootImage();
+        if ($bootImage->getFileIndex() === []) {
+            $this->bootImagePatched = true;
+            return;
+        }
+
+        $applied = [];
+        foreach (['CONFIG.SYS', 'AUTOEXEC.BAT'] as $filename) {
+            $info = $bootImage->getFileInfo($filename);
+            if ($info === null || $info['size'] <= 0) {
+                continue;
+            }
+
+            $original = $bootImage->readAt($info['offset'], $info['size']);
+            $result = $this->bootConfigPatcher()->patch($original);
+            if (!$result->isPatched()) {
+                continue;
+            }
+
+            $bootStream->replaceRange($info['offset'], $result->data);
+            foreach ($result->appliedRules as $rule) {
+                $applied[$rule] = true;
+            }
+        }
+
+        $bootSector = $bootImage->data();
+        if (strlen($bootSector) >= 36) {
+            $bytesPerSector = $this->readUint16LE($bootSector, 11) ?: self::SECTOR_SIZE;
+            $reserved = $this->readUint16LE($bootSector, 14);
+            $fats = ord($bootSector[16] ?? "\x00");
+            $rootEntries = $this->readUint16LE($bootSector, 17);
+            $sectorsPerFat = $this->readUint16LE($bootSector, 22);
+
+            if ($bytesPerSector > 0 && $rootEntries > 0 && $sectorsPerFat > 0) {
+                $rootOffset = ($reserved + $fats * $sectorsPerFat) * $bytesPerSector;
+                $rootBytes = $rootEntries * 32;
+                $rootData = $bootImage->readAt($rootOffset, $rootBytes);
+                $patchedRoot = $rootData;
+                $entryCount = intdiv(strlen($patchedRoot), 32);
+                for ($i = 0; $i < $entryCount; $i++) {
+                    $entryOffset = $i * 32;
+                    $name = substr($patchedRoot, $entryOffset, 11);
+                    if (!in_array($name, ['HIMEM   SYS', 'CD1     SYS', 'MSCDEX  EXE'], true)) {
+                        continue;
+                    }
+                    $patchedRoot[$entryOffset] = "\xE5";
+                    $patchedRoot = substr_replace($patchedRoot, "\x00\x00", $entryOffset + 26, 2);
+                    $patchedRoot = substr_replace($patchedRoot, "\x00\x00\x00\x00", $entryOffset + 28, 4);
+                    if ($name === 'HIMEM   SYS') {
+                        $applied['dos_himem'] = true;
+                    } elseif ($name === 'MSCDEX  EXE') {
+                        $applied['dos_mscdex'] = true;
+                    } else {
+                        $applied['dos_cd_sys'] = true;
+                    }
+                }
+
+                if ($patchedRoot !== $rootData) {
+                    $bootStream->replaceRange($rootOffset, $patchedRoot);
+                }
+            }
+        }
+
+        foreach ([
+            ['HIMEM.SYS', 'HIMEM', 'dos_himem'],
+            ['CD1.SYS', 'CD1', 'dos_cd_sys'],
+            ['MSCDEX.EXE', 'MSCDEX', 'dos_mscdex'],
+        ] as [$filename, $deviceName, $rule]) {
+            $info = $bootImage->getFileInfo($filename);
+            if ($info === null || $info['size'] <= 0) {
+                continue;
+            }
+            $stub = $this->buildDosDriverStub($deviceName);
+            if (strlen($stub) > $info['size']) {
+                continue;
+            }
+            $fill = $stub . str_repeat("\x00", $info['size'] - strlen($stub));
+            $bootStream->replaceRange($info['offset'], $fill);
+            $applied[$rule] = true;
+        }
+
+        if ($applied !== [] && !$this->bootConfigPatchAnnounced) {
+            $this->bootConfigPatchAnnounced = true;
+            $runtime->option()->logger()->warning(sprintf(
+                'PATCH: boot config updated (%s)',
+                implode(', ', array_keys($applied)),
+            ));
+        }
+
+        $this->bootImagePatched = true;
+    }
+
+    private function maybePatchBootConfigData(
+        RuntimeInterface $runtime,
+        string $data,
+        ?int $lba = null,
+        ?int $bytesPerSector = null,
+    ): string {
+        $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
+
+        if ($bootStream instanceof ISOBootImageStream
+            && !$bootStream->isNoEmulation()
+            && $lba !== null
+            && $bytesPerSector === self::SECTOR_SIZE
+        ) {
+            $bootImage = $bootStream->bootImage();
+            $fileIndex = $bootImage->getFileIndex();
+            if ($fileIndex !== []) {
+                $dataLen = strlen($data);
+                $dataStart = $lba * $bytesPerSector;
+                $dataEnd = $dataStart + $dataLen;
+                $patched = $data;
+                $applied = [];
+
+                foreach (['CONFIG.SYS', 'AUTOEXEC.BAT'] as $filename) {
+                    $info = $bootImage->getFileInfo($filename);
+                    if ($info === null) {
+                        continue;
+                    }
+
+                    $fileStart = $info['offset'];
+                    $fileEnd = $fileStart + $info['size'];
+                    if ($fileEnd <= $dataStart || $fileStart >= $dataEnd) {
+                        continue;
+                    }
+
+                    $sliceStart = max(0, $fileStart - $dataStart);
+                    $sliceEnd = min($dataLen, $fileEnd - $dataStart);
+                    if ($sliceEnd <= $sliceStart) {
+                        continue;
+                    }
+
+                    $slice = substr($patched, $sliceStart, $sliceEnd - $sliceStart);
+                    $result = $this->bootConfigPatcher()->patch($slice);
+                    if (!$result->isPatched()) {
+                        continue;
+                    }
+
+                    $patched = substr_replace($patched, $result->data, $sliceStart, $sliceEnd - $sliceStart);
+                    foreach ($result->appliedRules as $rule) {
+                        $applied[$rule] = true;
+                    }
+                }
+
+                if ($applied !== [] && !$this->bootConfigPatchAnnounced) {
+                    $this->bootConfigPatchAnnounced = true;
+                    $runtime->option()->logger()->warning(sprintf(
+                        'PATCH: boot config updated (%s)',
+                        implode(', ', array_keys($applied)),
+                    ));
+                }
+
+                return $patched;
+            }
+        }
+
         $result = $this->bootConfigPatcher()->patch($data);
         if ($result->isPatched() && !$this->bootConfigPatchAnnounced) {
             $this->bootConfigPatchAnnounced = true;
@@ -1168,4 +1409,48 @@ class Disk implements InterruptInterface
         }
         return $result->data;
     }
+
+    private function readUint16LE(string $data, int $offset): int
+    {
+        $lo = ord($data[$offset] ?? "\x00");
+        $hi = ord($data[$offset + 1] ?? "\x00");
+        return ($lo | ($hi << 8)) & 0xFFFF;
+    }
+
+    private function buildDosDriverStub(string $deviceName): string
+    {
+        $name = str_pad(substr($deviceName, 0, 8), 8, ' ');
+        $header = pack('V', 0xFFFFFFFF);
+        $header .= pack('v', 0x8000);
+        $header .= pack('v', 0x0020);
+        $header .= pack('v', 0x0030);
+        $header .= $name;
+        $header .= str_repeat("\x00", 32 - strlen($header));
+
+        $reqOff = 0x46;
+        $reqSeg = 0x48;
+
+        $strategy = "\x1E"
+            . "\x8C\xC8"
+            . "\x8E\xD8"
+            . "\x89\x1E" . pack('v', $reqOff)
+            . "\x8C\x06" . pack('v', $reqSeg)
+            . "\x1F"
+            . "\xCB";
+
+        $interrupt = "\x1E"
+            . "\x8C\xC8"
+            . "\x8E\xD8"
+            . "\x8B\x1E" . pack('v', $reqOff)
+            . "\x8E\x06" . pack('v', $reqSeg)
+            . "\x26\xC7\x47\x03\x00\x81"
+            . "\x1F"
+            . "\xCB";
+
+        $pad1 = str_repeat("\x00", max(0, 0x30 - (0x20 + strlen($strategy))));
+        $pad2 = str_repeat("\x00", max(0, 0x46 - (0x30 + strlen($interrupt))));
+
+        return $header . $strategy . $pad1 . $interrupt . $pad2 . str_repeat("\x00", 4);
+    }
+
 }

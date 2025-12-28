@@ -173,6 +173,30 @@ final class PagedMemoryStream implements MemoryStreamInterface
         return $this;
     }
 
+    /**
+     * Fast bulk copy from a PHP string into linear memory.
+     *
+     * Uses the underlying physical stream directly when paging is disabled.
+     */
+    public function copyFromString(string $data, int $destOffset): void
+    {
+        $len = strlen($data);
+        if ($len === 0) {
+            return;
+        }
+
+        $cpu = $this->runtime->context()->cpu();
+        if (!$cpu->isPagingEnabled() && $this->physical instanceof RustMemoryStream) {
+            $linear = $destOffset & $this->linearMask();
+            $this->physical->copyFromString($data, $linear);
+            return;
+        }
+
+        for ($i = 0; $i < $len; $i++) {
+            $this->writeLinearByte($destOffset + $i, ord($data[$i]));
+        }
+    }
+
     public function writeByte(int $value): void
     {
         $this->writeLinearByte($this->offset, $value & 0xFF);

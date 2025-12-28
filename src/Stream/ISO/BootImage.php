@@ -149,6 +149,19 @@ class BootImage
         return $available;
     }
 
+    public function replaceRange(int $offset, string $data): void
+    {
+        $len = strlen($data);
+        if ($len === 0) {
+            return;
+        }
+        if ($offset < 0 || ($offset + $len) > strlen($this->imageData)) {
+            return;
+        }
+
+        $this->imageData = substr_replace($this->imageData, $data, $offset, $len);
+    }
+
     /**
      * Build file index for FAT12 floppy images.
      */

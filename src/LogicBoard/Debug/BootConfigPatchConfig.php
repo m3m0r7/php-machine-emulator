@@ -10,6 +10,7 @@ final class BootConfigPatchConfig
         public readonly bool $enabled = true,
         public readonly bool $patchGrubPlatform = true,
         public readonly bool $disableLoadfontUnicode = true,
+        public readonly bool $disableDosCdromDrivers = true,
         public readonly ?int $timeoutOverride = 1,
     ) {
     }

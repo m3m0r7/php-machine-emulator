@@ -127,6 +127,20 @@ class ISOBootImageStream implements BootableStreamInterface
         return $result;
     }
 
+    public function replaceRange(int $offset, string $data): void
+    {
+        $len = strlen($data);
+        if ($len === 0) {
+            return;
+        }
+        if ($offset < 0 || ($offset + $len) > $this->fileSize) {
+            return;
+        }
+
+        $this->bootData = substr_replace($this->bootData, $data, $offset, $len);
+        $this->bootImage->replaceRange($offset, $data);
+    }
+
     public function offset(): int
     {
         return $this->offset;

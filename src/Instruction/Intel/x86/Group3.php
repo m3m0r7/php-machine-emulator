@@ -363,7 +363,7 @@ class Group3 implements InstructionInterface
             $ip = $memory->offset();
             $segOverride = $runtime->context()->cpu()->segmentOverride();
             if ($ip >= 0x9FAF0 && $ip <= 0x9FB00) {
-                $runtime->option()->logger()->warning(sprintf(
+                $runtime->option()->logger()->debug(sprintf(
                     'DIV DEBUG: IP=0x%05X segOverride=%s CS=0x%04X',
                     $ip, $segOverride?->name ?? 'none',
                     $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte()
@@ -373,7 +373,7 @@ class Group3 implements InstructionInterface
             $divider = $this->readRm8($runtime, $memory, $modRegRM);
 
             if ($ip >= 0x9FAF0 && $ip <= 0x9FB00) {
-                $runtime->option()->logger()->warning(sprintf(
+                $runtime->option()->logger()->debug(sprintf(
                     'DIV DEBUG: divider=0x%02X (expected 0x01)',
                     $divider
                 ));

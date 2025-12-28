@@ -332,6 +332,51 @@ class Group5 implements InstructionInterface
         $offset = $opSize === 32 ? $this->readMemory32($runtime, $addr) : $this->readMemory16($runtime, $addr);
         $segment = $this->readMemory16($runtime, $addr + ($opSize === 32 ? 4 : 2));
 
+        // Handle BIOS IVT handler calls (PUSHF + CALL FAR [F000:FF53]) by executing the BIOS interrupt
+        // and returning via an IRET sequence without running unmapped ROM bytes.
+        if (!$runtime->context()->cpu()->isProtectedMode() && $segment === 0xF000 && $offset === 0xFF53) {
+            $size = $runtime->context()->cpu()->operandSize();
+            $pos = $runtime->memory()->offset();
+            $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte();
+            $returnOffset = $this->codeOffsetFromLinear($runtime, $currentCs, $pos, $size);
+            $ah = ($runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(16) >> 8) & 0xFF;
+
+            $intVector = match (true) {
+                $ah === 0x42 || $ah === 0x02 || $ah === 0x03 || $ah === 0x08 || $ah === 0x15 || $ah === 0x41 => 0x13,
+                $ah === 0x0E || $ah === 0x00 || $ah === 0x01 || $ah === 0x02 || $ah === 0x03 || $ah === 0x06 || $ah === 0x07 || $ah === 0x0B || $ah === 0x0C || $ah === 0x0F || $ah === 0x10 || $ah === 0x11 || $ah === 0x12 || $ah === 0x13 => 0x10,
+                default => 0x10,
+            };
+
+            $runtime->option()->logger()->debug(sprintf(
+                'CALL FAR to BIOS IVT handler [F000:FF53]: AH=0x%02X -> INT 0x%02X',
+                $ah,
+                $intVector
+            ));
+
+            // Push return CS:IP (CALL FAR semantics).
+            $runtime->memoryAccessor()->push(RegisterType::ESP, $currentCs, 16);
+            $runtime->memoryAccessor()->push(RegisterType::ESP, $returnOffset, $size);
+
+            $this->executeBiosHandler($runtime, $intVector);
+
+            // IRET: pop IP, CS, FLAGS and restore state.
+            $ma = $runtime->memoryAccessor();
+            $ip = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+            $cs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+            $flags = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
+            $this->writeCodeSegment($runtime, $cs);
+            $linear = $this->linearCodeAddress($runtime, $cs & 0xFFFF, $ip, 16);
+            $runtime->memory()->setOffset($linear);
+            $ma->setCarryFlag(($flags & 0x1) !== 0);
+            $ma->setParityFlag(($flags & (1 << 2)) !== 0);
+            $ma->setZeroFlag(($flags & (1 << 6)) !== 0);
+            $ma->setSignFlag(($flags & (1 << 7)) !== 0);
+            $ma->setOverflowFlag(($flags & (1 << 11)) !== 0);
+            $ma->setDirectionFlag(($flags & (1 << 10)) !== 0);
+            $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);
+            return ExecutionStatus::SUCCESS;
+        }
+
         // Debug
         $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asByte();
         $si = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asByte();

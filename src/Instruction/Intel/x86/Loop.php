@@ -57,14 +57,14 @@ class Loop implements InstructionInterface
 
         // Optimization: Detect and bulk execute simple byte copy loops
         // Pattern: MOV AL, [source] / CALL output_routine / LOOP
-        // Only optimize when source and destination do NOT overlap
-        // DISABLED: This optimization has bugs that cause memory corruption
-        // if ($counter > 1 && $operand >= -15 && $operand <= -8) {
-        //     $result = $this->tryBulkByteCopyLoop($runtime, $loopTarget, $pos, $counter, $size);
-        //     if ($result !== null) {
-        //         return $result;
-        //     }
-        // }
+        // Only optimize when source and destination do NOT overlap.
+        $patternEnabled = $runtime->logicBoard()->debug()->patterns()->enableLzmaPattern;
+        if ($patternEnabled && $counter > 7 && $operand >= -15 && $operand <= -8) {
+            $result = $this->tryBulkByteCopyLoop($runtime, $loopTarget, $pos, $counter, $size);
+            if ($result !== null) {
+                return $result;
+            }
+        }
 
         $counter = ($counter - 1) & ($size === 32 ? 0xFFFFFFFF : 0xFFFF);
 
@@ -333,14 +333,42 @@ class Loop implements InstructionInterface
             $counter, $sourceAddr, $destAddr, $step, $useSib ? 1 : 0
         ));
 
-        // Bulk copy bytes
+        // Fast path: contiguous forward copy with no overlap.
+        if ($step === 1) {
+            $srcStart = $sourceAddr & 0xFFFFFFFF;
+            $dstStart = $destAddr & 0xFFFFFFFF;
+            $len = $counter & 0xFFFFFFFF;
+            if ($len > 0) {
+                $srcEnd = ($srcStart + $len - 1) & 0xFFFFFFFF;
+                $dstEnd = ($dstStart + $len - 1) & 0xFFFFFFFF;
+                $overlap = !($dstEnd < $srcStart || $dstStart > $srcEnd);
+                $memory = $runtime->memory();
+                if (!$overlap
+                    && $memory->ensureCapacity($srcEnd + 1)
+                    && $memory->ensureCapacity($dstEnd + 1)
+                ) {
+                    $memory->copy($memory, $srcStart, $dstStart, $len);
+                    // Update EDI and ECX below, then return.
+                    $newDest = ($dstStart + $len) & 0xFFFFFFFF;
+                    $ma->writeBySize(RegisterType::EDI, $newDest, 32);
+                    $ma->writeBySize(RegisterType::ECX, 0, $size);
+                    if ($len > 0) {
+                        $lastByte = $this->readMemory8($runtime, $srcStart + $len - 1);
+                        $ma->writeToLowBit(RegisterType::EAX, $lastByte);
+                    }
+                    if ($runtime->option()->shouldChangeOffset()) {
+                        $runtime->memory()->setOffset($loopPos);
+                    }
+                    return ExecutionStatus::SUCCESS;
+                }
+            }
+        }
+
+        // Fallback: per-byte copy.
         for ($i = 0; $i < $counter; $i++) {
-            // Read byte from source
-            // For SIB pattern, source moves with destination (copy from history)
             $currentSource = ($sourceAddr + ($i * $step)) & 0xFFFFFFFF;
             $byte = $this->readMemory8($runtime, $currentSource);
 
-            // Write to destination (STOSB behavior)
             $currentDest = ($destAddr + ($i * $step)) & 0xFFFFFFFF;
             $ma->allocate($currentDest, safe: false);
             $ma->writeRawByte($currentDest, $byte);

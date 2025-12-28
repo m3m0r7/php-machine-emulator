@@ -56,7 +56,7 @@ class Runtime implements RuntimeInterface
      * Number of instructions between tick processing.
      * Higher values = better performance but less responsive to interrupts/timers.
      */
-    private const TICK_INTERVAL = 256;
+    private const TICK_INTERVAL = 4096;
 
     public function __construct(
         protected MachineInterface $machine,

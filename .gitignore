@@ -25,3 +25,4 @@ test_*.iso
 scripts/
 .phpunit.cache
 target/
+seabios

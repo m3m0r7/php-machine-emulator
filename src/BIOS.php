@@ -10,6 +10,7 @@ use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Stream\ISO\ElTorito;
 use PHPMachineEmulator\Stream\ISO\ISOBootImageStream;
 
 class BIOS
@@ -17,6 +18,8 @@ class BIOS
     public const NAME = 'PHPMachineEmulator';
     public const BIOS_ENTRYPOINT = 0x7C00;
     public const READ_SIZE_PER_SECTOR = 512;
+    private const DISKETTE_PARAM_SEG = 0xF000;
+    private const DISKETTE_PARAM_OFF = 0xFE00;
 
     // BDA (BIOS Data Area) address range
     public const BDA_START = 0x400;
@@ -487,6 +490,11 @@ class BIOS
             $mem->writePhysical16($address + 2, $defaultSegment);
         }
 
+        // Diskette Parameter Table (INT 1Eh) points to BIOS ROM table.
+        $dptVector = 0x1E * 4;
+        $mem->writePhysical16($dptVector, self::DISKETTE_PARAM_OFF);
+        $mem->writePhysical16($dptVector + 2, self::DISKETTE_PARAM_SEG);
+
         $this->machine->option()->logger()->debug(
             sprintf('BIOS: Initialized IVT (0x000-0x3FF) with %d vectors pointing to F000:%04X', 256, $defaultOffset)
         );
@@ -584,7 +592,7 @@ class BIOS
 
         // ========================================
         // A20 Line
-        // Enable A20 for full memory access (QEMU enables by default)
+        // Enable A20 for full memory access (matches common BIOS behavior).
         // ========================================
         $cpuContext->enableA20(true);
 
@@ -645,8 +653,19 @@ class BIOS
         // Boot drive number (DL).
         // For El Torito no-emulation CD boots, BIOS typically passes DL=0xE0 (first CD-ROM).
         $bootStream = $this->machine->logicBoard()->media()->primary()->stream();
-        if ($bootStream instanceof ISOBootImageStream && $bootStream->isNoEmulation()) {
-            $mem->writeToLowBit(RegisterType::EDX, 0xE0);
+        if ($bootStream instanceof ISOBootImageStream) {
+            if ($bootStream->isNoEmulation()) {
+                $mem->writeToLowBit(RegisterType::EDX, 0xE0);
+            } else {
+                $mediaType = $bootStream->bootImage()->mediaType();
+                if (in_array($mediaType, [
+                    ElTorito::MEDIA_FLOPPY_1_2M,
+                    ElTorito::MEDIA_FLOPPY_1_44M,
+                    ElTorito::MEDIA_FLOPPY_2_88M,
+                ], true)) {
+                    $mem->writeToLowBit(RegisterType::EDX, 0x00);
+                }
+            }
         }
 
         $this->machine->option()->logger()->debug(
@@ -771,6 +790,25 @@ class BIOS
         $biosIdAddress = (0xF000 << 4) + 0xE000;  // 0xFE000
         for ($i = 0; $i < strlen($biosId); $i++) {
             $mem->writeBySize($biosIdAddress + $i, ord($biosId[$i]), 8);
+        }
+
+        // Diskette Parameter Table (INT 1Eh) for 1.44MB floppies at F000:FE00.
+        $dptAddress = (self::DISKETTE_PARAM_SEG << 4) + self::DISKETTE_PARAM_OFF;  // 0xFFE00
+        $disketteParams = [
+            0xAF, // Step rate, head unload
+            0x02, // Head load time
+            0x25, // Motor off time
+            0x02, // Bytes per sector (512)
+            0x12, // Sectors per track (18)
+            0x1B, // Gap length
+            0xFF, // Data length
+            0x6C, // Format gap length
+            0xF6, // Format fill byte
+            0x0F, // Head settle time
+            0x08, // Motor start time
+        ];
+        foreach ($disketteParams as $i => $value) {
+            $mem->writeBySize($dptAddress + $i, $value, 8);
         }
 
         // BIOS date at F000:FFF5 (physical address 0xFFFF5) - format: MM/DD/YY

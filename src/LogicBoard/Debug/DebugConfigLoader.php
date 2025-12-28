@@ -286,6 +286,7 @@ final class DebugConfigLoader
             enabled: $this->parser->parseBool($data['enabled'] ?? true, true),
             patchGrubPlatform: $this->parser->parseBool($data['patch_grub_platform'] ?? true, true),
             disableLoadfontUnicode: $this->parser->parseBool($data['disable_loadfont_unicode'] ?? true, true),
+            disableDosCdromDrivers: $this->parser->parseBool($data['disable_dos_cdrom_drivers'] ?? true, true),
             timeoutOverride: $timeoutOverride,
         );
     }
