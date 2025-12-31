@@ -282,12 +282,32 @@ final class DebugConfigLoader
             }
         }
 
+        $syslinuxTimeoutOverride = null;
+        if (array_key_exists('syslinux_timeout_override', $data)) {
+            $value = $data['syslinux_timeout_override'];
+            if ($value === null) {
+                $syslinuxTimeoutOverride = null;
+            } elseif (is_string($value)) {
+                $trimmed = strtolower(trim($value));
+                if (in_array($trimmed, ['off', 'disable'], true)) {
+                    $syslinuxTimeoutOverride = null;
+                } else {
+                    $syslinuxTimeoutOverride = $this->parser->parseInt($trimmed);
+                }
+            } else {
+                $syslinuxTimeoutOverride = $this->parser->parseInt($value);
+            }
+        }
+
         return new BootConfigPatchConfig(
-            enabled: $this->parser->parseBool($data['enabled'] ?? true, true),
-            patchGrubPlatform: $this->parser->parseBool($data['patch_grub_platform'] ?? true, true),
-            disableLoadfontUnicode: $this->parser->parseBool($data['disable_loadfont_unicode'] ?? true, true),
-            disableDosCdromDrivers: $this->parser->parseBool($data['disable_dos_cdrom_drivers'] ?? true, true),
+            enabled: $this->parser->parseBool($data['enabled'] ?? false, true),
+            patchGrubPlatform: $this->parser->parseBool($data['patch_grub_platform'] ?? false, true),
+            disableLoadfontUnicode: $this->parser->parseBool($data['disable_loadfont_unicode'] ?? false, true),
+            forceGrubTextMode: $this->parser->parseBool($data['force_grub_text_mode'] ?? false, true),
+            disableDosCdromDrivers: $this->parser->parseBool($data['disable_dos_cdrom_drivers'] ?? false, true),
             timeoutOverride: $timeoutOverride,
+            disableSyslinuxUi: $this->parser->parseBool($data['disable_syslinux_ui'] ?? false, true),
+            syslinuxTimeoutOverride: $syslinuxTimeoutOverride,
         );
     }
 

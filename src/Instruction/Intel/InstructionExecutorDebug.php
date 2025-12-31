@@ -467,11 +467,17 @@ final class InstructionExecutorDebug
         $esi = $ma->fetch(RegisterType::ESI)->asBytesBySize(32);
         $edx = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
         $ds = $ma->fetch(RegisterType::DS)->asByte() & 0xFFFF;
+        $es = $ma->fetch(RegisterType::ES)->asByte() & 0xFFFF;
+        $ss = $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF;
         $dsCached = $cpu->getCachedSegmentDescriptor(RegisterType::DS);
+        $esCached = $cpu->getCachedSegmentDescriptor(RegisterType::ES);
         $offsetMask = $cpu->addressSize() === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $dsBase = $cpu->isProtectedMode()
+        $dsBase = $dsCached !== null
             ? (int) (($dsCached['base'] ?? 0) & 0xFFFFFFFF)
             : (int) (($ds << 4) & 0xFFFFF);
+        $esBase = $esCached !== null
+            ? (int) (($esCached['base'] ?? 0) & 0xFFFFFFFF)
+            : (int) (($es << 4) & 0xFFFFF);
         $linearMask = $cpu->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
         $memory = $runtime->memory();
         $savedOffset = $memory->offset();
@@ -503,6 +509,14 @@ final class InstructionExecutorDebug
             $peekDword($edxLinear),
             $ds,
             $dsBase & 0xFFFFFFFF,
+        ));
+        $ediEsLinear = ($esBase + (($edi + 0x04) & $offsetMask)) & $linearMask;
+        $runtime->option()->logger()->warning(sprintf(
+            'STOP_AT_IP: ES=0x%04X SS=0x%04X mem[ES:DI+0x04]=0x%s (ES base=0x%08X)',
+            $es,
+            $ss,
+            $peekDword($ediEsLinear),
+            $esBase & 0xFFFFFFFF,
         ));
 
         if ($this->stackPreviewOnIpStopBytes > 0) {

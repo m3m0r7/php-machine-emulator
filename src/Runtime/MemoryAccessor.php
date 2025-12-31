@@ -159,6 +159,32 @@ class MemoryAccessor implements MemoryAccessorInterface
             );
 
             $this->postProcessWhenWrote($address, $previousValue, $value);
+
+            if ($registerType instanceof RegisterType) {
+                $cpu = $this->runtime->context()->cpu();
+                if (!$cpu->isProtectedMode()
+                    && in_array($registerType, [
+                        RegisterType::ES,
+                        RegisterType::CS,
+                        RegisterType::SS,
+                        RegisterType::DS,
+                        RegisterType::FS,
+                        RegisterType::GS,
+                    ], true)
+                ) {
+                    $selector = $value ?? 0;
+                    $cpu->cacheSegmentDescriptor($registerType, [
+                        'base' => ((($selector & 0xFFFF) << 4) & 0xFFFFF),
+                        'limit' => 0xFFFF,
+                        'present' => true,
+                        'type' => 0,
+                        'system' => false,
+                        'executable' => false,
+                        'dpl' => 0,
+                        'default' => 16,
+                    ]);
+                }
+            }
             return $this;
         }
 
@@ -711,8 +737,13 @@ class MemoryAccessor implements MemoryAccessorInterface
         // Real mode: still honor cached descriptor (Unreal Mode) if present
         $cached = $this->runtime->context()->cpu()->getCachedSegmentDescriptor(RegisterType::SS);
         if ($cached !== null) {
-            $effSp = $sp & $mask;
             $limit = $cached['limit'] ?? $mask;
+            if ($limit <= 0xFFFF) {
+                $cached = null;
+            }
+        }
+        if ($cached !== null) {
+            $effSp = $sp & $mask;
             if ($effSp > $limit) {
                 $effSp = $sp & 0xFFFF;
             }

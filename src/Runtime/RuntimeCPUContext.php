@@ -64,6 +64,12 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
 
     // Interrupt handling
     private int $interruptDeliveryBlock = 0;
+    /**
+     * Real-mode interrupt frames pushed by INT (linear address + bytes).
+     *
+     * @var array<int, array{linear:int,size:int,bytes:array<int,int>}>
+     */
+    private array $interruptFrameStack = [];
 
     // Segment override
     private ?RegisterType $segmentOverride = null;
@@ -593,6 +599,39 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
             return true;
         }
         return false;
+    }
+
+    /**
+     * Track the last real-mode interrupt frames to restore if overwritten.
+     *
+     * @param array{linear:int,size:int,bytes:array<int,int>} $frame
+     */
+    public function pushInterruptFrame(array $frame): void
+    {
+        $this->interruptFrameStack[] = $frame;
+    }
+
+    /**
+     * @return array{linear:int,size:int,bytes:array<int,int>}|null
+     */
+    public function popInterruptFrame(): ?array
+    {
+        if ($this->interruptFrameStack === []) {
+            return null;
+        }
+        return array_pop($this->interruptFrameStack);
+    }
+
+    /**
+     * @return array{linear:int,size:int,bytes:array<int,int>}|null
+     */
+    public function peekInterruptFrame(): ?array
+    {
+        $count = count($this->interruptFrameStack);
+        if ($count === 0) {
+            return null;
+        }
+        return $this->interruptFrameStack[$count - 1];
     }
 
     public function picState(): PicState

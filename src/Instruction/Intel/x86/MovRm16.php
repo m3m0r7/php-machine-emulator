@@ -7,6 +7,7 @@ use PHPMachineEmulator\Instruction\PrefixClass;
 
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class MovRm16 implements InstructionInterface
@@ -30,13 +31,10 @@ class MovRm16 implements InstructionInterface
 
         $regCode = $modRegRM->registerOrOPCode();
 
-        $runtime
-            ->memoryAccessor()
-            ->writeBySize(
-                $regCode,
-                $value,
-                $size,
-            );
+        $ma = $runtime->memoryAccessor();
+        $cpu = $runtime->context()->cpu();
+
+        $ma->writeBySize($regCode, $value, $size);
 
         return ExecutionStatus::SUCCESS;
     }

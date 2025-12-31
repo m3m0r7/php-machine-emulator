@@ -5,7 +5,6 @@ namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
 
-use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -35,7 +34,12 @@ class Lds implements InstructionInterface
         $modRegRM = $memory->byteAsModRegRM();
 
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
-            throw new ExecutionException('LDS/LES does not support register-direct addressing');
+            // Real hardware treats this as invalid, but some DOS drivers still reach it.
+            // Best-effort: behave like MOV reg, r/m and leave the segment unchanged.
+            $size = $runtime->context()->cpu()->operandSize();
+            $value = $this->readRm($runtime, $memory, $modRegRM, $size);
+            $runtime->memoryAccessor()->writeBySize($modRegRM->registerOrOPCode(), $value, $size);
+            return ExecutionStatus::SUCCESS;
         }
 
         // Get the linear address of the far pointer operand.

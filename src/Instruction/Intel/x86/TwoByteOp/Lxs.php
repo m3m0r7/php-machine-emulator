@@ -82,6 +82,11 @@ class Lxs implements InstructionInterface
             ]);
         }
 
+        if ($segment === RegisterType::SS) {
+            // LSS blocks interrupts for the following instruction.
+            $runtime->context()->cpu()->blockInterruptDelivery(1);
+        }
+
         return ExecutionStatus::SUCCESS;
     }
 }

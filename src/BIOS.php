@@ -20,13 +20,16 @@ class BIOS
     public const READ_SIZE_PER_SECTOR = 512;
     private const DISKETTE_PARAM_SEG = 0xF000;
     private const DISKETTE_PARAM_OFF = 0xFE00;
+    private const FIXED_DISK_PARAM_SEG = 0x9FC0;
+    private const FIXED_DISK_PARAM_OFF = 0x0000;
+    private const FIXED_DISK_PARAM_SIZE = 0x40;
 
     // BDA (BIOS Data Area) address range
     public const BDA_START = 0x400;
     public const BDA_END = 0x4FF;
 
-    // Conventional memory size in KB (640KB)
-    public const CONVENTIONAL_MEMORY_KB = 640;
+    // Conventional memory size in KB (640KB minus 1KB EBDA at 0x9FC00)
+    public const CONVENTIONAL_MEMORY_KB = 639;
 
     private ?RuntimeInterface $runtime = null;
 
@@ -183,7 +186,13 @@ class BIOS
         // Report minimal hardware during early boot.
         // DOS uses these counts to probe INT 14h/17h; we currently don't emulate UART/LPT,
         // so advertise none to avoid calling into uninitialized device vectors.
-        $equipmentFlags = 0x0021;  // Floppy present, 80x25 color, 1 floppy, no serial/LPT
+        [$floppyCount, $hardDriveCount] = $this->bootDriveCounts();
+
+        $equipmentFlags = 0x0020; // 80x25 color, no serial/LPT
+        if ($floppyCount > 0) {
+            $equipmentFlags |= 0x0001; // floppy present
+            $equipmentFlags |= ((($floppyCount - 1) & 0x03) << 6);
+        }
         $mem->writeBySize(0x410, $equipmentFlags, 16);
 
         // 0x412: Reserved (manufacturing test)
@@ -314,7 +323,7 @@ class BIOS
         // Hard Disk (0x475-0x477)
         // ========================================
         // 0x475: Number of hard drives
-        $mem->writeBySize(0x475, 0x01, 8);
+        $mem->writeBySize(0x475, $hardDriveCount, 8);
 
         // 0x476: Hard disk control byte
         $mem->writeBySize(0x476, 0x00, 8);
@@ -391,8 +400,14 @@ class BIOS
         // 0x48E: Hard disk task complete flag
         $mem->writeBySize(0x48E, 0x00, 8);
 
-        // 0x48F: Reserved
-        $mem->writeBySize(0x48F, 0x00, 8);
+        // 0x48F: Floppy/Hard disk info (drive types)
+        $floppyInfo = 0x00;
+        if ($floppyCount >= 2) {
+            $floppyInfo = 0x77;
+        } elseif ($floppyCount === 1) {
+            $floppyInfo = 0x07;
+        }
+        $mem->writeBySize(0x48F, $floppyInfo, 8);
 
         // ========================================
         // Floppy Drive Info (0x490-0x491)
@@ -468,6 +483,33 @@ class BIOS
     }
 
     /**
+     * @return array{int,int} [floppyCount, hardDriveCount]
+     */
+    private function bootDriveCounts(): array
+    {
+        $media = $this->machine->logicBoard()->media()->primary();
+        $stream = $media->stream();
+
+        if ($stream instanceof ISOBootImageStream) {
+            if ($stream->isNoEmulation()) {
+                return [0, 0];
+            }
+
+            $mediaType = $stream->bootImage()->mediaType();
+            return match ($mediaType) {
+                ElTorito::MEDIA_HARD_DISK => [0, 1],
+                ElTorito::MEDIA_FLOPPY_1_2M,
+                ElTorito::MEDIA_FLOPPY_1_44M,
+                ElTorito::MEDIA_FLOPPY_2_88M => [2, 0],
+                default => [0, 0],
+            };
+        }
+
+        // Boot signature media is treated as a hard disk.
+        return [0, 1];
+    }
+
+    /**
      * Initialize Interrupt Vector Table (IVT) at 0x000-0x3FF.
      * Each vector is 4 bytes (segment:offset).
      */
@@ -495,9 +537,48 @@ class BIOS
         $mem->writePhysical16($dptVector, self::DISKETTE_PARAM_OFF);
         $mem->writePhysical16($dptVector + 2, self::DISKETTE_PARAM_SEG);
 
+        $this->initializeFixedDiskParameterTable();
+
         $this->machine->option()->logger()->debug(
             sprintf('BIOS: Initialized IVT (0x000-0x3FF) with %d vectors pointing to F000:%04X', 256, $defaultOffset)
         );
+    }
+
+    /**
+     * Initialize fixed disk parameter tables and IVT vectors (INT 41h/46h).
+     * A minimal table prevents DOS from reading garbage when no HDD is present.
+     */
+    private function initializeFixedDiskParameterTable(): void
+    {
+        [, $hardDriveCount] = $this->bootDriveCounts();
+        if ($hardDriveCount <= 0) {
+            return;
+        }
+
+        $mem = $this->runtime()->memoryAccessor();
+        $addr = (self::FIXED_DISK_PARAM_SEG << 4) + self::FIXED_DISK_PARAM_OFF;
+
+        for ($i = 0; $i < self::FIXED_DISK_PARAM_SIZE; $i++) {
+            $mem->writeBySize($addr + $i, 0x00, 8);
+        }
+
+        // Provide non-zero geometry to avoid divide-by-zero in DOS init.
+        $mem->writeBySize($addr + 0x13, 63, 16); // sectors per track (word)
+        $mem->writeBySize($addr + 0x15, 16, 16); // heads (word)
+        $mem->writeBySize($addr + 0x22, 0x00, 8); // drive type marker (force template path)
+
+        $offset = self::FIXED_DISK_PARAM_OFF;
+        $segment = self::FIXED_DISK_PARAM_SEG;
+
+        $vec41 = 0x41 * 4;
+        $mem->writePhysical16($vec41, $offset);
+        $mem->writePhysical16($vec41 + 2, $segment);
+
+        $vec46 = 0x46 * 4;
+        $mem->writePhysical16($vec46, $offset);
+        $mem->writePhysical16($vec46 + 2, $segment);
+
+        // Avoid touching DOS scratch geometry in low memory here; IO.SYS initializes it.
     }
 
     /**
@@ -592,7 +673,7 @@ class BIOS
 
         // ========================================
         // A20 Line
-        // Enable A20 for full memory access (matches common BIOS behavior).
+        // Enable A20 by default (matches SeaBIOS behavior for 16-bit boot).
         // ========================================
         $cpuContext->enableA20(true);
 
@@ -664,8 +745,13 @@ class BIOS
                     ElTorito::MEDIA_FLOPPY_2_88M,
                 ], true)) {
                     $mem->writeToLowBit(RegisterType::EDX, 0x00);
+                } elseif ($mediaType === ElTorito::MEDIA_HARD_DISK) {
+                    $mem->writeToLowBit(RegisterType::EDX, 0x80);
                 }
             }
+        } else {
+            // Boot signature media is treated as a hard disk.
+            $mem->writeToLowBit(RegisterType::EDX, 0x80);
         }
 
         $this->machine->option()->logger()->debug(

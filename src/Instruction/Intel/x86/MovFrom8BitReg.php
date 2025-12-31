@@ -30,29 +30,7 @@ class MovFrom8BitReg implements InstructionInterface
 
         $value = $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
 
-        // Debug: Log CS:0x0137 writes
-        $ip = $memory->offset();
-        $debugThisInstruction = ($ip >= 0x0880 && $ip <= 0x0890);
-        if ($debugThisInstruction) {
-            $cpuOverride = $runtime->context()->cpu()->segmentOverride();
-            $cs = $runtime->memoryAccessor()->fetch(\PHPMachineEmulator\Instruction\RegisterType::CS)->asByte();
-            $runtime->option()->logger()->debug(sprintf(
-                'MOV [r/m8], r8 DEBUG: IP=0x%05X value=0x%02X segOverride=%s CS=0x%04X modRM=0x%02X',
-                $ip,
-                $value,
-                $cpuOverride?->name ?? 'none',
-                $cs,
-                $modRegRM->mode() << 6 | $modRegRM->registerOrOPCode() << 3 | $modRegRM->registerOrMemoryAddress()
-            ));
-        }
-
-        $this->writeRm8WithDebug(
-            $runtime,
-            $memory,
-            $modRegRM,
-            $value,
-            $debugThisInstruction
-        );
+        $this->writeRm8($runtime, $memory, $modRegRM, $value);
 
         return ExecutionStatus::SUCCESS;
     }

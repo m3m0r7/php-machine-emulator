@@ -157,7 +157,8 @@ class Video implements InterruptInterface
         $row = ($dx >> 8) & 0xFF; // DH
         $col = $dx & 0xFF;        // DL
 
-        $addrSize = $runtime->context()->cpu()->addressSize();
+        $cpu = $runtime->context()->cpu();
+        $addrSize = $cpu->addressSize();
         $bp = $runtime->memoryAccessor()->fetch(RegisterType::EBP)->asBytesBySize($addrSize);
         $src = $this->segmentOffsetAddress($runtime, RegisterType::ES, $bp);
 
@@ -532,7 +533,9 @@ class Video implements InterruptInterface
     private function vbeGetInfo(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor();
-        $addr = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize()));
+        $cpu = $runtime->context()->cpu();
+        $addrSize = $cpu->addressSize();
+        $addr = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($addrSize));
         // Zero 512 bytes
         for ($i = 0; $i < 512; $i++) {
             $this->writeMemory8($runtime, $addr + $i, 0);
@@ -553,8 +556,10 @@ class Video implements InterruptInterface
     private function vbeGetModeInfo(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor();
+        $cpu = $runtime->context()->cpu();
+        $addrSize = $cpu->addressSize();
         $mode = $ma->fetch(RegisterType::ECX)->asBytesBySize(16) & 0xFFFF;
-        $dest = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize()));
+        $dest = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($addrSize));
         // Only one mode: 0x141
         if ($mode !== 0x141) {
             $ma->write16Bit(RegisterType::EAX, 0x014F);
@@ -608,7 +613,8 @@ class Video implements InterruptInterface
      */
     protected function segmentOffsetAddress(RuntimeInterface $runtime, RegisterType $segment, int $offset): int
     {
-        $addressSize = $runtime->context()->cpu()->addressSize();
+        $cpu = $runtime->context()->cpu();
+        $addressSize = $cpu->addressSize();
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
         $linearMask = $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
         $selector = $runtime->memoryAccessor()->fetch($segment)->asBytesBySize(16) & 0xFFFF;

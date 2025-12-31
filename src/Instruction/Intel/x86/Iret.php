@@ -27,6 +27,11 @@ class Iret implements InstructionInterface
         $cpu = $runtime->context()->cpu();
         $opSize = $runtime->context()->cpu()->operandSize();
         $ma = $runtime->memoryAccessor();
+        $popInterruptFrame = static function (RuntimeInterface $runtime, \PHPMachineEmulator\Runtime\RuntimeCPUContextInterface $cpu): void {
+            if (!$cpu->isProtectedMode()) {
+                $runtime->context()->cpu()->popInterruptFrame();
+            }
+        };
 
         // IA-32e 64-bit mode: IRETQ uses 64-bit stack slots.
         // It always pops RIP, CS, RFLAGS. RSP/SS are popped only when returning
@@ -86,34 +91,110 @@ class Iret implements InstructionInterface
             $cpu->setIopl(($flags >> 12) & 0x3);
             $cpu->setNt(($flags & (1 << 14)) !== 0);
 
+            $popInterruptFrame($runtime, $cpu);
             return ExecutionStatus::SUCCESS;
         }
 
-        // Real-mode BIOS trampolines sometimes return via IRET even when
+        // Real-mode trampolines sometimes return via IRET even when
         // chained through a far CALL without a preceding PUSHF.
         // In that case, the stack does not contain a flags word for this IRET.
         // Detect it heuristically and fall back to a far return (RETF).
         if (!$cpu->isProtectedMode()) {
-            // Keep this heuristic scoped to BIOS ROM code paths; test programs and
-            // normal software should follow the architectural IRET stack layout.
-            $currentCs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
-            if ($currentCs === 0xF000) {
-                $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($opSize);
-                $bytesIp = intdiv($opSize, 8);
-                $flagsSp = ($sp + $bytesIp + 2) & 0xFFFF; // +CS(2)
-                $flagsLinear = $this->segmentOffsetAddress($runtime, RegisterType::SS, $flagsSp);
-                $flagsCandidate = $this->readMemory16($runtime, $flagsLinear);
-                if (($flagsCandidate & 0x2) === 0) {
-                    // Treat as RETF: pop IP and CS only, leave flags on stack.
-                    $ip = $ma->pop(RegisterType::ESP, $opSize)->asBytesBySize($opSize);
-                    $cs = $ma->pop(RegisterType::ESP, 16)->asBytesBySize(16);
-                    $this->writeCodeSegment($runtime, $cs);
+            $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($opSize) & 0xFFFF;
+            $bytesIp = intdiv($opSize, 8);
+            $ipLinear = $this->segmentOffsetAddress($runtime, RegisterType::SS, $sp);
+            $csLinear = $this->segmentOffsetAddress($runtime, RegisterType::SS, ($sp + $bytesIp) & 0xFFFF);
+            $flagsLinear = $this->segmentOffsetAddress($runtime, RegisterType::SS, ($sp + $bytesIp + 2) & 0xFFFF);
+            $ipCandidate = $this->readMemory16($runtime, $ipLinear);
+            $csCandidate = $this->readMemory16($runtime, $csLinear);
+            $flagsCandidate = $this->readMemory16($runtime, $flagsLinear);
+            if (($flagsCandidate & 0x2) === 0) {
+                // If only IP is present (near-call pattern), treat as RET.
+                if ($csCandidate === 0 && $ipCandidate !== 0) {
+                    $newSp = ($sp + $bytesIp) & 0xFFFF;
+                    $ma->writeBySize(RegisterType::ESP, $newSp, $opSize);
+                    $runtime->option()->logger()->debug(sprintf(
+                        'IRET heuristic RET: CS=0x%04X IP=0x%04X flagsCandidate=0x%04X SP=0x%04X',
+                        $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF,
+                        $ipCandidate & 0xFFFF,
+                        $flagsCandidate & 0xFFFF,
+                        $sp & 0xFFFF,
+                    ));
                     if ($runtime->option()->shouldChangeOffset()) {
-                        $linear = $this->linearCodeAddress($runtime, $cs & 0xFFFF, $ip, $opSize);
+                        $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                        $linear = $this->linearCodeAddress($runtime, $cs, $ipCandidate, $opSize);
                         $runtime->memory()->setOffset($linear);
                     }
+                    $popInterruptFrame($runtime, $cpu);
                     return ExecutionStatus::SUCCESS;
                 }
+
+                // DOS internal stack switch fallback: try alternate SS:SP from DS:05F0/05F2.
+                $altSs = $this->readMemory16($runtime, $this->segmentOffsetAddress($runtime, RegisterType::DS, 0x05F0));
+                $altSp = $this->readMemory16($runtime, $this->segmentOffsetAddress($runtime, RegisterType::DS, 0x05F2));
+                if (($altSs !== 0 || $altSp !== 0)) {
+                    $mask = $this->linearMask($runtime);
+                    $altBase = (($altSs & 0xFFFF) << 4) & $mask;
+                    $altIp = $this->readMemory16($runtime, ($altBase + ($altSp & 0xFFFF)) & $mask);
+                    $altCs = $this->readMemory16($runtime, ($altBase + (($altSp + 2) & 0xFFFF)) & $mask);
+                    $altFlags = $this->readMemory16($runtime, ($altBase + (($altSp + 4) & 0xFFFF)) & $mask);
+                    if (($altFlags & 0x2) !== 0) {
+                        $runtime->option()->logger()->debug(sprintf(
+                            'IRET heuristic ALT: SS=0x%04X SP=0x%04X CS=0x%04X IP=0x%04X flags=0x%04X',
+                            $altSs & 0xFFFF,
+                            $altSp & 0xFFFF,
+                            $altCs & 0xFFFF,
+                            $altIp & 0xFFFF,
+                            $altFlags & 0xFFFF,
+                        ));
+                        $ma->write16Bit(RegisterType::SS, $altSs & 0xFFFF);
+                        $runtime->context()->cpu()->cacheSegmentDescriptor(RegisterType::SS, [
+                            'base' => (($altSs << 4) & 0xFFFFF),
+                            'limit' => 0xFFFF,
+                            'present' => true,
+                            'type' => 0,
+                            'system' => false,
+                            'executable' => false,
+                            'dpl' => 0,
+                            'default' => 16,
+                        ]);
+                        $ma->writeBySize(RegisterType::ESP, ($altSp + $bytesIp + 2) & 0xFFFF, $opSize);
+                        $this->writeCodeSegment($runtime, $altCs & 0xFFFF);
+                        if ($runtime->option()->shouldChangeOffset()) {
+                            $linear = $this->linearCodeAddress($runtime, $altCs & 0xFFFF, $altIp, $opSize);
+                            $runtime->memory()->setOffset($linear);
+                        }
+                        // Restore flags directly from the alternate frame.
+                        $ma->setCarryFlag(($altFlags & 0x1) !== 0);
+                        $ma->setParityFlag(($altFlags & (1 << 2)) !== 0);
+                        $ma->setAuxiliaryCarryFlag(($altFlags & (1 << 4)) !== 0);
+                        $ma->setZeroFlag(($altFlags & (1 << 6)) !== 0);
+                        $ma->setSignFlag(($altFlags & (1 << 7)) !== 0);
+                        $ma->setOverflowFlag(($altFlags & (1 << 11)) !== 0);
+                        $ma->setDirectionFlag(($altFlags & (1 << 10)) !== 0);
+                        $ma->setInterruptFlag(($altFlags & (1 << 9)) !== 0);
+                        $popInterruptFrame($runtime, $cpu);
+                        return ExecutionStatus::SUCCESS;
+                    }
+                }
+
+                // Treat as RETF: pop IP and CS only, leave flags on stack.
+                $newSp = ($sp + $bytesIp + 2) & 0xFFFF;
+                $ma->writeBySize(RegisterType::ESP, $newSp, $opSize);
+                $runtime->option()->logger()->debug(sprintf(
+                    'IRET heuristic RETF: CS=0x%04X IP=0x%04X flagsCandidate=0x%04X SP=0x%04X',
+                    $csCandidate & 0xFFFF,
+                    $ipCandidate & 0xFFFF,
+                    $flagsCandidate & 0xFFFF,
+                    $sp & 0xFFFF,
+                ));
+                $this->writeCodeSegment($runtime, $csCandidate & 0xFFFF);
+                if ($runtime->option()->shouldChangeOffset()) {
+                    $linear = $this->linearCodeAddress($runtime, $csCandidate & 0xFFFF, $ipCandidate, $opSize);
+                    $runtime->memory()->setOffset($linear);
+                }
+                $popInterruptFrame($runtime, $cpu);
+                return ExecutionStatus::SUCCESS;
             }
         }
 
@@ -214,6 +295,7 @@ class Iret implements InstructionInterface
         $runtime->context()->cpu()->setIopl(($flags >> 12) & 0x3);
         $runtime->context()->cpu()->setNt(($flags & (1 << 14)) !== 0);
 
+        $popInterruptFrame($runtime, $cpu);
         return ExecutionStatus::SUCCESS;
     }
 }

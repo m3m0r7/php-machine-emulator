@@ -38,8 +38,7 @@ class Outs implements InstructionInterface
 
         $src = $runtime->memoryAccessor()->fetch(RegisterType::ESI)->asBytesBySize($runtime->context()->cpu()->addressSize());
         $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
-        $segBase = $runtime->memoryAccessor()->fetch($segment)->asByte();
-        $linearAddr = ($segBase << 4) + $src;
+        $linearAddr = $this->segmentOffsetAddress($runtime, $segment, $src);
         $value = match ($width) {
             8 => $this->readMemory8($runtime, $linearAddr),
             16 => $this->readMemory16($runtime, $linearAddr),

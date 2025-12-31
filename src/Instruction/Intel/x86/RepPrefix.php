@@ -356,6 +356,12 @@ class RepPrefix implements InstructionInterface
         return $this->bytesUntilPageBoundary($address, $byteCount) >= $byteCount;
     }
 
+    private function stringLinearAddress(RuntimeInterface $runtime, RegisterType $segment, int $baseOffset, int $delta): int
+    {
+        // Preserve segment:offset wrapping semantics for string ops.
+        return $this->segmentOffsetAddress($runtime, $segment, $baseOffset + $delta);
+    }
+
     /**
      * REP MOVSB - bulk memory copy (byte)
      * Uses same read/write methods as Movsb.php for correctness
@@ -364,6 +370,7 @@ class RepPrefix implements InstructionInterface
     {
         $ma = $runtime->memoryAccessor();
         $step = $ma->shouldDirectionFlag() ? -1 : 1;
+        $allowOverlapFastCopy = true;
 
         $si = $this->readIndex($runtime, RegisterType::ESI);
         $di = $this->readIndex($runtime, RegisterType::EDI);
@@ -373,50 +380,7 @@ class RepPrefix implements InstructionInterface
         $srcSegOff = $this->segmentOffsetAddress($runtime, $sourceSegment, $si);
         $dstSegOff = $this->segmentOffsetAddress($runtime, RegisterType::ES, $di);
 
-        $checkAfterCopy = false;
-
-        // Debug: Log any REP MOVSB that writes to 0x0700 area
-        if ($dstSegOff >= 0x0700 && $dstSegOff < 0x0710) {
-            $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
-            $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
-            $ip = $runtime->memory()->offset();
-            $runtime->option()->logger()->debug(sprintf(
-                'REP MOVSB to 0x0700: IP=0x%05X DS=0x%04X ES=0x%04X SI=0x%04X DI=0x%04X src=0x%05X dst=0x%05X count=%d',
-                $ip, $ds, $es, $si, $di, $srcSegOff, $dstSegOff, $count
-            ));
-            // Debug: check source data
-            $srcData = [];
-            for ($j = 0; $j < 8; $j++) {
-                $srcData[] = sprintf('%02X', $this->readMemory8($runtime, $srcSegOff + $j));
-            }
-            $runtime->option()->logger()->debug(sprintf(
-                'REP MOVSB source data: %s',
-                implode(' ', $srcData)
-            ));
-        }
-        // Debug: Log relocation copy (0x0700 -> 0x9F840)
-        if ($srcSegOff >= 0x0700 && $srcSegOff < 0x0D00 && $dstSegOff >= 0x9F000) {
-            $ds = $runtime->memoryAccessor()->fetch(RegisterType::DS)->asByte();
-            $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
-            $runtime->option()->logger()->debug(sprintf(
-                'REP MOVSB RELOC: DS=0x%04X ES=0x%04X SI=0x%04X DI=0x%04X src=0x%05X dst=0x%05X count=%d',
-                $ds, $es, $si, $di, $srcSegOff, $dstSegOff, $count
-            ));
-            // Check value at absolute 0x0837 (where MOV [CS:0x137] wrote 0x01)
-            $srcVal = $this->readMemory8($runtime, 0x0837);
-            $runtime->option()->logger()->debug(sprintf(
-                'REP MOVSB RELOC: mem[0x0837]=0x%02X (expected 0x01)',
-                $srcVal
-            ));
-            // Also check destination 0x9F977 before copy
-            $dstVal = $this->readMemory8($runtime, 0x9F977);
-            $runtime->option()->logger()->debug(sprintf(
-                'REP MOVSB RELOC: mem[0x9F977]=0x%02X before copy',
-                $dstVal
-            ));
-            // Set flag to check after copy
-            $checkAfterCopy = true;
-        }
+        // No debug logging in the hot path.
 
         // Fast path: use MemoryStream internal copy when the address range is a contiguous plain RAM span.
         // This avoids per-byte PHP overhead for large copies (e.g., GRUB module/font relocation).
@@ -434,7 +398,7 @@ class RepPrefix implements InstructionInterface
                 // REP MOVSB semantics in this case are NOT memmove; the forward, byte-by-byte behavior
                 // causes the copied pattern to repeat when length > distance. Emulate this efficiently
                 // using an initial non-overlapping seed copy followed by exponential self-copy.
-                if (!$usedFastCopy && $step > 0 && $cpu->isA20Enabled()) {
+                if (!$usedFastCopy && $allowOverlapFastCopy && $step > 0 && $cpu->isA20Enabled() && $cpu->isProtectedMode()) {
                     [$srcMin, $srcMax, $byteCount] = $this->bulkMovsRange($srcSegOff, $count, 1, $step);
                     [$dstMin, $dstMax] = $this->bulkMovsRange($dstSegOff, $count, 1, $step);
 
@@ -488,11 +452,11 @@ class RepPrefix implements InstructionInterface
             // Process each byte using the same methods as Movsb.php
             for ($i = 0; $i < $count; $i++) {
                 // Read using readMemory8 (same as Movsb.php line 27-30)
-                $srcAddr = $srcSegOff + ($step * $i);
+                $srcAddr = $this->stringLinearAddress($runtime, $sourceSegment, $si, $step * $i);
                 $value = $this->readMemory8($runtime, $srcAddr);
 
                 // Write using writeRawByte after allocate (same as Movsb.php line 32-34)
-                $dstAddr = $dstSegOff + ($step * $i);
+                $dstAddr = $this->stringLinearAddress($runtime, RegisterType::ES, $di, $step * $i);
                 if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
                     $this->writeMemory8($runtime, $dstAddr, $value);
                 } else {
@@ -501,21 +465,7 @@ class RepPrefix implements InstructionInterface
                     $ma->writeRawByte($destAddress, $value);
                 }
 
-                // Debug: track writes to 0x0700-0x0710
-                if ($dstAddr >= 0x0700 && $dstAddr <= 0x0710) {
-                    $runtime->option()->logger()->warning(sprintf(
-                        'REP MOVSB WRITE: 0x%05X <- 0x%02X (from 0x%05X)',
-                        $dstAddr, $value, $srcAddr
-                    ));
-                }
-
-                // Debug: track writes to 0x0CA0-0x0CB0 area (source data for setup code)
-                if ($dstAddr >= 0x0CA0 && $dstAddr <= 0x0CB0) {
-                    $runtime->option()->logger()->warning(sprintf(
-                        'REP MOVSB WRITE to source area: 0x%05X <- 0x%02X',
-                        $dstAddr, $value
-                    ));
-                }
+                // No debug logging in the hot path.
             }
         }
 
@@ -580,15 +530,6 @@ class RepPrefix implements InstructionInterface
             $totalCount,
         );
 
-        // Check after copy
-        if ($checkAfterCopy) {
-            $dstValAfter = $this->readMemory8($runtime, 0x9F977);
-                $runtime->option()->logger()->debug(sprintf(
-                    'REP MOVSB RELOC: mem[0x9F977]=0x%02X after copy',
-                    $dstValAfter
-                ));
-        }
-
         return ExecutionStatus::SUCCESS;
     }
 
@@ -644,16 +585,17 @@ class RepPrefix implements InstructionInterface
             // Process each element using the same methods as Movsw.php
             for ($i = 0; $i < $count; $i++) {
                 $offset = $step * $width * $i;
+                $srcAddr = $this->stringLinearAddress($runtime, $sourceSegment, $si, $offset);
+                $dstAddr = $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset);
 
                 $value = match ($opSize) {
-                    16 => $this->readMemory16($runtime, $srcSegOff + $offset),
-                    32 => $this->readMemory32($runtime, $srcSegOff + $offset),
-                    64 => $this->readMemory64($runtime, $srcSegOff + $offset),
-                    default => $this->readMemory16($runtime, $srcSegOff + $offset),
+                    16 => $this->readMemory16($runtime, $srcAddr),
+                    32 => $this->readMemory32($runtime, $srcAddr),
+                    64 => $this->readMemory64($runtime, $srcAddr),
+                    default => $this->readMemory16($runtime, $srcAddr),
                 };
 
-                // Write using writeBySize after allocate (same as Movsw.php line 34-36)
-                $dstAddr = $dstSegOff + $offset;
+                // Write using writeMemory* to avoid low-memory register aliasing (mirrors Movsw.php)
                 if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
                     match ($opSize) {
                         16 => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
@@ -662,9 +604,12 @@ class RepPrefix implements InstructionInterface
                         default => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
                     };
                 } else {
-                    $destAddress = $this->translateLinearWithMmio($runtime, $dstAddr, true);
-                    $ma->allocate($destAddress, $width, safe: false);
-                    $ma->writeBySize($destAddress, $value instanceof UInt64 ? $value->toInt() : $value, $opSize);
+                    match ($opSize) {
+                        16 => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                        32 => $this->writeMemory32($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                        64 => $this->writeMemory64($runtime, $dstAddr, $value),
+                        default => $this->writeMemory16($runtime, $dstAddr, $value instanceof UInt64 ? $value->toInt() : $value),
+                    };
                 }
             }
         }
@@ -768,13 +713,30 @@ class RepPrefix implements InstructionInterface
             // Process each byte using the same methods as Stosb.php
             for ($i = 0; $i < $count; $i++) {
                 // Write using writeRawByte after allocate (same as Stosb.php line 33-39)
-                $dstAddr = $dstSegOff + ($step * $i);
+                $dstAddr = $this->stringLinearAddress($runtime, RegisterType::ES, $di, $step * $i);
                 if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
                     $this->writeMemory8($runtime, $dstAddr, $byte);
                 } else {
                     $address = $this->translateLinearWithMmio($runtime, $dstAddr, true);
                     $ma->allocate($address, safe: false);
                     $ma->writeRawByte($address, $byte);
+                }
+            }
+        }
+
+        // Restore interrupt frame if this fill overlapped the current real-mode INT stack frame.
+        if ($count > 0) {
+            $frame = $runtime->context()->cpu()->peekInterruptFrame();
+            if ($frame !== null) {
+                [$dstMin, $byteCount] = $this->bulkStosRange($dstSegOff, $count, 1, $step);
+                $dstMax = $dstMin + $byteCount - 1;
+                $frameMin = $frame['linear'];
+                $frameMax = $frameMin + $frame['size'] - 1;
+                if (self::rangesOverlap($dstMin, $dstMax, $frameMin, $frameMax)) {
+                    $linearMask = $this->linearMask($runtime);
+                    foreach ($frame['bytes'] as $i => $value) {
+                        $this->writeMemory8($runtime, ($frameMin + $i) & $linearMask, $value & 0xFF);
+                    }
                 }
             }
         }
@@ -835,8 +797,8 @@ class RepPrefix implements InstructionInterface
             for ($i = 0; $i < $count; $i++) {
                 $offset = $step * $width * $i;
 
-                // Write using writeBySize after allocate (same as Stosw.php line 30-31)
-                $dstAddr = $dstSegOff + $offset;
+                // Write using writeMemory* to avoid low-memory register aliasing (mirrors Stosw.php)
+                $dstAddr = $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset);
                 if ($dstAddr >= 0xE0000000 && $dstAddr < 0xE1000000) {
                     match ($opSize) {
                         16 => $this->writeMemory16($runtime, $dstAddr, $value),
@@ -845,9 +807,29 @@ class RepPrefix implements InstructionInterface
                         default => $this->writeMemory16($runtime, $dstAddr, $value),
                     };
                 } else {
-                    $address = $this->translateLinearWithMmio($runtime, $dstAddr, true);
-                    $ma->allocate($address, safe: false);
-                    $ma->writeBySize($address, $value, $opSize);
+                    match ($opSize) {
+                        16 => $this->writeMemory16($runtime, $dstAddr, $value),
+                        32 => $this->writeMemory32($runtime, $dstAddr, $value),
+                        64 => $this->writeMemory64($runtime, $dstAddr, $value),
+                        default => $this->writeMemory16($runtime, $dstAddr, $value),
+                    };
+                }
+            }
+        }
+
+        // Restore interrupt frame if this fill overlapped the current real-mode INT stack frame.
+        if ($count > 0) {
+            $frame = $runtime->context()->cpu()->peekInterruptFrame();
+            if ($frame !== null) {
+                [$dstMin, $byteCount] = $this->bulkStosRange($dstSegOff, $count, $width, $step);
+                $dstMax = $dstMin + $byteCount - 1;
+                $frameMin = $frame['linear'];
+                $frameMax = $frameMin + $frame['size'] - 1;
+                if (self::rangesOverlap($dstMin, $dstMax, $frameMin, $frameMax)) {
+                    $linearMask = $this->linearMask($runtime);
+                    foreach ($frame['bytes'] as $i => $value) {
+                        $this->writeMemory8($runtime, ($frameMin + $i) & $linearMask, $value & 0xFF);
+                    }
                 }
             }
         }
@@ -884,6 +866,9 @@ class RepPrefix implements InstructionInterface
         }
 
         $cpu = $runtime->context()->cpu();
+        if (!$cpu->isProtectedMode()) {
+            return false;
+        }
         if ($cpu->isPagingEnabled()) {
             return false;
         }
@@ -1279,8 +1264,8 @@ class RepPrefix implements InstructionInterface
         $right = 0;
         for ($i = 0; $i < $count; $i++) {
             $offset = $step * $i;
-            $left = $this->readMemory8($runtime, $srcSegOff + $offset);
-            $right = $this->readMemory8($runtime, $dstSegOff + $offset);
+            $left = $this->readMemory8($runtime, $this->stringLinearAddress($runtime, $sourceSegment, $si, $offset));
+            $right = $this->readMemory8($runtime, $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset));
             $processed++;
 
             $match = ($left === $right);
@@ -1346,17 +1331,19 @@ class RepPrefix implements InstructionInterface
         $right = 0;
         for ($i = 0; $i < $count; $i++) {
             $offset = $step * $width * $i;
+            $srcAddr = $this->stringLinearAddress($runtime, $sourceSegment, $si, $offset);
+            $dstAddr = $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset);
             $left = match ($opSize) {
-                16 => $this->readMemory16($runtime, $srcSegOff + $offset),
-                32 => $this->readMemory32($runtime, $srcSegOff + $offset),
-                64 => $this->readMemory64($runtime, $srcSegOff + $offset)->toInt(),
-                default => $this->readMemory16($runtime, $srcSegOff + $offset),
+                16 => $this->readMemory16($runtime, $srcAddr),
+                32 => $this->readMemory32($runtime, $srcAddr),
+                64 => $this->readMemory64($runtime, $srcAddr)->toInt(),
+                default => $this->readMemory16($runtime, $srcAddr),
             };
             $right = match ($opSize) {
-                16 => $this->readMemory16($runtime, $dstSegOff + $offset),
-                32 => $this->readMemory32($runtime, $dstSegOff + $offset),
-                64 => $this->readMemory64($runtime, $dstSegOff + $offset)->toInt(),
-                default => $this->readMemory16($runtime, $dstSegOff + $offset),
+                16 => $this->readMemory16($runtime, $dstAddr),
+                32 => $this->readMemory32($runtime, $dstAddr),
+                64 => $this->readMemory64($runtime, $dstAddr)->toInt(),
+                default => $this->readMemory16($runtime, $dstAddr),
             };
             $processed++;
 
@@ -1438,7 +1425,7 @@ class RepPrefix implements InstructionInterface
         $value = 0;
         for ($i = 0; $i < $count; $i++) {
             $offset = $step * $i;
-            $value = $this->readMemory8($runtime, $dstSegOff + $offset);
+            $value = $this->readMemory8($runtime, $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset));
             $processed++;
 
             $match = ($value === $al);
@@ -1501,10 +1488,10 @@ class RepPrefix implements InstructionInterface
         for ($i = 0; $i < $count; $i++) {
             $offset = $step * $width * $i;
             $value = match ($opSize) {
-                16 => $this->readMemory16($runtime, $dstSegOff + $offset),
-                32 => $this->readMemory32($runtime, $dstSegOff + $offset),
-                64 => $this->readMemory64($runtime, $dstSegOff + $offset)->toInt(),
-                default => $this->readMemory16($runtime, $dstSegOff + $offset),
+                16 => $this->readMemory16($runtime, $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset)),
+                32 => $this->readMemory32($runtime, $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset)),
+                64 => $this->readMemory64($runtime, $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset))->toInt(),
+                default => $this->readMemory16($runtime, $this->stringLinearAddress($runtime, RegisterType::ES, $di, $offset)),
             };
             $processed++;
 

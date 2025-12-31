@@ -98,6 +98,20 @@ interface RuntimeCPUContextInterface
     // ========================================
     public function blockInterruptDelivery(int $count = 1): void;
     public function consumeInterruptDeliveryBlock(): bool;
+    /**
+     * Track real-mode interrupt frames for preservation across bulk fills.
+     *
+     * @param array{linear:int,size:int,bytes:array<int,int>} $frame
+     */
+    public function pushInterruptFrame(array $frame): void;
+    /**
+     * @return array{linear:int,size:int,bytes:array<int,int>}|null
+     */
+    public function popInterruptFrame(): ?array;
+    /**
+     * @return array{linear:int,size:int,bytes:array<int,int>}|null
+     */
+    public function peekInterruptFrame(): ?array;
 
     // ========================================
     // Hardware state

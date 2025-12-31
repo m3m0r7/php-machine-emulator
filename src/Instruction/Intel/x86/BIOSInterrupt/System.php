@@ -32,7 +32,9 @@ class System implements InterruptInterface
             0x88 => $this->getExtendedMemorySize($runtime),
             0xC0 => $this->getSystemConfiguration($runtime),
             0x24 => $this->a20($runtime),
+            0xD8 => $this->systemD8($runtime),
             0x86 => $this->wait($runtime),
+            0x90 => $this->deviceBusy($runtime),
             0x87 => $this->moveExtendedMemory($runtime),
             0x41 => $this->waitOnExternalEvent($runtime),
             default => $this->unsupported($runtime, $ah),
@@ -44,8 +46,25 @@ class System implements InterruptInterface
         $al = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
         $ma = $runtime->memoryAccessor();
 
-        if ($al === 0x01) {
-            $runtime->context()->cpu()->enableA20(true);
+        switch ($al) {
+            case 0x00: // disable A20
+                $runtime->context()->cpu()->enableA20(false);
+                break;
+            case 0x01: // enable A20
+                $runtime->context()->cpu()->enableA20(true);
+                break;
+            case 0x02: // query A20 status
+                // No state change.
+                break;
+            case 0x03: // query A20 support
+                // Report KBC and port 0x92 support.
+                $ma->write16Bit(RegisterType::EBX, 0x0003);
+                break;
+            default:
+                // Unsupported subfunction: report failure.
+                $ma->writeToHighBit(RegisterType::EAX, 0x86);
+                $ma->setCarryFlag(true);
+                return;
         }
 
         $ma->writeToHighBit(RegisterType::EAX, 0x00);
@@ -118,6 +137,28 @@ class System implements InterruptInterface
     {
         // In emulation, we just return immediately (no real delay)
         $ma = $runtime->memoryAccessor();
+        $ma->setCarryFlag(false);
+    }
+
+    /**
+     * INT 15h AH=90h - Device busy (best-effort stub).
+     */
+    private function deviceBusy(RuntimeInterface $runtime): void
+    {
+        $ma = $runtime->memoryAccessor();
+        $ma->writeToHighBit(RegisterType::EAX, 0x00);
+        $ma->setCarryFlag(false);
+    }
+
+    /**
+     * INT 15h AH=D8h - Vendor/BIOS-specific extension.
+     * Return success with zeroed status to avoid boot loops.
+     */
+    private function systemD8(RuntimeInterface $runtime): void
+    {
+        $ma = $runtime->memoryAccessor();
+        $ma->writeToHighBit(RegisterType::EAX, 0x00);
+        $ma->writeToLowBit(RegisterType::EAX, 0x00);
         $ma->setCarryFlag(false);
     }
 

@@ -39,9 +39,18 @@ class Ins implements InstructionInterface
         $value = $this->readPort($runtime, $port, $width);
 
         $dest = $runtime->memoryAccessor()->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize());
-        $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::ES;
-        $segBase = $runtime->memoryAccessor()->fetch($segment)->asByte();
-        $linearAddr = ($segBase << 4) + $dest;
+        // INS always writes to ES:DI; segment overrides are ignored.
+        $segment = RegisterType::ES;
+        $linearAddr = $this->segmentOffsetAddress($runtime, $segment, $dest);
+        if ($port === 0x170 || $port === 0x1F0) {
+            $runtime->option()->logger()->debug(sprintf(
+                'INS port=0x%04X seg=%s di=0x%04X linear=0x%05X',
+                $port,
+                $segment->name,
+                $dest & 0xFFFF,
+                $linearAddr & 0xFFFFF
+            ));
+        }
         match ($width) {
             8 => $this->writeMemory8($runtime, $linearAddr, $value),
             16 => $this->writeMemory16($runtime, $linearAddr, $value),

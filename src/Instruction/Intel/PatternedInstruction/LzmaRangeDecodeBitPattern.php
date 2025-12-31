@@ -47,19 +47,19 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
 
     public function tryCompile(int $ip, array $bytes): ?callable
     {
-        // Needs the fixed prefix; PatternedInstructionsList currently provides 64 bytes.
-        if (count($bytes) < 64) {
-            return null;
-        }
-
-        // Exact bytes captured from a GRUB core image (hot inner routine).
         $expected = [
             0x8D, 0x04, 0x83, 0x89, 0xC1, 0x8B, 0x01, 0x8B, 0x55, 0xF4, 0xC1, 0xEA, 0x0B, 0xF7, 0xE2,
             0x3B, 0x45, 0xF0, 0x76, 0x28, 0x89, 0x45, 0xF4, 0xBA, 0x00, 0x08, 0x00, 0x00, 0x2B, 0x11,
             0xC1, 0xEA, 0x05, 0x01, 0x11, 0xF8, 0x9C, 0x81, 0x7D, 0xF4, 0x00, 0x00, 0x00, 0x01, 0x73,
             0x0C, 0xC1, 0x65, 0xF0, 0x08, 0xAC, 0x88, 0x45, 0xF0, 0xC1, 0x65, 0xF4, 0x08, 0x9D, 0xC3,
-            0x29, 0x45, 0xF4, 0x29,
+            0x29, 0x45, 0xF4, 0x29, 0x45, 0xF0, 0x8B, 0x11, 0xC1, 0xEA, 0x05, 0x29, 0x11, 0xF9, 0xEB,
+            0xD8,
         ];
+
+        // Needs the full routine body so we don't mis-detect other sequences.
+        if (count($bytes) < count($expected)) {
+            return null;
+        }
 
         for ($i = 0; $i < count($expected); $i++) {
             if (($bytes[$i] ?? null) !== $expected[$i]) {
@@ -137,12 +137,11 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
             // bound = prob * (range>>11). In this GRUB routine, the product fits in 32-bit.
             $bound = ($prob * $rangeShift) & 0xFFFFFFFF;
 
-            // Unsigned compare: if (code >= bound) -> bit=1 (else branch).
-            // Values are masked to 32-bit and fit within PHP int, so a direct compare is safe.
-            $bitOne = $code >= $bound;
+            // Unsigned compare: if (bound <= code) -> bit=1 (else branch).
+            $bitOne = ($bound & 0xFFFFFFFF) <= ($code & 0xFFFFFFFF);
 
             $delta = 0;
-            $returnEax = $bound;
+            $newProb = $prob;
             if (!$bitOne) {
                 // bit=0: range = bound
                 $range = $bound;
@@ -150,7 +149,6 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
                 // prob += (0x800 - prob) >> 5
                 $delta = ((0x800 - $prob) & 0xFFFFFFFF) >> 5;
                 $newProb = ($prob + $delta) & 0xFFFFFFFF;
-                $ma->writePhysical32($probPtr, $newProb);
 
                 $this->updateAddFlags32($ma, $prob, $delta, $newProb);
                 $ma->setCarryFlag(false); // CLC
@@ -162,13 +160,13 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
                 // prob -= prob >> 5
                 $delta = ($prob >> 5) & 0xFFFFFFFF;
                 $newProb = ($prob - $delta) & 0xFFFFFFFF;
-                $ma->writePhysical32($probPtr, $newProb);
 
                 $this->updateSubFlags32($ma, $prob, $delta, $newProb);
                 $ma->setCarryFlag(true); // STC
             }
 
             // Normalize when range < 0x01000000.
+            $returnEax = $bound;
             if (($range & 0xFFFFFFFF) < 0x01000000) {
                 $range = ($range << 8) & 0xFFFFFFFF;
 
@@ -178,16 +176,13 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
                 $code = (($code << 8) & 0xFFFFFFFF) | $byte;
                 $ma->writeBySize(RegisterType::ESI, $esi, 32);
 
-                $ma->writePhysical32($codeAddr, $code);
-                $ma->writePhysical32($rangeAddr, $range);
-
                 // Match LODSB side-effect: AL is overwritten by the byte read.
                 $returnEax = (($bound & 0xFFFFFF00) | $byte) & 0xFFFFFFFF;
-            } else {
-                // Ensure memory reflects updates even when no normalization.
-                $ma->writePhysical32($codeAddr, $code);
-                $ma->writePhysical32($rangeAddr, $range);
             }
+
+            $ma->writePhysical32($probPtr, $newProb);
+            $ma->writePhysical32($codeAddr, $code);
+            $ma->writePhysical32($rangeAddr, $range);
 
             $ma->writeBySize(RegisterType::EAX, $returnEax, 32);
             $ma->writeBySize(RegisterType::EDX, $delta & 0xFFFFFFFF, 32);

@@ -53,13 +53,12 @@ class Movsw implements InstructionInterface
                 default => $this->writeMemory16($runtime, $destLinear, is_int($value) ? $value : $value->toInt()),
             };
         } else {
-            $destAddress = $this->translateLinearWithMmio($runtime, $destLinear, true);
-            $runtime->memoryAccessor()->allocate($destAddress, $width, safe: false);
-            $runtime->memoryAccessor()->writeBySize(
-                $destAddress,
-                $value instanceof UInt64 ? $value->toInt() : $value,
-                $opSize
-            );
+            match ($opSize) {
+                16 => $this->writeMemory16($runtime, $destLinear, is_int($value) ? $value : $value->toInt()),
+                32 => $this->writeMemory32($runtime, $destLinear, is_int($value) ? $value : $value->toInt()),
+                64 => $this->writeMemory64($runtime, $destLinear, $value),
+                default => $this->writeMemory16($runtime, $destLinear, is_int($value) ? $value : $value->toInt()),
+            };
         }
 
         $step = $this->stepForElement($runtime, $width);

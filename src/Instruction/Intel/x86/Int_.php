@@ -116,16 +116,25 @@ class Int_ implements InstructionInterface
             return ExecutionStatus::SUCCESS;
         }
 
+        // INT 2Ah (DOS network/redirector services) - not emulated.
+        // Return carry set to indicate "not installed/unsupported" and let DOS continue.
+        if ($vector === 0x2A) {
+            $ma = $runtime->memoryAccessor();
+            $ma->setCarryFlag(true);
+            $ma->writeToLowBit(RegisterType::EAX, 0x00);
+            return ExecutionStatus::SUCCESS;
+        }
+
         $operand = BIOSInterrupt::tryFrom($vector);
 
-        // INT 15h AH=C0 ("Get System Configuration Parameters") is polled during DOS boot.
-        // Some DOS/BIOS implementations hook INT 15h early and then chain to the ROM handler.
-        // Our ROM handler lives in PHP, so if the vector is hooked we can safely handle AH=C0
-        // directly here to avoid getting stuck in broken chain stubs.
+        // INT 15h AH=C0 ("Get System Configuration Parameters") and AH=24h (A20 control)
+        // are polled during DOS boot. Some DOS/BIOS implementations hook INT 15h early and
+        // then chain to the ROM handler. Our ROM handler lives in PHP, so if the vector is
+        // hooked we can safely handle these directly here to avoid getting stuck in stubs.
         if ($operand === BIOSInterrupt::SYSTEM_INTERRUPT) {
             $ax = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(16);
             $ah = ($ax >> 8) & 0xFF;
-            if ($ah === 0xC0) {
+            if ($ah === 0xC0 || $ah === 0x24) {
                 ($this->interruptInstances[System::class] ??= new System())->process($runtime);
                 return ExecutionStatus::SUCCESS;
             }
@@ -295,6 +304,61 @@ class Int_ implements InstructionInterface
         $ma->push(RegisterType::ESP, $flags, 16);
         $ma->push(RegisterType::ESP, $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte(), 16);
         $ma->push(RegisterType::ESP, $returnOffset, 16);
+
+        // Capture the real-mode interrupt frame so we can restore it if a bulk fill overwrites it.
+        if (!$runtime->context()->cpu()->isProtectedMode()) {
+            $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize(16) & 0xFFFF;
+            $linearMask = $this->linearMask($runtime);
+            $frameLinear = $this->segmentOffsetAddress($runtime, RegisterType::SS, $sp) & $linearMask;
+            $frameBytes = [];
+            for ($i = 0; $i < 6; $i++) {
+                $frameBytes[] = $this->readMemory8($runtime, ($frameLinear + $i) & $linearMask);
+            }
+            $runtime->context()->cpu()->pushInterruptFrame([
+                'linear' => $frameLinear,
+                'size' => 6,
+                'bytes' => $frameBytes,
+            ]);
+        }
+
+        // MS-DOS INT 21h stack-save assist:
+        // DOS expects the user stack (SS:SP after INT frame push) to be stored
+        // in its data segment (DS:0584/0586). Some boot paths in this emulator
+        // fail to populate these slots, causing the DOS handler to restore a
+        // bogus stack and IRET to 0000:0000. If the IVT points into DOS and the
+        // data segment looks plausible, seed those slots now.
+        if (in_array($vector, [0x20, 0x21, 0x29, 0x2F], true) && $segment !== 0xF000) {
+            $linearMask = $this->linearMask($runtime);
+            $segBase = (($segment & 0xFFFF) << 4) & $linearMask;
+            $dosDataSeg = $this->readMemory16($runtime, ($segBase + 0x3DE7) & $linearMask);
+            $dosDataSegSource = 0x3DE7;
+            if ($dosDataSeg < 0x100 || $dosDataSeg >= 0xF000) {
+                $dosDataSeg = $this->readMemory16($runtime, ($segBase + 0x0030) & $linearMask);
+                $dosDataSegSource = 0x0030;
+            }
+            if ($dosDataSeg >= 0x100 && $dosDataSeg < 0xF000) {
+                $linearMask = $this->linearMask($runtime);
+                $sp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(16) & 0xFFFF;
+                $ss = $runtime->memoryAccessor()->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+                // Avoid clobbering the saved user stack when DOS re-enters INT 21h
+                // on its own internal stack segment.
+                if (($ss & 0xFFFF) !== ($dosDataSeg & 0xFFFF)) {
+                    $this->writeMemory16($runtime, ((($dosDataSeg & 0xFFFF) << 4) + 0x0584) & $linearMask, $sp);
+                    $this->writeMemory16($runtime, ((($dosDataSeg & 0xFFFF) << 4) + 0x0586) & $linearMask, $ss);
+                }
+                if ($vector === 0x21) {
+                    $runtime->option()->logger()->debug(sprintf(
+                        'INT 0x%02X: DOS data seg=0x%04X (CS:%04X) SP=0x%04X SS=0x%04X%s',
+                        $vector,
+                        $dosDataSeg & 0xFFFF,
+                        $dosDataSegSource & 0xFFFF,
+                        $sp & 0xFFFF,
+                        $ss & 0xFFFF,
+                        (($ss & 0xFFFF) === ($dosDataSeg & 0xFFFF)) ? ' (skip save: already on DOS stack)' : '',
+                    ));
+                }
+            }
+        }
 
         // Clear IF like real INT.
         $runtime->memoryAccessor()->setInterruptFlag(false);

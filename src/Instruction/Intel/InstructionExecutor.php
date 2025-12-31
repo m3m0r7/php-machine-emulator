@@ -329,6 +329,10 @@ class InstructionExecutor implements InstructionExecutorInterface
             $runtime->tickerRegistry()->tick($runtime);
             $runtime->interruptDeliveryHandler()->deliverPendingInterrupts($runtime);
             $runtime->context()->screen()->flushIfNeeded();
+            // If an interrupt changed the IP, stop chaining so execution resumes at the handler.
+            if ($runtime->memory()->offset() !== $exitIp) {
+                return $status;
+            }
 
             $block = $nextBlock;
             $chainDepth++;

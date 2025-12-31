@@ -183,9 +183,11 @@ class PicState
 
     public function pendingVector(): ?int
     {
-        while (!empty($this->pendingQueue)) {
+        $count = count($this->pendingQueue);
+        for ($i = 0; $i < $count; $i++) {
             $irq = array_shift($this->pendingQueue);
             if ($this->irqMasked($irq)) {
+                $this->pendingQueue[] = $irq;
                 continue;
             }
             if ($irq < 8) {

@@ -7,11 +7,14 @@ namespace PHPMachineEmulator\LogicBoard\Debug;
 final class BootConfigPatchConfig
 {
     public function __construct(
-        public readonly bool $enabled = true,
-        public readonly bool $patchGrubPlatform = true,
-        public readonly bool $disableLoadfontUnicode = true,
-        public readonly bool $disableDosCdromDrivers = true,
-        public readonly ?int $timeoutOverride = 1,
+        public readonly bool $enabled = false,
+        public readonly bool $patchGrubPlatform = false,
+        public readonly bool $disableLoadfontUnicode = false,
+        public readonly bool $forceGrubTextMode = false,
+        public readonly bool $disableDosCdromDrivers = false,
+        public readonly ?int $timeoutOverride = null,
+        public readonly bool $disableSyslinuxUi = false,
+        public readonly ?int $syslinuxTimeoutOverride = null,
     ) {
     }
 }

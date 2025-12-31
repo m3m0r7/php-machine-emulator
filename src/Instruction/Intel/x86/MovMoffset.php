@@ -45,13 +45,8 @@ class MovMoffset implements InstructionInterface
             $runtime->memoryAccessor()->writeBySize(RegisterType::EAX, $value, $opSize);
             break;
         case 0xA2: // moffs8 <- AL
-            $phys = $this->translateLinearWithMmio($runtime, $linearOffset);
-            $runtime->memoryAccessor()->allocate($phys, safe: false);
-            $runtime->memoryAccessor()->writeBySize(
-                $phys,
-                $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit(),
-                8,
-            );
+            $value8 = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
+            $this->writeMemory8($runtime, $linearOffset, $value8);
             break;
         case 0xA3: // moffs16 <- AX
             $valueToWrite = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize($opSize);

@@ -7,6 +7,7 @@ namespace PHPMachineEmulator\Instruction\Traits;
 use PHPMachineEmulator\Display\Pixel\Color;
 use PHPMachineEmulator\Display\Writer\TerminalScreenWriter;
 use PHPMachineEmulator\Exception\FaultException;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Util\UInt64;
 
@@ -122,10 +123,50 @@ trait MemoryAccessTrait
     }
 
     /**
+     * Best-effort debug hook for unexpected writes into code segments.
+     */
+    protected function logSuspiciousWrite(RuntimeInterface $runtime, int $address, int $width): void
+    {
+        $logger = $runtime->option()->logger();
+        if (!$logger->isHandling(\Monolog\Level::Debug)) {
+            return;
+        }
+
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+        $mask = $this->linearMask($runtime);
+        $base = (($cs << 4) & $mask);
+        $offset = ($address - $base) & 0xFFFFFFFF;
+        if ($address < 0x12E00 || $address > 0x13000) {
+            return;
+        }
+
+        $executor = $runtime->architectureProvider()->instructionExecutor();
+        $lastOpcodes = $executor->lastOpcodes();
+        $lastOpcodeStr = $lastOpcodes === null
+            ? 'n/a'
+            : implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $lastOpcodes));
+        $lastInstruction = $executor->lastInstruction();
+        $lastInstructionName = $lastInstruction === null
+            ? 'n/a'
+            : (preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($lastInstruction)) ?? 'n/a');
+        $logger->debug(sprintf(
+            'WRITE into CS region: addr=0x%08X cs=0x%04X off=0x%04X width=%d ip=0x%08X lastIns=%s lastOp=%s',
+            $address & 0xFFFFFFFF,
+            $cs,
+            $offset & 0xFFFF,
+            $width,
+            $runtime->memory()->offset() & 0xFFFFFFFF,
+            $lastInstructionName,
+            $lastOpcodeStr
+        ));
+    }
+
+    /**
      * Write 8-bit value to linear address.
      */
     protected function writeMemory8(RuntimeInterface $runtime, int $address, int $value): void
     {
+        $this->logSuspiciousWrite($runtime, $address, 8);
         $ma = $runtime->memoryAccessor();
         $mask = $this->linearMask($runtime);
         $isUser = $runtime->context()->cpu()->cpl() === 3;
@@ -157,6 +198,7 @@ trait MemoryAccessTrait
      */
     protected function writeMemory16(RuntimeInterface $runtime, int $address, int $value): void
     {
+        $this->logSuspiciousWrite($runtime, $address, 16);
         $ma = $runtime->memoryAccessor();
         $mask = $this->linearMask($runtime);
         $isUser = $runtime->context()->cpu()->cpl() === 3;
@@ -187,6 +229,7 @@ trait MemoryAccessTrait
      */
     protected function writeMemory32(RuntimeInterface $runtime, int $address, int $value): void
     {
+        $this->logSuspiciousWrite($runtime, $address, 32);
         $ma = $runtime->memoryAccessor();
         $mask = $this->linearMask($runtime);
         $isUser = $runtime->context()->cpu()->cpl() === 3;

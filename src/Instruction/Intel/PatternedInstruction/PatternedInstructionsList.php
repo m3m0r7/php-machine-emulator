@@ -50,6 +50,7 @@ class PatternedInstructionsList
      * Threshold for pattern detection (hits before we check for patterns)
      */
     private const DETECTION_THRESHOLD = 10;
+    private const PATTERN_READ_BYTES = 96;
 
     public function __construct(?PatternDebugConfig $debugConfig = null)
     {
@@ -64,12 +65,9 @@ class PatternedInstructionsList
     private function registerDefaultPatterns(): void
     {
         // The GRUB/LZMA range-decoder pattern is high-impact but correctness-sensitive.
-        // Keep it opt-in until it is validated against real boot flows.
+        // Keep it behind a config flag to allow quick disable if regressions appear.
         if ($this->debugConfig->enableLzmaPattern) {
             $this->register(new LzmaRangeDecodeBitPattern($this->debugConfig->traceHotPatterns));
-            $this->register(new LzmaBitTreeDecodeBytePattern($this->debugConfig->traceHotPatterns));
-            $this->register(new LzmaBitTreeDecodePattern($this->debugConfig->traceHotPatterns));
-            $this->register(new LzmaLiteralDecodeMatchPattern($this->debugConfig->traceHotPatterns));
         }
         $this->register(new UdivmoddiPattern($this->debugConfig->traceHotPatterns));
         $this->register(new MemsetDwordLoopPattern($this->debugConfig->traceHotPatterns));
@@ -157,7 +155,7 @@ class PatternedInstructionsList
         // Read instruction bytes
         $memory->setOffset($ip);
         $bytes = [];
-        for ($i = 0; $i < 64 && !$memory->isEOF(); $i++) {
+        for ($i = 0; $i < self::PATTERN_READ_BYTES && !$memory->isEOF(); $i++) {
             $bytes[] = $memory->byte();
         }
         $memory->setOffset($savedOffset);

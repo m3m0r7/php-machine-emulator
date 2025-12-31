@@ -687,13 +687,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
     public function write16Bit(int|RegisterType $registerType, int|null $value): self
     {
-        $address = $this->asAddress($registerType);
-        $this->maybeLogWatchedAccess('WRITE', 'bySize', $address, 16, $value ?? 0);
-        $this->maybeLogMsDosBootWrite('bySize', $address, 16, $value ?? 0);
-        $previousValue = $this->ffi->memory_accessor_fetch($this->handle, $address);
-        $this->ffi->memory_accessor_write_16bit($this->handle, $address, $value ?? 0);
-        $this->postProcessWhenWrote($address, $previousValue, $value);
-        return $this;
+        return $this->writeBySize($registerType, $value, 16);
     }
 
     public function writeBySize(int|RegisterType $registerType, int|null $value, int $size = 64): self
@@ -707,6 +701,62 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         if (!$this->isRegisterAddress($address)) {
             $bytes = intdiv($size, 8);
             $this->invalidateInstructionCachesOnWrite($address, $bytes);
+        }
+
+        if ($registerType instanceof RegisterType) {
+            $cpu = $this->runtime->context()->cpu();
+            if (!$cpu->isProtectedMode()
+                && in_array($registerType, [
+                    RegisterType::ES,
+                    RegisterType::CS,
+                    RegisterType::SS,
+                    RegisterType::DS,
+                    RegisterType::FS,
+                    RegisterType::GS,
+                ], true)
+            ) {
+                $selector = $value ?? 0;
+                $cpu->cacheSegmentDescriptor($registerType, [
+                    'base' => ((($selector & 0xFFFF) << 4) & 0xFFFFF),
+                    'limit' => 0xFFFF,
+                    'present' => true,
+                    'type' => 0,
+                    'system' => false,
+                    'executable' => false,
+                    'dpl' => 0,
+                    'default' => 16,
+                ]);
+            }
+        }
+
+        if ($registerType instanceof RegisterType && $registerType === RegisterType::SS) {
+            $prev = $previousValue & 0xFFFF;
+            $next = ($value ?? 0) & 0xFFFF;
+            if ($prev !== $next) {
+                $logger = $this->runtime->option()->logger();
+                if ($logger->isHandling(\Monolog\Level::Debug)) {
+                    $ip = $this->runtime->memory()->offset() & 0xFFFFFFFF;
+                    $cs = $this->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                    $executor = $this->runtime->architectureProvider()->instructionExecutor();
+                    $lastOpcodes = $executor->lastOpcodes();
+                    $lastOpcodeStr = $lastOpcodes === null
+                        ? 'n/a'
+                        : implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $lastOpcodes));
+                    $lastInstruction = $executor->lastInstruction();
+                    $lastInstructionName = $lastInstruction === null
+                        ? 'n/a'
+                        : (preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($lastInstruction)) ?? 'n/a');
+                    $logger->debug(sprintf(
+                        'SS WRITE: prev=0x%04X next=0x%04X ip=0x%08X cs=0x%04X lastIns=%s lastOp=%s',
+                        $prev,
+                        $next,
+                        $ip,
+                        $cs,
+                        $lastInstructionName,
+                        $lastOpcodeStr,
+                    ));
+                }
+            }
         }
 
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
@@ -1189,8 +1239,13 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
         $cached = $this->runtime->context()->cpu()->getCachedSegmentDescriptor(RegisterType::SS);
         if ($cached !== null) {
-            $effSp = $sp & $mask;
             $limit = $cached['limit'] ?? $mask;
+            if ($limit <= 0xFFFF) {
+                $cached = null;
+            }
+        }
+        if ($cached !== null) {
+            $effSp = $sp & $mask;
             if ($effSp > $limit) {
                 $effSp = $sp & 0xFFFF;
             }

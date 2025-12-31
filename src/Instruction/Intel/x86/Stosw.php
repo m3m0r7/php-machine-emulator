@@ -43,10 +43,12 @@ class Stosw implements InstructionInterface
                 default => $this->writeMemory16($runtime, $linear, $value),
             };
         } else {
-            $address = $this->translateLinearWithMmio($runtime, $linear, true);
-
-            $runtime->memoryAccessor()->allocate($address, safe: false);
-            $runtime->memoryAccessor()->writeBySize($address, $value, $opSize);
+            match ($opSize) {
+                16 => $this->writeMemory16($runtime, $linear, $value),
+                32 => $this->writeMemory32($runtime, $linear, $value),
+                64 => $this->writeMemory64($runtime, $linear, $value),
+                default => $this->writeMemory16($runtime, $linear, $value),
+            };
         }
 
         $step = $this->stepForElement($runtime, $width);

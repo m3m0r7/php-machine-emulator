@@ -48,6 +48,10 @@ class PopSeg implements InstructionInterface
         }
 
         $runtime->memoryAccessor()->write16Bit($seg, $value);
+        if ($seg === RegisterType::SS) {
+            // POP SS blocks interrupts for the following instruction.
+            $runtime->context()->cpu()->blockInterruptDelivery(1);
+        }
 
         // In real mode, loading a segment resets its hidden cache to real-mode values.
         if (!$cpu->isProtectedMode()) {

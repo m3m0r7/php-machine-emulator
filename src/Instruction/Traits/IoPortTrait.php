@@ -99,7 +99,7 @@ trait IoPortTrait
     {
         $runtime->option()->logger()->debug(sprintf('IN from port 0x%04X (%d-bit)', $port, $width));
 
-        $ata = $this->ioPortAta ??= new Ata($runtime);
+        $ata = $this->ioPortAta ??= Ata::forRuntime($runtime);
         $ctx = $runtime->context()->cpu();
         $kbd = $ctx->keyboardController();
         $cmos = $ctx->cmos();
@@ -134,10 +134,19 @@ trait IoPortTrait
 
         // ATA/IDE
         if (AtaPort::isDataPort($port)) {
-            return $ata->readDataWord();
+            if ($width === 32) {
+                $lo = $ata->readDataWord($port);
+                $hi = $ata->readDataWord($port);
+                return (($hi & 0xFFFF) << 16) | ($lo & 0xFFFF);
+            }
+            if ($width === 16) {
+                return $ata->readDataWord($port);
+            }
+            // Match QEMU: 8-bit reads consume a word and return the low byte.
+            return $ata->readDataWord($port) & 0xFF;
         }
         if (AtaPort::isStatusPort($port)) {
-            return $ata->readStatus();
+            return $ata->readStatus($port);
         }
         if (AtaPort::isRegisterPort($port)) {
             return $ata->readRegister($port);
@@ -241,7 +250,7 @@ trait IoPortTrait
         $ctx = $runtime->context()->cpu();
         $picState = $ctx->picState();
         $pit = $ctx->pit();
-        $ata = $this->ioPortAta ??= new Ata($runtime);
+        $ata = $this->ioPortAta ??= Ata::forRuntime($runtime);
         $kbd = $ctx->keyboardController();
         $cmos = $ctx->cmos();
         if ($this->ioPortPciConfigSpace === null) {
@@ -292,7 +301,15 @@ trait IoPortTrait
 
         // ATA/IDE
         if (AtaPort::isDataPort($port)) {
-            $ata->writeDataWord($value);
+            if ($width === 32) {
+                $ata->writeDataWord($port, $value & 0xFFFF);
+                $ata->writeDataWord($port, ($value >> 16) & 0xFFFF);
+                return;
+            }
+            if ($width === 16) {
+                $ata->writeDataWord($port, $value);
+                return;
+            }
             return;
         }
         if (AtaPort::isWritableRegisterPort($port)) {

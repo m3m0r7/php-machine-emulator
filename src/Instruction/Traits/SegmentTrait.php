@@ -76,14 +76,18 @@ trait SegmentTrait
         // This models Unreal Mode where segment caches retain 32-bit bases/limits after PE is cleared.
         $cachedDescriptor = $runtime->context()->cpu()->getCachedSegmentDescriptor($segment);
         if ($cachedDescriptor !== null) {
+            $cachedLimit = $cachedDescriptor['limit'] ?? $offsetMask;
+            $realBase = ($this->segmentBase($runtime, $segment) & $linearMask);
+            $cachedBase = $cachedDescriptor['base'] ?? $realBase;
+            if ($cachedLimit <= 0xFFFF || (($cachedBase & 0xF) !== 0)) {
+                return ($realBase + ($offset & $offsetMask)) & $linearMask;
+            }
             $effOffset = $offset & $offsetMask;
-            $limit = $cachedDescriptor['limit'] ?? $offsetMask;
-            if ($effOffset > $limit) {
+            if ($effOffset > $cachedLimit) {
                 // Clamp to 16-bit wraparound if offset exceeds the cached limit
                 $effOffset = $offset & 0xFFFF;
             }
-            $base = $cachedDescriptor['base'] ?? (($selector << 4) & 0xFFFFF);
-            return ($base + $effOffset) & $linearMask;
+            return (($cachedBase & $linearMask) + $effOffset) & $linearMask;
         }
 
         return ($this->segmentBase($runtime, $segment) + ($offset & $offsetMask)) & $linearMask;

@@ -64,9 +64,8 @@ class MovRmToSeg implements InstructionInterface
         }
 
         if ($seg === RegisterType::SS) {
-            $esp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize(
-                $runtime->context()->cpu()->operandSize()
-            );
+            // MOV SS inhibits interrupts until after the next instruction.
+            $runtime->context()->cpu()->blockInterruptDelivery(1);
         }
 
         return ExecutionStatus::SUCCESS;
