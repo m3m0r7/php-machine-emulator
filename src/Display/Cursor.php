@@ -10,7 +10,8 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 class Cursor implements CursorInterface
 {
     public function __construct(protected ScreenWriterInterface $screenWriter)
-    {}
+    {
+    }
 
     public function reset(): void
     {

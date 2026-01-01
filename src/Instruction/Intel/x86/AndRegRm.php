@@ -1,13 +1,12 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class AndRegRm implements InstructionInterface
@@ -23,8 +22,8 @@ class AndRegRm implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x20, 0x22], true);
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
@@ -33,16 +32,16 @@ class AndRegRm implements InstructionInterface
         // Cache effective address to avoid reading displacement twice
         $rmAddress = null;
         if ($destIsRm && $modRegRM->mode() !== 0b11) {
-            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
+            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $memory, $modRegRM), true);
         }
 
         $src = $isByte
             ? ($destIsRm
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
-                : $this->readRm8($runtime, $reader, $modRegRM))
+                : $this->readRm8($runtime, $memory, $modRegRM))
             : ($destIsRm
                 ? $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize)
-                : $this->readRm($runtime, $reader, $modRegRM, $opSize));
+                : $this->readRm($runtime, $memory, $modRegRM, $opSize));
 
         if ($isByte) {
             $dest = $destIsRm
@@ -80,7 +79,11 @@ class AndRegRm implements InstructionInterface
             }
         }
 
-        $runtime->memoryAccessor()->setCarryFlag(false)->setOverflowFlag(false)->updateFlags($result, $isByte ? 8 : $opSize);
+        $runtime->memoryAccessor()
+            ->updateFlags($result, $isByte ? 8 : $opSize)
+            ->setCarryFlag(false)
+            ->setOverflowFlag(false)
+            ->setAuxiliaryCarryFlag(false);
 
         return ExecutionStatus::SUCCESS;
     }

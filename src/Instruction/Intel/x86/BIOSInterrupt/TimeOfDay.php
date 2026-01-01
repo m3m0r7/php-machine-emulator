@@ -133,7 +133,12 @@ class TimeOfDay implements InterruptInterface
 
         $runtime->option()->logger()->debug(sprintf(
             'INT 0x1A AH=0x02: Read RTC Time %02d:%02d:%02d (BCD: CH=0x%02X CL=0x%02X DH=0x%02X)',
-            $hours, $minutes, $seconds, $hoursBcd, $minutesBcd, $secondsBcd
+            $hours,
+            $minutes,
+            $seconds,
+            $hoursBcd,
+            $minutesBcd,
+            $secondsBcd
         ));
     }
 
@@ -168,7 +173,9 @@ class TimeOfDay implements InterruptInterface
 
         $runtime->option()->logger()->debug(sprintf(
             'INT 0x1A AH=0x03: Set RTC Time %02d:%02d:%02d',
-            $hours, $minutes, $seconds
+            $hours,
+            $minutes,
+            $seconds
         ));
     }
 
@@ -209,7 +216,9 @@ class TimeOfDay implements InterruptInterface
 
         $runtime->option()->logger()->debug(sprintf(
             'INT 0x1A AH=0x04: Read RTC Date %04d-%02d-%02d',
-            $year, $month, $day
+            $year,
+            $month,
+            $day
         ));
     }
 
@@ -248,7 +257,9 @@ class TimeOfDay implements InterruptInterface
 
         $runtime->option()->logger()->debug(sprintf(
             'INT 0x1A AH=0x05: Set RTC Date %04d-%02d-%02d',
-            $year, $month, $day
+            $year,
+            $month,
+            $day
         ));
     }
 

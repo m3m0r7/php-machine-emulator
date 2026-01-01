@@ -1,13 +1,12 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class CmpRegRm implements InstructionInterface
@@ -23,8 +22,8 @@ class CmpRegRm implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x38, 0x3A], true);
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
@@ -33,17 +32,18 @@ class CmpRegRm implements InstructionInterface
         $src = $isByte
             ? ($destIsRm
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
-                : $this->readRm8($runtime, $reader, $modRegRM))
+                : $this->readRm8($runtime, $memory, $modRegRM))
             : ($destIsRm
                 ? $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize)
-                : $this->readRm($runtime, $reader, $modRegRM, $opSize));
+                : $this->readRm($runtime, $memory, $modRegRM, $opSize));
 
         if ($isByte) {
             $dest = $destIsRm
-                ? $this->readRm8($runtime, $reader, $modRegRM)
+                ? $this->readRm8($runtime, $memory, $modRegRM)
                 : $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode());
             $calc = $dest - $src;
             $maskedResult = $calc & 0xFF;
+            $af = (($dest & 0x0F) < ($src & 0x0F));
             // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
             $signA = ($dest >> 7) & 1;
             $signB = ($src >> 7) & 1;
@@ -52,11 +52,11 @@ class CmpRegRm implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
-            $runtime->option()->logger()->debug(sprintf('CMP r/m8, r8: dest=0x%02X src=0x%02X ZF=%d', $dest, $src, $dest === $src ? 1 : 0));
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         } else {
             $dest = $destIsRm
-                ? $this->readRm($runtime, $reader, $modRegRM, $opSize)
+                ? $this->readRm($runtime, $memory, $modRegRM, $opSize)
                 : $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize);
 
             // For unsigned comparison, dest < src means borrow (CF=1)
@@ -67,6 +67,7 @@ class CmpRegRm implements InstructionInterface
             $calc = $destU - $srcU;
             $maskedResult = $calc & $mask;
             $cf = $calc < 0;
+            $af = (($destU & 0x0F) < ($srcU & 0x0F));
 
             // OF for CMP (same as SUB): set if signs of operands differ and result sign equals subtrahend sign
             $signA = ($destU >> $signBit) & 1;
@@ -76,7 +77,8 @@ class CmpRegRm implements InstructionInterface
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, $opSize)
                 ->setCarryFlag($cf)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         }
 
         return ExecutionStatus::SUCCESS;

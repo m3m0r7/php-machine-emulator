@@ -1,5 +1,7 @@
 <?php
+
 declare(strict_types=1);
+
 namespace PHPMachineEmulator\Instruction\Intel\ServiceFunction;
 
 enum VideoServiceFunction: int
@@ -21,4 +23,5 @@ enum VideoServiceFunction: int
     case TELETYPE_OUTPUT = 0x0E;
     case GET_CURRENT_VIDEO_MODE = 0x0F;
     case PALETTE_ATTRIBUTE_CONTROL = 0x10;
+    case WRITE_STRING = 0x13;
 }

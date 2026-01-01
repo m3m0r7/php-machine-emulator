@@ -29,6 +29,8 @@ use PHPMachineEmulator\Runtime\Ticker\PitTicker;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
+use PHPMachineEmulator\Stream\PagedMemoryStream;
+use PHPMachineEmulator\Stream\RustFFIContext;
 use PHPMachineEmulator\Stream\RustMemoryStream;
 use PHPMachineEmulator\Video\VideoInterface;
 
@@ -44,6 +46,18 @@ class Runtime implements RuntimeInterface
     protected array $shutdown = [];
     protected MemoryStreamInterface $memory;
 
+    /**
+     * Instruction counter for tick throttling.
+     * Ticks are processed every TICK_INTERVAL instructions for performance.
+     */
+    private int $instructionCounter = 0;
+
+    /**
+     * Number of instructions between tick processing.
+     * Higher values = better performance but less responsive to interrupts/timers.
+     */
+    private const TICK_INTERVAL = 4096;
+
     public function __construct(
         protected MachineInterface $machine,
         protected RuntimeOptionInterface $runtimeOption,
@@ -58,13 +72,16 @@ class Runtime implements RuntimeInterface
         $this->addressMap = new AddressMap($this);
 
         // Convert boot stream to memory stream (must be before RustMemoryAccessor)
-        $this->memory = $this->createMemoryStream();
+        $ffiContext = new RustFFIContext();
+        $this->memory = $this->createMemoryStream($ffiContext);
 
         $this->memoryAccessor = new RustMemoryAccessor(
             $this,
             $this->architectureProvider
                 ->observers(),
+            $ffiContext,
         );
+        $this->memory = new PagedMemoryStream($this->memory, $this);
 
         // Initialize DeviceManager with keyboard and video contexts
         $deviceManager = new DeviceManager();
@@ -110,7 +127,7 @@ class Runtime implements RuntimeInterface
     /**
      * Create memory stream with boot data copied in.
      */
-    private function createMemoryStream(): MemoryStreamInterface
+    private function createMemoryStream(RustFFIContext $ffiContext): MemoryStreamInterface
     {
         $memoryContext = $this->logicBoard()->memory();
         $bootStream = $this->logicBoard()->media()->primary()->stream();
@@ -120,10 +137,12 @@ class Runtime implements RuntimeInterface
             $memoryContext->initialMemory(),
             $memoryContext->maxMemory(),
             $memoryContext->swapSize(),
+            $ffiContext,
         );
 
         $loadAddress = $bootStream->loadAddress();
-        $bootSize = $bootStream->fileSize();
+        // Only load the bootstrap portion, not the entire boot image/disk.
+        $bootSize = $bootStream->bootLoadSize();
 
         $this->option()->logger()->debug(
             sprintf(
@@ -161,7 +180,12 @@ class Runtime implements RuntimeInterface
         $iterationContext = $cpu->iteration();
 
         while (!$this->memory->isEOF()) {
-            $this->tickTimers();
+            // Throttled tick processing for performance
+            // Only process ticks every TICK_INTERVAL instructions
+            if (++$this->instructionCounter >= self::TICK_INTERVAL) {
+                $this->instructionCounter = 0;
+                $this->tickTimers();
+            }
 
             // Execute instruction with iteration context
             // The iterate() method will handle REP loops internally if a handler is set

@@ -17,12 +17,12 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
  * - Pre-decoded instructions for fast execution
  * - Block chaining for direct jumps between blocks
  */
-class TranslationBlock
+class TranslationBlock implements TranslationBlockInterface
 {
     /**
-     * Chained blocks: exitIP => TranslationBlock
+     * Chained blocks: exitIP => TranslationBlockInterface
      * When this block exits to a known IP, we can jump directly to the next block
-     * @var array<int, TranslationBlock>
+     * @var array<int, TranslationBlockInterface>
      */
     private array $chainedBlocks = [];
 
@@ -33,16 +33,26 @@ class TranslationBlock
      * @param int $totalLength Total byte length of this block
      */
     public function __construct(
-        public readonly int $startIp,
-        private array $instructions,
-        public readonly int $totalLength,
+        private readonly int $startIp,
+        private readonly array $instructions,
+        private readonly int $totalLength,
     ) {
+    }
+
+    public function startIp(): int
+    {
+        return $this->startIp;
+    }
+
+    public function totalLength(): int
+    {
+        return $this->totalLength;
     }
 
     /**
      * Chain this block to another block at the given exit IP.
      */
-    public function chainTo(int $exitIp, TranslationBlock $nextBlock): void
+    public function chainTo(int $exitIp, TranslationBlockInterface $nextBlock): void
     {
         $this->chainedBlocks[$exitIp] = $nextBlock;
     }
@@ -50,7 +60,7 @@ class TranslationBlock
     /**
      * Get chained block for the given exit IP, if any.
      */
-    public function getChainedBlock(int $exitIp): ?TranslationBlock
+    public function getChainedBlock(int $exitIp): ?TranslationBlockInterface
     {
         return $this->chainedBlocks[$exitIp] ?? null;
     }
@@ -68,8 +78,7 @@ class TranslationBlock
         RuntimeInterface $runtime,
         ?callable $beforeInstruction = null,
         ?callable $instructionRunner = null,
-    ): array
-    {
+    ): array {
         $memory = $runtime->memory();
         $currentIp = $this->startIp;
 
@@ -86,8 +95,14 @@ class TranslationBlock
                 ? $instructionRunner($instruction, $opcodes)
                 : $instruction->process($runtime, $opcodes);
 
-            // CRITICAL: Clear transient overrides (like operand size prefix) after each instruction
-            // Without this, prefixes from one instruction bleed into subsequent instructions in the block
+            // Prefix chaining: for instructions that return CONTINUE (e.g. REX/REP),
+            // transient overrides must remain active for the next instruction.
+            if ($status === ExecutionStatus::CONTINUE) {
+                return [$status, $memory->offset()];
+            }
+
+            // CRITICAL: Clear transient overrides (like operand size prefix) after each instruction.
+            // Without this, prefixes from one instruction bleed into subsequent instructions in the block.
             $runtime->context()->cpu()->clearTransientOverrides();
 
             // If instruction changed control flow (jump taken), stop block execution
@@ -107,6 +122,14 @@ class TranslationBlock
 
         // Fell through to end of block
         return [ExecutionStatus::SUCCESS, $currentIp];
+    }
+
+    /**
+     * Get the number of instructions in this block.
+     */
+    public function instructions(): array
+    {
+        return $this->instructions;
     }
 
     /**

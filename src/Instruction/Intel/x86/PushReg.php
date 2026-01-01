@@ -1,13 +1,14 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -22,18 +23,24 @@ class PushReg implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $hasOperandSizeOverridePrefix = in_array(self::PREFIX_OPERAND_SIZE, $opcodes, true);
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $size = $runtime->context()->cpu()->operandSize();
-        $regType = $this->registersAndOPCodes()[$opcode];
-        $fetchResult = $runtime
-            ->memoryAccessor()
-            ->fetch($regType)
-            ->asBytesBySize($size);
+        $cpu = $runtime->context()->cpu();
 
-        $runtime
-            ->memoryAccessor()
-            ->push(RegisterType::ESP, $fetchResult, $size);
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $pushSize = $hasOperandSizeOverridePrefix ? 16 : 64;
+            $regCode = $opcode & 0x7;
+            $regType = Register::findGprByCode($regCode, $cpu->rexB());
+            $value = $runtime->memoryAccessor()->fetch($regType)->asBytesBySize($pushSize);
+            $runtime->memoryAccessor()->push(RegisterType::ESP, $value, $pushSize);
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $size = $cpu->operandSize();
+        $regType = $this->registersAndOPCodes()[$opcode];
+        $fetchResult = $runtime->memoryAccessor()->fetch($regType)->asBytesBySize($size);
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $fetchResult, $size);
 
         return ExecutionStatus::SUCCESS;
     }

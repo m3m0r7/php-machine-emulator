@@ -1,14 +1,14 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -24,14 +24,14 @@ class Lea implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             throw new ExecutionException('LEA does not support register-direct addressing');
         }
 
-        [$address] = $this->effectiveAddressInfo($runtime, $reader, $modRegRM);
+        [$address] = $this->effectiveAddressInfo($runtime, $memory, $modRegRM);
 
         $size = $runtime->context()->cpu()->operandSize();
         $cpu = $runtime->context()->cpu();
@@ -42,15 +42,21 @@ class Lea implements InstructionInterface
         if (!$cpu->isProtectedMode() && !$cpu->isA20Enabled()) {
             $mask = 0xFFFFF; // 20-bit mask for real mode
         } else {
-            $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $mask = match ($size) {
+                64 => -1, // PHP int is signed; -1 acts as a 64-bit all-ones mask
+                32 => 0xFFFFFFFF,
+                default => 0xFFFF,
+            };
         }
 
         $regCode = $modRegRM->registerOrOPCode();
+        $rexR = $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexR();
+        $dest = Register::findGprByCode($regCode, $rexR);
 
         $runtime
             ->memoryAccessor()
             ->writeBySize(
-                $regCode,
+                $dest,
                 $address & $mask,
                 $size,
             );

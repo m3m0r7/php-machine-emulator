@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Stream;
 
+use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Instruction\Stream\SIBInterface;
+
 /**
  * Interface for memory streams with size and capacity management.
  */
@@ -35,4 +38,24 @@ interface MemoryStreamInterface extends StreamIsProxyableInterface, StreamReader
      * Get the swap size.
      */
     public function swapSize(): int;
+
+    /**
+     * Read a byte from stream and parse as SIB.
+     */
+    public function byteAsSIB(): SIBInterface;
+
+    /**
+     * Read a byte from stream and parse as ModR/M.
+     */
+    public function byteAsModRegRM(): ModRegRMInterface;
+
+    /**
+     * Parse an already-read byte as ModR/M.
+     */
+    public function modRegRM(int $byte): ModRegRMInterface;
+
+    /**
+     * Copy raw bytes from a string into memory at the given offset.
+     */
+    public function copyFromString(string $data, int $destOffset): void;
 }

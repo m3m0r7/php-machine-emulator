@@ -11,6 +11,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Stosb;
 use PHPMachineEmulator\Instruction\Intel\x86\Stosw;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsw;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Nopl;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsb;
 use PHPMachineEmulator\Instruction\Intel\x86\Lodsw;
 use PHPMachineEmulator\Instruction\Intel\x86\Scasb;
@@ -147,7 +148,7 @@ class RepPrefixTest extends InstructionTestCase
     // Basic REP STOSB Tests
     // ========================================
 
-    public function testRepStosb_ZeroCount(): void
+    public function testRepStosbZeroCount(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 0);
@@ -171,7 +172,118 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0x2000, $this->getRegister(RegisterType::EDI));
     }
 
-    public function testRepStosb_SingleIteration(): void
+    public function testRepMovsbZeroCountConsumesStringInstructionBytes(): void
+    {
+        $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 0);
+        $this->setRegister(RegisterType::ESI, 0x1000);
+        $this->setRegister(RegisterType::EDI, 0x2000);
+
+        $this->writeMemory(0x1000, 0x42, 8);
+        $this->writeMemory(0x2000, 0xFF, 8);
+
+        // Program: REP MOVSB; NOP
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xF3) . chr(0xA4) . chr(0x90));
+        $this->memoryStream->setOffset(0);
+
+        $executor = new class ($this->repPrefix, $this->movsb) implements InstructionExecutorInterface {
+            private ?InstructionInterface $lastInstruction = null;
+            private ?array $lastOpcodes = null;
+            private int $lastInstructionPointer = 0;
+
+            public function __construct(
+                private readonly RepPrefix $repPrefix,
+                private readonly Movsb $movsb,
+            ) {
+            }
+
+            public function execute(RuntimeInterface $runtime): ExecutionStatus
+            {
+                $this->lastInstructionPointer = $runtime->memory()->offset();
+                $opcode = $runtime->memory()->byte() & 0xFF;
+
+                $instruction = match ($opcode) {
+                    0xF3, 0xF2 => $this->repPrefix,
+                    0xA4 => $this->movsb,
+                    0x90 => null, // NOP
+                    default => throw new \RuntimeException(sprintf('Unexpected opcode 0x%02X', $opcode)),
+                };
+
+                $this->lastInstruction = $instruction;
+                $this->lastOpcodes = [$opcode];
+
+                if ($instruction === null) {
+                    return ExecutionStatus::SUCCESS;
+                }
+
+                return $instruction->process($runtime, [$opcode]);
+            }
+
+            public function lastInstruction(): ?InstructionInterface
+            {
+                return $this->lastInstruction;
+            }
+
+            public function lastOpcodes(): ?array
+            {
+                return $this->lastOpcodes;
+            }
+
+            public function lastInstructionPointer(): int
+            {
+                return $this->lastInstructionPointer;
+            }
+
+            public function invalidateCaches(): void
+            {
+            }
+
+            public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
+            {
+            }
+
+            public function instructionCount(): int
+            {
+                return 0;
+            }
+
+            public function getIpSampleReport(int $top = 20): array
+            {
+                return [
+                    'every' => 0,
+                    'instructions' => 0,
+                    'samples' => 0,
+                    'unique' => 0,
+                    'top' => [],
+                ];
+            }
+        };
+
+        $iterationContext = $this->cpuContext->iteration();
+        $result = $iterationContext->iterate($this->runtime, $executor);
+        while ($result === ExecutionStatus::CONTINUE) {
+            $result = $iterationContext->iterate($this->runtime, $executor);
+        }
+        $iterationContext->clear();
+        $this->cpuContext->clearTransientOverrides();
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        // Must point at the next instruction (NOP) after consuming "A4" with count=0.
+        $this->assertSame(2, $this->memoryStream->offset());
+
+        // REP MOVSB must not execute when ECX=0.
+        $this->assertSame(0xFF, $this->readMemory(0x2000, 8));
+        $this->assertSame(0x1000, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x2000, $this->getRegister(RegisterType::EDI));
+
+        // Next instruction (NOP) executes normally.
+        $result2 = $iterationContext->iterate($this->runtime, $executor);
+        $this->assertSame(ExecutionStatus::SUCCESS, $result2);
+        $this->assertSame(3, $this->memoryStream->offset());
+    }
+
+    public function testRepStosbSingleIteration(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 1);
@@ -194,7 +306,7 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0, $this->getRegister(RegisterType::ECX));
     }
 
-    public function testRepStosb_MultipleIterations(): void
+    public function testRepStosbMultipleIterations(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 4);
@@ -229,7 +341,7 @@ class RepPrefixTest extends InstructionTestCase
     // REP + Operand Size Prefix (0x66) Tests
     // ========================================
 
-    public function testRepStosd_With66Prefix_16bitDefault(): void
+    public function testRepStosdWith66Prefix16bitDefault(): void
     {
         // In 16-bit mode, 0x66 prefix toggles to 32-bit operand
         $this->setRealMode16();
@@ -258,7 +370,7 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0, $this->getRegister(RegisterType::ECX));
     }
 
-    public function testRepStosd_With66Prefix_ZeroFill(): void
+    public function testRepStosdWith66PrefixZeroFill(): void
     {
         // Critical test: REP STOSD with 0x66 prefix should zero memory
         // This was the original bug - 0x66 was being treated as the instruction opcode
@@ -291,7 +403,7 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0, $this->getRegister(RegisterType::ECX));
     }
 
-    public function testRepStosw_Without66Prefix_16bitDefault(): void
+    public function testRepStoswWithout66Prefix16bitDefault(): void
     {
         // In 16-bit mode without prefix, STOSW stores 16-bit values
         $this->setRealMode16();
@@ -314,7 +426,7 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0x2006, $this->getRegister(RegisterType::EDI));
     }
 
-    public function testRepStosd_With66Prefix_32bitDefault(): void
+    public function testRepStosdWith66Prefix32bitDefault(): void
     {
         // In 32-bit mode, 0x66 prefix toggles to 16-bit operand
         $this->setProtectedMode32();
@@ -341,7 +453,7 @@ class RepPrefixTest extends InstructionTestCase
     // REP + Address Size Prefix (0x67) Tests
     // ========================================
 
-    public function testRepStosb_With67Prefix_UsesEcx(): void
+    public function testRepStosbWith67PrefixUsesEcx(): void
     {
         // 0x67 prefix toggles address size, affecting which counter register is used
         $this->setRealMode16();
@@ -368,7 +480,7 @@ class RepPrefixTest extends InstructionTestCase
     // REP + Both Prefixes (0x66 + 0x67) Tests
     // ========================================
 
-    public function testRepStosd_WithBothPrefixes_66_67(): void
+    public function testRepStosdWithBothPrefixes6667(): void
     {
         // Test: F3 66 67 AB (REP + operand size + address size + STOSD)
         $this->setRealMode16();
@@ -396,7 +508,7 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0, $this->getRegister(RegisterType::ECX));
     }
 
-    public function testRepStosd_WithBothPrefixes_67_66(): void
+    public function testRepStosdWithBothPrefixes6766(): void
     {
         // Test: F3 67 66 AB (REP + address size + operand size + STOSD)
         // Prefix order should not matter
@@ -422,7 +534,7 @@ class RepPrefixTest extends InstructionTestCase
     // REP MOVSB/MOVSD Tests
     // ========================================
 
-    public function testRepMovsb_CopyMemory(): void
+    public function testRepMovsbCopyMemory(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 4);
@@ -453,7 +565,73 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0, $this->getRegister(RegisterType::ECX));
     }
 
-    public function testRepMovsd_With66Prefix(): void
+    public function testRepMovsbOverlappingForwardCopyMatchesCpuSemantics(): void
+    {
+        $this->setRealMode16();
+        $this->setRegister(RegisterType::ECX, 5);
+        $this->setRegister(RegisterType::ESI, 0x1000);
+        $this->setRegister(RegisterType::EDI, 0x1001); // dst > src and overlaps
+        $this->setDirectionFlag(false);
+
+        // Initial bytes: 01 02 03 04 05 06
+        for ($i = 0; $i < 6; $i++) {
+            $this->writeMemory(0x1000 + $i, $i + 1, 8);
+        }
+
+        // Execute REP MOVSB (F3 A4)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xA4));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+
+        // Forward overlapping copy repeats the first byte (distance=1).
+        for ($i = 0; $i < 6; $i++) {
+            $this->assertSame(0x01, $this->readMemory(0x1000 + $i, 8), sprintf('Byte at 0x%04X', 0x1000 + $i));
+        }
+
+        $this->assertSame(0x1005, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x1006, $this->getRegister(RegisterType::EDI));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX));
+    }
+
+    public function testRepMovsbCopyMemoryWithPagingEnabled(): void
+    {
+        $this->setProtectedMode32();
+        $this->cpuContext->enableA20(true);
+        $this->cpuContext->setPagingEnabled(true);
+
+        $this->setRegister(RegisterType::ECX, 4);
+        $this->setRegister(RegisterType::ESI, 0x1000);
+        $this->setRegister(RegisterType::EDI, 0x2000);
+        $this->setDirectionFlag(false);
+
+        // Source data
+        $this->writeMemory(0x1000, 0x48, 8); // 'H'
+        $this->writeMemory(0x1001, 0x65, 8); // 'e'
+        $this->writeMemory(0x1002, 0x6C, 8); // 'l'
+        $this->writeMemory(0x1003, 0x6C, 8); // 'l'
+
+        // Execute REP MOVSB (F3 A4)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xA4));
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        $this->assertSame(0x48, $this->readMemory(0x2000, 8));
+        $this->assertSame(0x65, $this->readMemory(0x2001, 8));
+        $this->assertSame(0x6C, $this->readMemory(0x2002, 8));
+        $this->assertSame(0x6C, $this->readMemory(0x2003, 8));
+        $this->assertSame(0x1004, $this->getRegister(RegisterType::ESI));
+        $this->assertSame(0x2004, $this->getRegister(RegisterType::EDI));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX));
+    }
+
+    public function testRepMovsdWith66Prefix(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 2);
@@ -483,7 +661,7 @@ class RepPrefixTest extends InstructionTestCase
     // REPNE/REPNZ (0xF2) Tests - SCAS
     // ========================================
 
-    public function testRepneScasb_FindByte(): void
+    public function testRepneScasbFindByte(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 10);
@@ -513,7 +691,7 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertTrue($this->getZeroFlag()); // Found match
     }
 
-    public function testRepneScasb_NotFound(): void
+    public function testRepneScasbNotFound(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 4);
@@ -545,7 +723,7 @@ class RepPrefixTest extends InstructionTestCase
     // REPE/REPZ (0xF3) Tests - SCAS
     // ========================================
 
-    public function testRepeScasb_FindNonMatching(): void
+    public function testRepeScasbFindNonMatching(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 10);
@@ -577,7 +755,7 @@ class RepPrefixTest extends InstructionTestCase
     // Direction Flag Tests
     // ========================================
 
-    public function testRepStosb_BackwardDirection(): void
+    public function testRepStosbBackwardDirection(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 4);
@@ -602,7 +780,7 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0x1FFF, $this->getRegister(RegisterType::EDI));
     }
 
-    public function testRepStosd_With66Prefix_BackwardDirection(): void
+    public function testRepStosdWith66PrefixBackwardDirection(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 2);
@@ -629,7 +807,7 @@ class RepPrefixTest extends InstructionTestCase
     // Protected Mode Tests
     // ========================================
 
-    public function testRepStosd_ProtectedMode32(): void
+    public function testRepStosdProtectedMode32(): void
     {
         $this->setProtectedMode32();
         $this->setRegister(RegisterType::ECX, 3);
@@ -651,7 +829,7 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0x200C, $this->getRegister(RegisterType::EDI));
     }
 
-    public function testRepStosw_ProtectedMode32_With66Prefix(): void
+    public function testRepStoswProtectedMode32With66Prefix(): void
     {
         // In 32-bit protected mode, 0x66 toggles to 16-bit
         $this->setProtectedMode32();
@@ -679,7 +857,7 @@ class RepPrefixTest extends InstructionTestCase
     // Large Count Tests
     // ========================================
 
-    public function testRepStosd_LargeCount(): void
+    public function testRepStosdLargeCount(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 256); // 1KB when using STOSD
@@ -720,7 +898,7 @@ class RepPrefixTest extends InstructionTestCase
      * When source or destination crosses a 4KB page boundary,
      * bulk optimization should fall back to per-iteration execution.
      */
-    public function testRepMovsb_CrossingPageBoundary(): void
+    public function testRepMovsbCrossingPageBoundary(): void
     {
         $this->setRealMode16();
         // Start near page boundary (0x1000) and cross it
@@ -754,7 +932,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REP STOSB crossing page boundary.
      */
-    public function testRepStosb_CrossingPageBoundary(): void
+    public function testRepStosbCrossingPageBoundary(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 32);  // Fill 32 bytes
@@ -781,7 +959,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REP MOVSW crossing page boundary (word copy).
      */
-    public function testRepMovsw_CrossingPageBoundary(): void
+    public function testRepMovswCrossingPageBoundary(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 8);  // Copy 8 words = 16 bytes
@@ -813,7 +991,7 @@ class RepPrefixTest extends InstructionTestCase
      * Test REP MOVSB entirely within single page (no crossing).
      * This should use bulk optimization.
      */
-    public function testRepMovsb_WithinSinglePage(): void
+    public function testRepMovsbWithinSinglePage(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 100);  // Copy 100 bytes
@@ -844,7 +1022,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REP STOSB exactly at page boundary end.
      */
-    public function testRepStosb_ExactlyAtPageEnd(): void
+    public function testRepStosbExactlyAtPageEnd(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 256);  // Fill exactly 256 bytes
@@ -869,7 +1047,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test large REP MOVSB that crosses multiple page boundaries.
      */
-    public function testRepMovsb_CrossingMultiplePages(): void
+    public function testRepMovsbCrossingMultiplePages(): void
     {
         $this->setRealMode16();
         $count = 8192;  // 8KB = crosses 2 page boundaries
@@ -914,7 +1092,7 @@ class RepPrefixTest extends InstructionTestCase
      * For MOVSB, segment override affects source (DS:SI).
      * We use SS as override to make DS:SI and SS:SI point to different addresses.
      */
-    public function testRepMovsb_WithSegmentOverride_External(): void
+    public function testRepMovsbWithSegmentOverrideExternal(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 4);
@@ -958,7 +1136,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REP MOVSB with SS segment override - uses different linear addresses
      */
-    public function testRepMovsb_WithSSOverride_DifferentAddresses(): void
+    public function testRepMovsbWithSSOverrideDifferentAddresses(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 3);
@@ -998,7 +1176,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REP MOVSB with CS segment override - uses different linear addresses
      */
-    public function testRepMovsb_WithCSOverride_DifferentAddresses(): void
+    public function testRepMovsbWithCSOverrideDifferentAddresses(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 2);
@@ -1039,7 +1217,7 @@ class RepPrefixTest extends InstructionTestCase
      * Test REP MOVSD with segment override + 0x66 prefix (externally set)
      * This tests 32-bit operand size with segment override
      */
-    public function testRepMovsd_WithESOverride_And66Prefix(): void
+    public function testRepMovsdWithESOverrideAnd66Prefix(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 2);
@@ -1080,7 +1258,7 @@ class RepPrefixTest extends InstructionTestCase
      * Test REP MOVSB with segment override + 0x67 address size prefix
      * Format: F3 36 67 A4 (REP SS: MOVSB with 32-bit addresses)
      */
-    public function testRepMovsb_WithSSOverride_And67Prefix(): void
+    public function testRepMovsbWithSSOverrideAnd67Prefix(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 3);
@@ -1118,7 +1296,7 @@ class RepPrefixTest extends InstructionTestCase
      * Test REP MOVSD with segment override + 0x66 + 0x67 prefixes
      * Tests all three prefix types combined
      */
-    public function testRepMovsd_WithAllPrefixes(): void
+    public function testRepMovsdWithAllPrefixes(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 2);
@@ -1148,7 +1326,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test prefix ordering: 67 66 vs 66 67 should produce same result
      */
-    public function testRepStosd_PrefixOrder_67_66_vs_66_67(): void
+    public function testRepStosdPrefixOrder6766Vs6667(): void
     {
         $this->setRealMode16();
 
@@ -1199,7 +1377,7 @@ class RepPrefixTest extends InstructionTestCase
      * Test that multiple operand size prefixes (0x66 0x66) are handled
      * Double 0x66 should toggle twice, resulting in original size
      */
-    public function testRepStosd_Double66Prefix(): void
+    public function testRepStosdDouble66Prefix(): void
     {
         $this->setRealMode16(); // Default 16-bit
         $this->setRegister(RegisterType::ECX, 2);
@@ -1231,7 +1409,7 @@ class RepPrefixTest extends InstructionTestCase
      * Note: Cmpsb is not in the mock findInstruction, so this test
      * documents expected behavior without executing.
      */
-    public function testRepeCmpsb_WithSegmentOverride(): void
+    public function testRepeCmpsbWithSegmentOverride(): void
     {
         // CMPSB is not in the mock, document expected behavior
         $this->assertTrue(true, 'Placeholder: CMPSB with segment override should work when mock is extended');
@@ -1248,7 +1426,7 @@ class RepPrefixTest extends InstructionTestCase
      * Note: Lodsb is not in the mock findInstruction, so this test
      * documents expected behavior without executing.
      */
-    public function testRepLodsb_BasicOperation(): void
+    public function testRepLodsbBasicOperation(): void
     {
         // LODSB is not in the mock, document expected behavior
         $this->assertTrue(true, 'Placeholder: REP LODSB should load bytes into AL sequentially');
@@ -1261,7 +1439,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REPNE SCASW (16-bit scan)
      */
-    public function testRepneScasw_FindWord(): void
+    public function testRepneScaswFindWord(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 5);
@@ -1292,7 +1470,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REPNE SCASD with 0x66 prefix (32-bit scan in 16-bit mode)
      */
-    public function testRepneScasd_With66Prefix(): void
+    public function testRepneScasdWith66Prefix(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 4);
@@ -1326,7 +1504,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test that in 16-bit address mode, CX (not ECX) is used as counter
      */
-    public function testRepStosb_16bitMode_UsesCX(): void
+    public function testRepStosb16bitModeUsesCX(): void
     {
         $this->setRealMode16();
         // Set ECX high word to non-zero, CX (low word) to 3
@@ -1359,7 +1537,7 @@ class RepPrefixTest extends InstructionTestCase
      * Test that with 0x67 prefix in 16-bit mode, ECX (32-bit) is used
      * Verifies full 32-bit counter functionality
      */
-    public function testRepStosb_With67Prefix_UsesFullECX(): void
+    public function testRepStosbWith67PrefixUsesFullECX(): void
     {
         $this->setRealMode16();
         // Set ECX to 5
@@ -1395,7 +1573,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REP with ECX=0 and segment override - should do nothing
      */
-    public function testRepMovsb_ZeroCount_WithSegmentOverride(): void
+    public function testRepMovsbZeroCountWithSegmentOverride(): void
     {
         $this->setRealMode16();
         $this->setRegister(RegisterType::ECX, 0);
@@ -1431,7 +1609,7 @@ class RepPrefixTest extends InstructionTestCase
      * In this test, we use linear addresses since protected mode
      * segment handling is complex and depends on descriptor tables.
      */
-    public function testRepMovsb_WithFSOverride(): void
+    public function testRepMovsbWithFSOverride(): void
     {
         $this->setRealMode16();  // Use real mode for simpler segment calculation
         $this->setRegister(RegisterType::ECX, 2);
@@ -1466,7 +1644,7 @@ class RepPrefixTest extends InstructionTestCase
     /**
      * Test REP MOVSB with GS segment override (externally set)
      */
-    public function testRepMovsb_WithGSOverride(): void
+    public function testRepMovsbWithGSOverride(): void
     {
         $this->setRealMode16();  // Use real mode for simpler segment calculation
         $this->setRegister(RegisterType::ECX, 2);
@@ -1493,93 +1671,172 @@ class RepPrefixTest extends InstructionTestCase
         $this->assertSame(0xA5, $this->readMemory(0x9000, 8));
         $this->assertSame(0x5A, $this->readMemory(0x9001, 8));
     }
-}
 
-/**
- * Test implementation of InstructionExecutorInterface for unit tests.
- */
-class TestInstructionExecutor implements InstructionExecutorInterface
-{
-    private ?InstructionInterface $lastInstruction = null;
-    private ?array $lastOpcodes = null;
-    private int $lastInstructionPointer = 0;
+    // ========================================
+    // Long Mode (64-bit) REP + REX.W Tests
+    // ========================================
 
-    public function __construct(
-        private readonly \PHPMachineEmulator\Runtime\RuntimeInterface $runtime,
-        private readonly \PHPMachineEmulator\Stream\MemoryStreamInterface $memoryStream,
-        private readonly \Tests\Utils\TestCPUContext $cpuContext,
-        private readonly Stosb $stosb,
-        private readonly Stosw $stosw,
-        private readonly Movsb $movsb,
-        private readonly Movsw $movsw,
-        private readonly Scasb $scasb,
-        private readonly Scasw $scasw,
-    ) {
-    }
-
-    public function execute(RuntimeInterface $runtime): ExecutionStatus
+    public function testRepMovsqLongModeCopiesQwords(): void
     {
-        $this->lastInstructionPointer = $this->memoryStream->offset();
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setCompatibilityMode(false);
+        $this->cpuContext->setDefaultOperandSize(32);
+        $this->cpuContext->setDefaultAddressSize(64);
 
-        // Read and handle prefixes, then execute string instruction
-        $instruction = null;
-        $opcode = null;
+        $this->setRegister(RegisterType::ECX, 3, 64);
+        $this->setRegister(RegisterType::ESI, 0x1000, 64);
+        $this->setRegister(RegisterType::EDI, 0x2000, 64);
+        $this->setRegister(RegisterType::DS, 0x0000);
+        $this->setRegister(RegisterType::ES, 0x0000);
+        $this->setDirectionFlag(false);
 
-        while ($instruction === null) {
-            // Read next byte from stream
-            $nextByte = $this->memoryStream->byte();
+        $this->writeMemory(0x1000, 0x1122334455667788, 64);
+        $this->writeMemory(0x1008, 0x0123456789ABCDEF, 64);
+        $this->writeMemory(0x1010, 0x0F0E0D0C0B0A0908, 64);
 
-            // Handle prefixes
-            if ($nextByte === 0x66) {
-                $this->cpuContext->setOperandSizeOverride(true);
-                continue;
-            }
-            if ($nextByte === 0x67) {
-                $this->cpuContext->setAddressSizeOverride(true);
-                continue;
-            }
-
-            // Find the string instruction
-            $opcode = $nextByte;
-            $instruction = match ($nextByte) {
-                0xAA => $this->stosb,
-                0xAB => $this->stosw,
-                0xA4 => $this->movsb,
-                0xA5 => $this->movsw,
-                0xAE => $this->scasb,
-                0xAF => $this->scasw,
-                default => throw new \RuntimeException("Unknown opcode: 0x" . sprintf("%02X", $nextByte)),
-            };
-        }
-
-        $this->lastInstruction = $instruction;
-        $this->lastOpcodes = [$opcode];
-
-        $result = $instruction->process($this->runtime, [$opcode]);
-
-        // Reset stream for next iteration
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0x48) . chr(0xA5)); // REX.W + MOVS
         $this->memoryStream->setOffset(0);
 
-        return $result;
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        $this->assertSame(0x1122334455667788, $this->readMemory(0x2000, 64));
+        $this->assertSame(0x0123456789ABCDEF, $this->readMemory(0x2008, 64));
+        $this->assertSame(0x0F0E0D0C0B0A0908, $this->readMemory(0x2010, 64));
+        $this->assertSame(0x1018, $this->getRegister(RegisterType::ESI, 64));
+        $this->assertSame(0x2018, $this->getRegister(RegisterType::EDI, 64));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX, 64));
     }
 
-    public function lastInstruction(): ?InstructionInterface
+    public function testRepStosqLongModeStoresQwords(): void
     {
-        return $this->lastInstruction;
+        $this->cpuContext->setLongMode(true);
+        $this->cpuContext->setCompatibilityMode(false);
+        $this->cpuContext->setDefaultOperandSize(32);
+        $this->cpuContext->setDefaultAddressSize(64);
+
+        $this->setRegister(RegisterType::ECX, 2, 64);
+        $this->setRegister(RegisterType::EAX, 0x0123456789ABCDEF, 64);
+        $this->setRegister(RegisterType::EDI, 0x3000, 64);
+        $this->setRegister(RegisterType::ES, 0x0000);
+        $this->setDirectionFlag(false);
+
+        $this->writeMemory(0x3000, 0, 64);
+        $this->writeMemory(0x3008, 0, 64);
+
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0x48) . chr(0xAB)); // REX.W + STOS
+        $this->memoryStream->setOffset(0);
+
+        $result = $this->executeRepWithIteration(0xF3);
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        $this->assertSame(0x0123456789ABCDEF, $this->readMemory(0x3000, 64));
+        $this->assertSame(0x0123456789ABCDEF, $this->readMemory(0x3008, 64));
+        $this->assertSame(0x3010, $this->getRegister(RegisterType::EDI, 64));
+        $this->assertSame(0, $this->getRegister(RegisterType::ECX, 64));
     }
 
-    public function lastOpcodes(): ?array
+    public function testRepPrefixDoesNotRepeatNonStringInstructionAndPreservesCount(): void
     {
-        return $this->lastOpcodes;
-    }
+        $this->setProtectedMode32();
+        $this->setRegister(RegisterType::ECX, 5, 32);
 
-    public function lastInstructionPointer(): int
-    {
-        return $this->lastInstructionPointer;
-    }
+        // Program: F3 0F 1E C0 (REP + NOPL r/m32,r32 with ModRM=11 000 000)
+        $this->memoryStream->setOffset(0);
+        $this->memoryStream->write(chr(0xF3) . chr(0x0F) . chr(0x1E) . chr(0xC0));
+        $this->memoryStream->setOffset(0);
 
-    public function invalidateCaches(): void
-    {
-        // No caching in test executor
+        $noplList = $this->createMock(InstructionListInterface::class);
+        $noplList->method('register')->willReturn(new Register());
+        $nopl = new Nopl($noplList);
+
+        $executor = new class ($this->repPrefix, $nopl) implements InstructionExecutorInterface {
+            private ?InstructionInterface $lastInstruction = null;
+            private ?array $lastOpcodes = null;
+            private int $lastInstructionPointer = 0;
+
+            public function __construct(
+                private readonly RepPrefix $repPrefix,
+                private readonly Nopl $nopl,
+            ) {
+            }
+
+            public function execute(RuntimeInterface $runtime): ExecutionStatus
+            {
+                $this->lastInstructionPointer = $runtime->memory()->offset();
+                $opcode = $runtime->memory()->byte() & 0xFF;
+
+                if ($opcode === 0xF3 || $opcode === 0xF2) {
+                    $this->lastInstruction = $this->repPrefix;
+                    $this->lastOpcodes = [$opcode];
+                    return $this->repPrefix->process($runtime, [$opcode]);
+                }
+
+                if ($opcode === 0x0F) {
+                    $second = $runtime->memory()->byte() & 0xFF;
+                    if ($second !== 0x1E) {
+                        throw new \RuntimeException(sprintf('Unexpected 0x0F opcode second byte 0x%02X', $second));
+                    }
+                    $this->lastInstruction = $this->nopl;
+                    $this->lastOpcodes = [0x0F, 0x1E];
+                    return $this->nopl->process($runtime, [0x0F, 0x1E]);
+                }
+
+                throw new \RuntimeException(sprintf('Unexpected opcode 0x%02X', $opcode));
+            }
+
+            public function lastInstruction(): ?InstructionInterface
+            {
+                return $this->lastInstruction;
+            }
+
+            public function lastOpcodes(): ?array
+            {
+                return $this->lastOpcodes;
+            }
+
+            public function lastInstructionPointer(): int
+            {
+                return $this->lastInstructionPointer;
+            }
+
+            public function invalidateCaches(): void
+            {
+            }
+
+            public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
+            {
+            }
+
+            public function instructionCount(): int
+            {
+                return 0;
+            }
+
+            public function getIpSampleReport(int $top = 20): array
+            {
+                return [
+                    'every' => 0,
+                    'instructions' => 0,
+                    'samples' => 0,
+                    'unique' => 0,
+                    'top' => [],
+                ];
+            }
+        };
+
+        $iterationContext = $this->cpuContext->iteration();
+        $result = $iterationContext->iterate($this->runtime, $executor);
+        while ($result === ExecutionStatus::CONTINUE) {
+            $result = $iterationContext->iterate($this->runtime, $executor);
+        }
+        $iterationContext->clear();
+        $this->cpuContext->clearTransientOverrides();
+
+        $this->assertSame(ExecutionStatus::SUCCESS, $result);
+        $this->assertSame(4, $this->memoryStream->offset(), 'REP + non-string must execute once and advance past the full instruction');
+        $this->assertSame(5, $this->getRegister(RegisterType::ECX, 32), 'REP hint must not decrement ECX for non-string instructions');
     }
 }

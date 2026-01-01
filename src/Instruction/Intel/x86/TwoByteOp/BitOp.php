@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Bit test operations (0x0F 0xA3, 0xAB, 0xB3, 0xBA, 0xBB)
@@ -36,13 +36,19 @@ class BitOp implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->context()->cpu()->operandSize();
-        $maskBits = $opSize === 32 ? 0x1F : 0x0F;
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
+        $cpu = $runtime->context()->cpu();
+        $opSize = $cpu->operandSize();
+        $maskBits = match ($opSize) {
+            16 => 0x0F,
+            32 => 0x1F,
+            64 => 0x3F,
+            default => 0x1F,
+        };
 
         $isReg = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
-        $baseAddr = $isReg ? null : $this->rmLinearAddress($runtime, $reader, $modrm);
+        $baseAddr = $isReg ? null : $this->rmLinearAddress($runtime, $memory, $modrm);
 
         $secondByte = $opcode & 0xFF;
         if ($opcode > 0xFF) {
@@ -52,7 +58,7 @@ class BitOp implements InstructionInterface
         $isImmediate = $secondByte === 0xBA;
 
         if ($isImmediate) {
-            $imm = $reader->streamReader()->byte() & 0xFF;
+            $imm = $memory->byte() & 0xFF;
             $op = match ($modrm->registerOrOPCode() & 0x7) {
                 0b100 => 'bt',
                 0b101 => 'bts',
@@ -69,7 +75,11 @@ class BitOp implements InstructionInterface
                 0xBB => 'btc',
                 default => null,
             };
-            $bitIndex = $this->readRegisterBySize($runtime, $modrm->registerOrOPCode(), $opSize);
+            $bitRegCode = $modrm->registerOrOPCode();
+            $bitReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+                ? Register::findGprByCode($bitRegCode, $cpu->rexR())
+                : $bitRegCode;
+            $bitIndex = $this->readRegisterBySize($runtime, $bitReg, $opSize);
         }
 
         if ($op === null) {
@@ -79,7 +89,32 @@ class BitOp implements InstructionInterface
         $bitWithin = $bitIndex & $maskBits;
 
         if ($isReg) {
-            $dest = $this->readRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $opSize);
+            $rmCode = $modrm->registerOrMemoryAddress();
+            $destReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+                ? Register::findGprByCode($rmCode, $cpu->rexB())
+                : $rmCode;
+
+            if ($opSize === 64) {
+                $destU = UInt64::of($this->readRegisterBySize($runtime, $destReg, 64));
+                $bit = ($destU->shr($bitWithin)->low32() & 0x1) !== 0;
+                $runtime->memoryAccessor()->setCarryFlag($bit);
+
+                $maskU = UInt64::of(1)->shl($bitWithin);
+                $newValU = match ($op) {
+                    'bt' => $destU,
+                    'bts' => $destU->or($maskU),
+                    'btr' => $destU->and($maskU->not()),
+                    'btc' => $destU->xor($maskU),
+                    default => $destU,
+                };
+
+                if ($op !== 'bt') {
+                    $this->writeRegisterBySize($runtime, $destReg, $newValU->toInt(), 64);
+                }
+                return ExecutionStatus::SUCCESS;
+            }
+
+            $dest = $this->readRegisterBySize($runtime, $destReg, $opSize);
             $bit = ($dest >> $bitWithin) & 0x1;
             $runtime->memoryAccessor()->setCarryFlag($bit === 1);
 
@@ -92,16 +127,43 @@ class BitOp implements InstructionInterface
             };
 
             if ($op !== 'bt') {
-                $this->writeRegisterBySize($runtime, $modrm->registerOrMemoryAddress(), $newVal, $opSize);
+                $this->writeRegisterBySize($runtime, $destReg, $newVal, $opSize);
             }
             return ExecutionStatus::SUCCESS;
         }
 
-        $elemSizeBytes = $opSize === 32 ? 4 : 2;
+        $elemSizeBytes = intdiv($opSize, 8);
         $elemIndex = intdiv($bitIndex, $opSize);
         $targetAddr = $baseAddr + ($elemIndex * $elemSizeBytes);
-        $value = $opSize === 32 ? $this->readMemory32($runtime, $targetAddr) : $this->readMemory16($runtime, $targetAddr);
+        $value = match ($opSize) {
+            16 => $this->readMemory16($runtime, $targetAddr),
+            32 => $this->readMemory32($runtime, $targetAddr),
+            64 => $this->readMemory64($runtime, $targetAddr),
+            default => $this->readMemory32($runtime, $targetAddr),
+        };
         $bitWithin = $bitIndex % $opSize;
+
+        if ($opSize === 64) {
+            $valueU = $value instanceof UInt64 ? $value : UInt64::of($value);
+            $bit = ($valueU->shr($bitWithin)->low32() & 0x1) !== 0;
+            $runtime->memoryAccessor()->setCarryFlag($bit);
+
+            $maskU = UInt64::of(1)->shl($bitWithin);
+            $newValU = match ($op) {
+                'bt' => $valueU,
+                'bts' => $valueU->or($maskU),
+                'btr' => $valueU->and($maskU->not()),
+                'btc' => $valueU->xor($maskU),
+                default => $valueU,
+            };
+
+            if ($op !== 'bt') {
+                $this->writeMemory64($runtime, $targetAddr, $newValU);
+            }
+
+            return ExecutionStatus::SUCCESS;
+        }
+
         $bit = ($value >> $bitWithin) & 0x1;
         $runtime->memoryAccessor()->setCarryFlag($bit === 1);
 

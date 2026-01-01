@@ -2,54 +2,55 @@
 
 declare(strict_types=1);
 
-namespace PHPMachineEmulator;
+namespace PHPMachineEmulator\BIOS;
 
+use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\Exception\BIOSInvalidException;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\LogicBoard\Media\MediaContext;
+use PHPMachineEmulator\LogicBoard\Media\MediaContextInterface;
+use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class BIOS
 {
     public const NAME = 'PHPMachineEmulator';
     public const BIOS_ENTRYPOINT = 0x7C00;
-    public const READ_SIZE_PER_SECTOR = 512;
 
     // BDA (BIOS Data Area) address range
     public const BDA_START = 0x400;
     public const BDA_END = 0x4FF;
 
-    // Conventional memory size in KB (640KB)
-    public const CONVENTIONAL_MEMORY_KB = 640;
+    // Conventional memory size in KB (640KB minus 1KB EBDA at 0x9FC00)
+    public const CONVENTIONAL_MEMORY_KB = 639;
 
-    private ?RuntimeInterface $runtime = null;
-
-    public function __construct(protected MachineInterface $machine)
-    {
-        if ($this->machine->logicBoard()->media()->primary()->bootType() === BootType::BOOT_SIGNATURE) {
+    public function __construct(
+        protected RuntimeInterface $runtime,
+        protected MediaContextInterface $mediaContext,
+        protected OptionInterface $option,
+    ) {
+        if ($this->mediaContext->primary()->bootType() === BootType::BOOT_SIGNATURE) {
             $this->verifyBIOSSignature();
         }
-
 
         $this->initialize();
     }
 
-    public function machine(): MachineInterface
-    {
-        return $this->machine;
-    }
-
     public function runtime(): RuntimeInterface
     {
-        return $this->runtime ??= $this->machine->runtime(self::BIOS_ENTRYPOINT);
+        return $this->runtime;
     }
 
-    public static function start(MachineInterface $machine): void
-    {
+    public static function start(
+        RuntimeInterface $runtime,
+        MediaContextInterface $mediaContext,
+        OptionInterface $option,
+    ): void {
         try {
-            (new static($machine))
+            (new static($runtime, $mediaContext, $option))
                 ->runtime()
                 ->start();
         } catch (HaltException) {
@@ -92,7 +93,10 @@ class BIOS
         // 9. Initialize boot segment (CS register) - should be last before boot
         $this->initializeBootSegment();
 
-        $this->machine->option()->logger()->info('BIOS initialization completed');
+        // BIOS typically enables interrupts before handing control to the boot loader.
+        $this->runtime()->memoryAccessor()->setInterruptFlag(true);
+
+        $this->option->logger()->info('BIOS initialization completed');
     }
 
     /**
@@ -105,7 +109,7 @@ class BIOS
 
         foreach ([...$runtime->register()::map(), $runtime->video()->videoTypeFlagAddress()] as $address) {
             $mem->allocate($address);
-            $this->machine->option()->logger()->debug(sprintf('BIOS: Register allocated 0x%03s', decbin($address)));
+            $this->option->logger()->debug(sprintf('BIOS: Register allocated 0x%03s', decbin($address)));
         }
     }
 
@@ -117,7 +121,7 @@ class BIOS
         $runtime = $this->runtime();
         foreach ($runtime->services() as $service) {
             $service->initialize($runtime);
-            $this->machine->option()->logger()->debug(sprintf('BIOS: Initialize %s service', get_class($service)));
+            $this->option->logger()->debug(sprintf('BIOS: Initialize %s service', get_class($service)));
         }
     }
 
@@ -126,9 +130,9 @@ class BIOS
      */
     protected function initializeBootSegment(): void
     {
-        $loadSegment = $this->machine->logicBoard()->media()->primary()->stream()->loadSegment();
+        $loadSegment = $this->mediaContext->primary()->stream()->loadSegment();
         $this->runtime()->memoryAccessor()->write16Bit(RegisterType::CS, $loadSegment);
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             sprintf('BIOS: Initialized CS to 0x%04X for bootable stream', $loadSegment)
         );
     }
@@ -173,9 +177,16 @@ class BIOS
         // Bit 6-7: Number of floppy drives - 1
         // Bit 9-11: Number of serial ports
         // Bit 14-15: Number of parallel ports
-        $equipmentFlags = 0x0021;  // Floppy present, 80x25 color, 1 floppy
-        $equipmentFlags |= (2 << 9);   // 2 serial ports (COM1, COM2)
-        $equipmentFlags |= (1 << 14);  // 1 parallel port (LPT1)
+        // Report minimal hardware during early boot.
+        // DOS uses these counts to probe INT 14h/17h; we currently don't emulate UART/LPT,
+        // so advertise none to avoid calling into uninitialized device vectors.
+        [$floppyCount, $hardDriveCount] = $this->mediaContext->bootDriveCounts();
+
+        $equipmentFlags = 0x0020; // 80x25 color, no serial/LPT
+        if ($floppyCount > 0) {
+            $equipmentFlags |= 0x0001; // floppy present
+            $equipmentFlags |= ((($floppyCount - 1) & 0x03) << 6);
+        }
         $mem->writeBySize(0x410, $equipmentFlags, 16);
 
         // 0x412: Reserved (manufacturing test)
@@ -306,7 +317,7 @@ class BIOS
         // Hard Disk (0x475-0x477)
         // ========================================
         // 0x475: Number of hard drives
-        $mem->writeBySize(0x475, 0x01, 8);
+        $mem->writeBySize(0x475, $hardDriveCount, 8);
 
         // 0x476: Hard disk control byte
         $mem->writeBySize(0x476, 0x00, 8);
@@ -383,8 +394,14 @@ class BIOS
         // 0x48E: Hard disk task complete flag
         $mem->writeBySize(0x48E, 0x00, 8);
 
-        // 0x48F: Reserved
-        $mem->writeBySize(0x48F, 0x00, 8);
+        // 0x48F: Floppy/Hard disk info (drive types)
+        $floppyInfo = 0x00;
+        if ($floppyCount >= 2) {
+            $floppyInfo = 0x77;
+        } elseif ($floppyCount === 1) {
+            $floppyInfo = 0x07;
+        }
+        $mem->writeBySize(0x48F, $floppyInfo, 8);
 
         // ========================================
         // Floppy Drive Info (0x490-0x491)
@@ -453,9 +470,15 @@ class BIOS
             $mem->writeBySize($addr, 0x00, 8);
         }
 
-        $this->machine->option()->logger()->debug(
-            sprintf('BIOS: Initialized BDA (0x%03X-0x%03X): cols=%d, rows=%d, memory=%dKB',
-                self::BDA_START, self::BDA_END, $cols, $rows, self::CONVENTIONAL_MEMORY_KB)
+        $this->option->logger()->debug(
+            sprintf(
+                'BIOS: Initialized BDA (0x%03X-0x%03X): cols=%d, rows=%d, memory=%dKB',
+                self::BDA_START,
+                self::BDA_END,
+                $cols,
+                $rows,
+                self::CONVENTIONAL_MEMORY_KB
+            )
         );
     }
 
@@ -471,18 +494,64 @@ class BIOS
         $defaultSegment = 0xF000;
         $defaultOffset = 0xFF53;
 
-        // Initialize all 256 interrupt vectors to point to default handler
+        // Initialize all 256 interrupt vectors to point to default handler.
+        // Use physical writes here because low IVT addresses (0x0000-0x000D)
+        // overlap with the internal register address space.
         for ($vector = 0; $vector < 256; $vector++) {
             $address = $vector * 4;
             // Store offset (low word)
-            $mem->writeBySize($address, $defaultOffset, 16);
+            $mem->writePhysical16($address, $defaultOffset);
             // Store segment (high word)
-            $mem->writeBySize($address + 2, $defaultSegment, 16);
+            $mem->writePhysical16($address + 2, $defaultSegment);
         }
 
-        $this->machine->option()->logger()->debug(
+        // Diskette Parameter Table (INT 1Eh) points to BIOS ROM table.
+        $dptVector = 0x1E * 4;
+        $mem->writePhysical16($dptVector, MediaContext::DISKETTE_PARAM_OFF);
+        $mem->writePhysical16($dptVector + 2, MediaContext::DISKETTE_PARAM_SEG);
+
+        $this->initializeFixedDiskParameterTable();
+
+        $this->option->logger()->debug(
             sprintf('BIOS: Initialized IVT (0x000-0x3FF) with %d vectors pointing to F000:%04X', 256, $defaultOffset)
         );
+    }
+
+    /**
+     * Initialize fixed disk parameter tables and IVT vectors (INT 41h/46h).
+     * A minimal table prevents DOS from reading garbage when no HDD is present.
+     */
+    private function initializeFixedDiskParameterTable(): void
+    {
+        [, $hardDriveCount] = $this->mediaContext->bootDriveCounts();
+        if ($hardDriveCount <= 0) {
+            return;
+        }
+
+        $mem = $this->runtime()->memoryAccessor();
+        $addr = (MediaContext::FIXED_DISK_PARAM_SEG << 4) + MediaContext::FIXED_DISK_PARAM_OFF;
+
+        for ($i = 0; $i < MediaContext::FIXED_DISK_PARAM_SIZE; $i++) {
+            $mem->writeBySize($addr + $i, 0x00, 8);
+        }
+
+        // Provide non-zero geometry to avoid divide-by-zero in DOS init.
+        $mem->writeBySize($addr + 0x13, 63, 16); // sectors per track (word)
+        $mem->writeBySize($addr + 0x15, 16, 16); // heads (word)
+        $mem->writeBySize($addr + 0x22, 0x00, 8); // drive type marker (force template path)
+
+        $offset = MediaContext::FIXED_DISK_PARAM_OFF;
+        $segment = MediaContext::FIXED_DISK_PARAM_SEG;
+
+        $vec41 = 0x41 * 4;
+        $mem->writePhysical16($vec41, $offset);
+        $mem->writePhysical16($vec41 + 2, $segment);
+
+        $vec46 = 0x46 * 4;
+        $mem->writePhysical16($vec46, $offset);
+        $mem->writePhysical16($vec46 + 2, $segment);
+
+        // Avoid touching DOS scratch geometry in low memory here; IO.SYS initializes it.
     }
 
     /**
@@ -504,7 +573,7 @@ class BIOS
         // Mask all IRQs on slave PIC
         $picState->maskSlave(0xFF);
 
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             'BIOS: Initialized PIC - IRQ0 (timer) enabled, others masked'
         );
     }
@@ -577,7 +646,7 @@ class BIOS
 
         // ========================================
         // A20 Line
-        // Enable A20 for full memory access (QEMU enables by default)
+        // Enable A20 by default (matches SeaBIOS behavior for 16-bit boot).
         // ========================================
         $cpuContext->enableA20(true);
 
@@ -591,7 +660,7 @@ class BIOS
         // ========================================
         $mem->writeEfer(0);
 
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             sprintf('BIOS: Initialized CPU state - Real Mode 16-bit, CR0=0x%08X, A20=enabled, IF=0', $cr0)
         );
     }
@@ -635,7 +704,10 @@ class BIOS
         $mem->writeBySize(RegisterType::EDI, 0x00000000, 32);
         $mem->writeBySize(RegisterType::EBP, 0x00000000, 32);
 
-        $this->machine->option()->logger()->debug(
+        // Boot drive number (DL).
+        $mem->writeToLowBit(RegisterType::EDX, $this->mediaContext->bootDriveNumber());
+
+        $this->option->logger()->debug(
             'BIOS: Initialized segment registers DS=ES=SS=FS=GS=0, SP=0xFFFE'
         );
     }
@@ -759,6 +831,25 @@ class BIOS
             $mem->writeBySize($biosIdAddress + $i, ord($biosId[$i]), 8);
         }
 
+        // Diskette Parameter Table (INT 1Eh) for 1.44MB floppies at F000:FE00.
+        $dptAddress = (MediaContext::DISKETTE_PARAM_SEG << 4) + MediaContext::DISKETTE_PARAM_OFF;  // 0xFFE00
+        $disketteParams = [
+            0xAF, // Step rate, head unload
+            0x02, // Head load time
+            0x25, // Motor off time
+            0x02, // Bytes per sector (512)
+            0x12, // Sectors per track (18)
+            0x1B, // Gap length
+            0xFF, // Data length
+            0x6C, // Format gap length
+            0xF6, // Format fill byte
+            0x0F, // Head settle time
+            0x08, // Motor start time
+        ];
+        foreach ($disketteParams as $i => $value) {
+            $mem->writeBySize($dptAddress + $i, $value, 8);
+        }
+
         // BIOS date at F000:FFF5 (physical address 0xFFFF5) - format: MM/DD/YY
         $date = date('m/d/y');
         $dateAddress = (0xF000 << 4) + 0xFFF5;  // 0xFFFF5
@@ -770,15 +861,18 @@ class BIOS
         // 0xFC = AT compatible
         $mem->writeBySize(0xFFFFE, 0xFC, 8);
 
-        $this->machine->option()->logger()->debug(
-            sprintf('BIOS: Initialized ROM with trampolines at 0x%05X, INT13h at F000:FF03, ID at 0x%05X',
-                $trampolineBase, $biosIdAddress)
+        $this->option->logger()->debug(
+            sprintf(
+                'BIOS: Initialized ROM with trampolines at 0x%05X, INT13h at F000:FF03, ID at 0x%05X',
+                $trampolineBase,
+                $biosIdAddress
+            )
         );
     }
 
     protected function verifyBIOSSignature(): void
     {
-        $bootStream = $this->machine->logicBoard()->media()->primary()->stream();
+        $bootStream = $this->mediaContext->primary()->stream();
         $proxy = $bootStream->proxy();
         try {
             $proxy->setOffset(510);

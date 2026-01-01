@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -29,12 +29,14 @@ class Inc implements InstructionInterface
         $value = $ma->fetch($reg)->asBytesBySize($size);
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value + 1) & $mask;
+        $af = (($value & 0x0F) + 1) > 0x0F;
 
         // Preserve CF - INC does not affect carry flag
         $savedCf = $ma->shouldCarryFlag();
 
         $ma->writeBySize($reg, $result, $size);
         $ma->updateFlags($result, $size);
+        $ma->setAuxiliaryCarryFlag($af);
 
         // Restore CF
         $ma->setCarryFlag($savedCf);

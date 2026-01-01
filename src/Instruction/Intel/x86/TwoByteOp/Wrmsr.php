@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
@@ -40,13 +39,15 @@ class Wrmsr implements InstructionInterface
         $edx = $ma->fetch(RegisterType::EDX)->asBytesBySize(32);
         $value = UInt64::fromParts($eax, $edx);
 
-        Rdmsr::writeMsr($ecx, $value);
+        $runtime->context()->cpu()->writeMsr($ecx, $value);
 
         if ($ecx === 0x1B) { // APIC_BASE
             $enable = !$value->and(1 << 11)->isZero();
             $runtime->context()->cpu()->apicState()->setApicBase($value->and(0xFFFFF000)->low32(), $enable);
         } elseif ($ecx === 0xC0000080) { // EFER
-            $ma->writeEfer($value->toInt());
+            // EFER.LMA (bit 10) is read-only; it is set/cleared by the CPU when IA-32e becomes active/inactive.
+            $ma->writeEfer($value->toInt() & ~(1 << 10));
+            $this->updateIa32eMode($runtime);
         }
 
         return ExecutionStatus::SUCCESS;

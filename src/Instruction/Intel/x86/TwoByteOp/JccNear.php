@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -38,23 +38,37 @@ class JccNear implements InstructionInterface
             $cc = $opcode & 0x0F;
         }
 
-        $opSize = $runtime->context()->cpu()->operandSize();
-        $disp = $opSize === 32
-            ? $runtime->memory()->dword()
-            : $runtime->memory()->short();
+        $cpu = $runtime->context()->cpu();
 
-        // Sign-extend displacement
-        if ($opSize === 32) {
-            $disp = (int) (pack('V', $disp) === false ? $disp : unpack('l', pack('V', $disp))[1]);
-        } else {
-            if ($disp > 0x7FFF) {
-                $disp = $disp - 0x10000;
+        // In 64-bit mode, Jcc near always uses a 32-bit signed displacement (rel32),
+        // sign-extended to 64-bit and added to RIP.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $disp = $runtime->memory()->signedDword();
+            if ($this->conditionMet($runtime, $cc)) {
+                $current = $runtime->memory()->offset();
+                $runtime->memory()->setOffset(($current + $disp) & -1);
             }
+            return ExecutionStatus::SUCCESS;
         }
 
+        $opSize = $cpu->operandSize();
+        $disp = $opSize === 32
+            ? $runtime->memory()->signedDword()
+            : $runtime->memory()->signedShort();
+
         if ($this->conditionMet($runtime, $cc)) {
-            $current = $runtime->memory()->offset();
-            $runtime->memory()->setOffset(($current + $disp) & 0xFFFFFFFF);
+            if ($runtime->option()->shouldChangeOffset()) {
+                $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+                // In legacy modes, the code stream offset is linear, but rel targets are based on the
+                // IP/EIP offset within CS. Convert linear->offset, apply the displacement with proper
+                // truncation, then convert back to a linear address using the CS base/descriptor.
+                $nextLinear = $runtime->memory()->offset();
+                $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                $nextOffset = $this->codeOffsetFromLinear($runtime, $cs, $nextLinear, $opSize);
+                $targetOffset = ($nextOffset + $disp) & $mask;
+                $targetLinear = $this->linearCodeAddress($runtime, $cs, $targetOffset, $opSize);
+                $runtime->memory()->setOffset($targetLinear);
+            }
         }
 
         return ExecutionStatus::SUCCESS;

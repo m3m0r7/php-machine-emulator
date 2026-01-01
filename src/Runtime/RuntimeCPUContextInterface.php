@@ -39,6 +39,7 @@ interface RuntimeCPUContextInterface
     public function isLongMode(): bool;
     public function setCompatibilityMode(bool $enabled): void;
     public function isCompatibilityMode(): bool;
+    public function syncCompatibilityModeWithCs(): void;
 
     // ========================================
     // REX prefix support (64-bit mode)
@@ -71,6 +72,12 @@ interface RuntimeCPUContextInterface
     public function segmentOverride(): ?\PHPMachineEmulator\Instruction\RegisterType;
 
     // ========================================
+    // Segment descriptor cache (Unreal Mode)
+    // ========================================
+    public function cacheSegmentDescriptor(\PHPMachineEmulator\Instruction\RegisterType $segment, array $descriptor): void;
+    public function getCachedSegmentDescriptor(\PHPMachineEmulator\Instruction\RegisterType $segment): ?array;
+
+    // ========================================
     // Address line and paging
     // ========================================
     public function clearTransientOverrides(): void;
@@ -98,6 +105,20 @@ interface RuntimeCPUContextInterface
     // ========================================
     public function blockInterruptDelivery(int $count = 1): void;
     public function consumeInterruptDeliveryBlock(): bool;
+    /**
+     * Track real-mode interrupt frames for preservation across bulk fills.
+     *
+     * @param array{linear:int,size:int,bytes:array<int,int>} $frame
+     */
+    public function pushInterruptFrame(array $frame): void;
+    /**
+     * @return array{linear:int,size:int,bytes:array<int,int>}|null
+     */
+    public function popInterruptFrame(): ?array;
+    /**
+     * @return array{linear:int,size:int,bytes:array<int,int>}|null
+     */
+    public function peekInterruptFrame(): ?array;
 
     // ========================================
     // Hardware state
@@ -118,4 +139,37 @@ interface RuntimeCPUContextInterface
     // ========================================
     public function currentInstructionPointer(): int;
     public function setCurrentInstructionPointer(int $ip): void;
+
+    // ========================================
+    // SIMD state (SSE/SSE2)
+    // ========================================
+    /**
+     * Read XMM register as 4x32-bit dwords (little-endian).
+     *
+     * @return array{int,int,int,int}
+     */
+    public function getXmm(int $index): array;
+
+    /**
+     * Write XMM register as 4x32-bit dwords (little-endian).
+     *
+     * @param array{int,int,int,int} $value
+     */
+    public function setXmm(int $index, array $value): void;
+
+    /**
+     * Get MXCSR (32-bit).
+     */
+    public function mxcsr(): int;
+
+    /**
+     * Set MXCSR (32-bit).
+     */
+    public function setMxcsr(int $mxcsr): void;
+
+    // ========================================
+    // MSR storage
+    // ========================================
+    public function readMsr(int $index): \PHPMachineEmulator\Util\UInt64;
+    public function writeMsr(int $index, \PHPMachineEmulator\Util\UInt64|int $value): void;
 }

@@ -1,14 +1,14 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class AdcRegRm implements InstructionInterface
 {
@@ -23,8 +23,8 @@ class AdcRegRm implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x10, 0x12], true);
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
@@ -34,16 +34,16 @@ class AdcRegRm implements InstructionInterface
         // Cache effective address to avoid reading displacement twice
         $rmAddress = null;
         if ($destIsRm && $modRegRM->mode() !== 0b11) {
-            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
+            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $memory, $modRegRM), true);
         }
 
         $src = $isByte
             ? ($destIsRm
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
-                : $this->readRm8($runtime, $reader, $modRegRM))
+                : $this->readRm8($runtime, $memory, $modRegRM))
             : ($destIsRm
                 ? $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize)
-                : $this->readRm($runtime, $reader, $modRegRM, $opSize));
+                : $this->readRm($runtime, $memory, $modRegRM, $opSize));
 
         if ($isByte) {
             $dest = $destIsRm
@@ -65,11 +65,67 @@ class AdcRegRm implements InstructionInterface
             $signB = ($src >> 7) & 1;
             $signR = ($maskedResult >> 7) & 1;
             $of = ($signA === $signB) && ($signA !== $signR);
+            $af = (($dest & 0x0F) + ($src & 0x0F) + $carry) > 0x0F;
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
                 ->setCarryFlag($result > 0xFF)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         } else {
+            if ($opSize === 64) {
+                $ma = $runtime->memoryAccessor();
+
+                $srcU = $src instanceof UInt64 ? $src : UInt64::of($src);
+
+                if ($destIsRm) {
+                    $destU = $rmAddress !== null
+                        ? $this->readMemory64($runtime, $rmAddress)
+                        : UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64));
+                } else {
+                    $destU = UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), 64));
+                }
+
+                $tempU = $destU->add($srcU);
+                $resultU = $tempU->add($carry);
+
+                if ($destIsRm) {
+                    if ($rmAddress !== null) {
+                        $this->writeMemory64($runtime, $rmAddress, $resultU);
+                    } else {
+                        $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+                    }
+                } else {
+                    $this->writeRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $resultU->toInt(), 64);
+                }
+
+                $ma->setZeroFlag($resultU->isZero());
+                $ma->setSignFlag($resultU->isNegativeSigned());
+                $lowByte = $resultU->low32() & 0xFF;
+                $ones = 0;
+                for ($i = 0; $i < 8; $i++) {
+                    $ones += ($lowByte >> $i) & 1;
+                }
+                $ma->setParityFlag(($ones % 2) === 0);
+
+                $carry1 = $tempU->lt($destU);
+                $carry2 = $carry !== 0 && $resultU->lt($tempU);
+                $ma->setCarryFlag($carry1 || $carry2);
+
+                $srcWithCarry = $srcU->add($carry);
+                $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+                $overflow = !$destU
+                    ->xor($resultU)
+                    ->and($srcWithCarry->xor($resultU))
+                    ->and($signMask)
+                    ->isZero();
+                $ma->setOverflowFlag($overflow);
+
+                $af = (($destU->low32() & 0x0F) + ($srcU->low32() & 0x0F) + $carry) > 0x0F;
+                $ma->setAuxiliaryCarryFlag($af);
+
+                return ExecutionStatus::SUCCESS;
+            }
+
             $dest = $destIsRm
                 ? ($rmAddress !== null
                     ? ($opSize === 32 ? $this->readMemory32($runtime, $rmAddress) : $this->readMemory16($runtime, $rmAddress))
@@ -79,12 +135,6 @@ class AdcRegRm implements InstructionInterface
             $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
             $signBit = $opSize === 32 ? 31 : 15;
             $maskedResult = $result & $mask;
-
-            // Debug ADC for LZMA distance calculation
-            $runtime->option()->logger()->debug(sprintf(
-                'ADC r%d: dest=0x%X src=0x%X CF=%d result=0x%X',
-                $opSize, $dest & 0xFFFFFFFF, $src & 0xFFFFFFFF, $carry, $maskedResult
-            ));
 
             if ($destIsRm) {
                 if ($rmAddress !== null) {
@@ -104,10 +154,12 @@ class AdcRegRm implements InstructionInterface
             $signB = ($src >> $signBit) & 1;
             $signR = ($maskedResult >> $signBit) & 1;
             $of = ($signA === $signB) && ($signA !== $signR);
+            $af = (($dest & 0x0F) + ($src & 0x0F) + $carry) > 0x0F;
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, $opSize)
                 ->setCarryFlag($result > $mask)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         }
 
         return ExecutionStatus::SUCCESS;

@@ -14,6 +14,10 @@ trait SignTrait
      */
     protected function signExtend(int $value, int $bits): int
     {
+        if ($bits >= 64) {
+            return $value;
+        }
+
         if ($bits >= 32) {
             $value &= 0xFFFFFFFF;
             return ($value & 0x80000000) ? $value - 0x100000000 : $value;

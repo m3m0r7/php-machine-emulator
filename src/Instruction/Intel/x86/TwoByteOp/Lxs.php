@@ -5,12 +5,10 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -34,8 +32,8 @@ class Lxs implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
 
         $secondByte = $opcode & 0xFF;
@@ -50,7 +48,7 @@ class Lxs implements InstructionInterface
             default => RegisterType::DS,
         };
 
-        $address = $this->rmLinearAddress($runtime, $reader, $modrm);
+        $address = $this->rmLinearAddress($runtime, $memory, $modrm);
 
         $offset = $opSize === 32
             ? $this->readMemory32($runtime, $address)
@@ -59,7 +57,34 @@ class Lxs implements InstructionInterface
 
         $destReg = $modrm->registerOrOPCode();
         $this->writeRegisterBySize($runtime, $destReg, $offset, $opSize);
+        $cpu = $runtime->context()->cpu();
+
+        if ($cpu->isProtectedMode() && $segValue !== 0) {
+            $descriptor = $this->readSegmentDescriptor($runtime, $segValue);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $cpu->cacheSegmentDescriptor($segment, $descriptor);
+            }
+        }
+
         $runtime->memoryAccessor()->write16Bit($segment, $segValue & 0xFFFF);
+
+        if (!$cpu->isProtectedMode()) {
+            $cpu->cacheSegmentDescriptor($segment, [
+                'base' => ((($segValue & 0xFFFF) << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
+        }
+
+        if ($segment === RegisterType::SS) {
+            // LSS blocks interrupts for the following instruction.
+            $runtime->context()->cpu()->blockInterruptDelivery(1);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

@@ -12,7 +12,7 @@ trait InstructionSupport
 {
     public function makeKeyByOpCodes(int|array $opcodes): string
     {
-        return '0x'.implode(
+        return '0x' . implode(
             array_map(
                 fn ($opcode) => sprintf('%02X', $opcode),
                 is_array($opcodes) ? $opcodes : [$opcodes]

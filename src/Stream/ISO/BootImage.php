@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Stream\ISO;
 
-class BootImage
+use PHPMachineEmulator\Stream\BootImageInterface;
+
+class BootImage implements BootImageInterface
 {
     private string $imageData;
     private int $imageSize;
@@ -147,6 +149,19 @@ class BootImage
         }
 
         return $available;
+    }
+
+    public function replaceRange(int $offset, string $data): void
+    {
+        $len = strlen($data);
+        if ($len === 0) {
+            return;
+        }
+        if ($offset < 0 || ($offset + $len) > strlen($this->imageData)) {
+            return;
+        }
+
+        $this->imageData = substr_replace($this->imageData, $data, $offset, $len);
     }
 
     /**

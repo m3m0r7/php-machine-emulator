@@ -91,12 +91,12 @@ class MemoryAccessor implements MemoryAccessorInterface
             $this->validateRegisterAddressWasAllocated($address);
             // GPRs (0-7 and 16-23) are stored as 64-bit, segment registers as 16-bit
             $storedSize = $this->isGprAddress($address) ? 64 : 16;
-            return MemoryAccessorFetchResult::fromCache($this->registers[$address], $storedSize);
+            return new MemoryAccessorFetchResult($this->registers[$address], $storedSize);
         }
 
         // General memory uses MemoryStream
         $value = $this->readFromMemory($address);
-        return MemoryAccessorFetchResult::fromCache($value, 8);
+        return new MemoryAccessorFetchResult($value, 8);
     }
 
     public function tryToFetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface|null
@@ -110,12 +110,12 @@ class MemoryAccessor implements MemoryAccessorInterface
             }
             // GPRs (0-7 and 16-23) are stored as 64-bit, segment registers as 16-bit
             $storedSize = $this->isGprAddress($address) ? 64 : 16;
-            return MemoryAccessorFetchResult::fromCache($this->registers[$address], $storedSize);
+            return new MemoryAccessorFetchResult($this->registers[$address], $storedSize);
         }
 
         // General memory uses MemoryStream
         $value = $this->readFromMemory($address);
-        return MemoryAccessorFetchResult::fromCache($value, 8);
+        return new MemoryAccessorFetchResult($value, 8);
     }
 
     public function write16Bit(int|RegisterType $registerType, int|null $value): self
@@ -159,6 +159,35 @@ class MemoryAccessor implements MemoryAccessorInterface
             );
 
             $this->postProcessWhenWrote($address, $previousValue, $value);
+
+            if ($registerType instanceof RegisterType) {
+                $cpu = $this->runtime->context()->cpu();
+                if (
+                    !$cpu->isProtectedMode()
+                    && in_array($registerType, [
+                        RegisterType::ES,
+                        RegisterType::CS,
+                        RegisterType::SS,
+                        RegisterType::DS,
+                        RegisterType::FS,
+                        RegisterType::GS,
+                    ], true)
+                ) {
+                    $selector = $value ?? 0;
+                    if (!$cpu->hasExtendedSegmentLimit($registerType)) {
+                        $cpu->cacheSegmentDescriptor($registerType, [
+                            'base' => ((($selector & 0xFFFF) << 4) & 0xFFFFF),
+                            'limit' => 0xFFFF,
+                            'present' => true,
+                            'type' => 0,
+                            'system' => false,
+                            'executable' => false,
+                            'dpl' => 0,
+                            'default' => 16,
+                        ]);
+                    }
+                }
+            }
             return $this;
         }
 
@@ -169,6 +198,7 @@ class MemoryAccessor implements MemoryAccessorInterface
             $this->writeToMemory($address + $i, ($value >> ($i * 8)) & 0xFF);
         }
         $this->postProcessWhenWrote($address, $previousValue, $value);
+        $this->invalidateInstructionCachesOnWrite($address, $bytes);
 
         return $this;
     }
@@ -255,6 +285,18 @@ class MemoryAccessor implements MemoryAccessorInterface
         );
     }
 
+    private function invalidateInstructionCachesOnWrite(int $address, int $bytes): void
+    {
+        if ($bytes <= 0) {
+            return;
+        }
+
+        $this->runtime
+            ->architectureProvider()
+            ->instructionExecutor()
+            ->invalidateCachesIfExecutedPageOverlaps($address, $bytes);
+    }
+
     public function updateFlags(int|null $value, int $size = 16): self
     {
         if ($value === null) {
@@ -262,6 +304,16 @@ class MemoryAccessor implements MemoryAccessorInterface
             $this->signFlag = false;
             $this->overflowFlag = false;
             $this->parityFlag = true;
+            return $this;
+        }
+
+        // 64-bit results are represented as signed PHP ints; avoid shifts that overflow to float.
+        if ($size === 64) {
+            $this->zeroFlag = $value === 0;
+            $this->signFlag = $value < 0;
+            // OF cannot be derived from result alone; treat as cleared for generic updates.
+            $this->overflowFlag = false;
+            $this->parityFlag = substr_count(decbin($value & 0xFF), '1') % 2 === 0;
             return $this;
         }
 
@@ -395,6 +447,30 @@ class MemoryAccessor implements MemoryAccessorInterface
 
     public function setInterruptFlag(bool $which): self
     {
+        $trace = $this->runtime->logicBoard()->debug()->trace()->traceInterruptFlag ?? false;
+        if ($trace && $this->interruptFlag !== $which) {
+            $executor = $this->runtime->architectureProvider()->instructionExecutor();
+            $lastInstruction = $executor->lastInstruction();
+            $lastOpcodes = $executor->lastOpcodes();
+            $bytesStr = $lastOpcodes === null
+                ? 'n/a'
+                : implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $lastOpcodes));
+            $cs = $this->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+            $ip = $this->runtime->memory()->offset() & 0xFFFFFFFF;
+            $mnemonic = $lastInstruction === null
+                ? 'n/a'
+                : (preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($lastInstruction)) ?? 'insn');
+
+            $this->runtime->option()->logger()->info(sprintf(
+                'IF %d->%d at CS:IP=%04X:%08X last=%s bytes=%s',
+                $this->interruptFlag ? 1 : 0,
+                $which ? 1 : 0,
+                $cs,
+                $ip,
+                $mnemonic,
+                $bytesStr,
+            ));
+        }
         $this->interruptFlag = $which;
         return $this;
     }
@@ -427,19 +503,19 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         // Stack-aware pop when targeting ESP.
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
-            $espFullBefore = $this->fetch(RegisterType::ESP)->asBytesBySize(32);
-            $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($size);
+            $stackAddrSize = $this->stackAddressSize();
+            $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($stackAddrSize);
             $bytes = intdiv($size, 8);
 
-            $address = $this->stackLinearAddress($sp, $size, false);
+            $address = $this->stackLinearAddress($sp, $stackAddrSize, false);
             $value = 0;
             for ($i = 0; $i < $bytes; $i++) {
                 $value |= $this->readFromMemory($address + $i) << ($i * 8);
             }
-            $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $mask = $this->stackPointerMask($stackAddrSize);
             $newSp = ($sp + $bytes) & $mask;
 
-            $this->writeBySize(RegisterType::ESP, $newSp, $size);
+            $this->writeBySize(RegisterType::ESP, $newSp, $stackAddrSize);
             // Value is already in correct little-endian format from memory read
             // Pass alreadyDecoded=true to skip byte swap in asBytesBySize()
             return new MemoryAccessorFetchResult($value, $size, alreadyDecoded: true);
@@ -466,16 +542,17 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         // Stack-aware push when targeting ESP.
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
-            $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($size) & ((1 << $size) - 1);
+            $stackAddrSize = $this->stackAddressSize();
+            $sp = $this->fetch(RegisterType::ESP)->asBytesBySize($stackAddrSize);
             $bytes = intdiv($size, 8);
-            $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
+            $mask = $this->stackPointerMask($stackAddrSize);
             $newSp = ($sp - $bytes) & $mask;
-            $address = $this->stackLinearAddress($newSp, $size, true);
+            $address = $this->stackLinearAddress($newSp, $stackAddrSize, true);
 
-            $this->writeBySize(RegisterType::ESP, $newSp, $size);
+            $this->writeBySize(RegisterType::ESP, $newSp, $stackAddrSize);
             $this->allocate($address, $bytes, safe: false);
 
-            $masked = $value & ((1 << $size) - 1);
+            $masked = $value & $this->valueMask($size);
             for ($i = 0; $i < $bytes; $i++) {
                 $this->writeBySize($address + $i, ($masked >> ($i * 8)) & 0xFF, 8);
             }
@@ -601,15 +678,25 @@ class MemoryAccessor implements MemoryAccessorInterface
         return ($address >= 0 && $address <= 13) || ($address >= 16 && $address <= 25);
     }
 
-    private function stackLinearAddress(int $sp, int $size, bool $isWrite = false): int
+    private function stackLinearAddress(int $sp, int $stackAddrSize, bool $isWrite = false): int
     {
+        $cpu = $this->runtime->context()->cpu();
         $ssSelector = $this->fetch(RegisterType::SS)->asByte();
-        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
-        $isUser = $this->runtime->context()->cpu()->cpl() === 3;
-        $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
+        $mask = $this->stackPointerMask($stackAddrSize);
+        $linearMask = $cpu->isLongMode() ? 0x0000FFFFFFFFFFFF : ($cpu->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF);
+        $isUser = $cpu->cpl() === 3;
+        $pagingEnabled = $cpu->isPagingEnabled();
 
-        if ($this->runtime->context()->cpu()->isProtectedMode()) {
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $linear = ($sp & $mask) & $linearMask;
+            [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
+            if ($error !== 0 && $error !== 0xFFFFFFFF) {
+                $this->throwTranslationError($linear, $error);
+            }
+            return $physical;
+        }
+
+        if ($cpu->isProtectedMode()) {
             $descriptor = $this->segmentDescriptor($ssSelector);
             if ($descriptor === null || !$descriptor['present']) {
                 // Allow null/invalid stack selector for boot compatibility
@@ -624,7 +711,7 @@ class MemoryAccessor implements MemoryAccessorInterface
             }
 
             // SS must be writable data, and DPL == CPL == RPL.
-            $cpl = $this->runtime->context()->cpu()->cpl();
+            $cpl = $cpu->cpl();
             $rpl = $ssSelector & 0x3;
             $dpl = $descriptor['dpl'] ?? 0;
             $isWritable = ($descriptor['type'] & 0x2) !== 0;
@@ -650,12 +737,76 @@ class MemoryAccessor implements MemoryAccessorInterface
             return $physical;
         }
 
-        $linear = ((($ssSelector << 4) & 0xFFFFF) + ($sp & $mask)) & $linearMask;
+        // Real mode: still honor cached descriptor (Unreal Mode) if present
+        $cached = $this->runtime->context()->cpu()->getCachedSegmentDescriptor(RegisterType::SS);
+        if ($cached !== null) {
+            $limit = $cached['limit'] ?? $mask;
+            if ($limit <= 0xFFFF) {
+                $cached = null;
+            }
+        }
+        if ($cached !== null) {
+            $effSp = $sp & $mask;
+            if ($effSp > $limit) {
+                $effSp = $sp & 0xFFFF;
+            }
+            $base = $cached['base'] ?? (($ssSelector << 4) & 0xFFFFF);
+            $linear = ($base + $effSp) & $linearMask;
+        } else {
+            $linear = ((($ssSelector << 4) & 0xFFFFF) + ($sp & $mask)) & $linearMask;
+        }
         [$physical, $error] = $this->translateLinear($linear, $isWrite, $isUser, $pagingEnabled, $linearMask);
         if ($error !== 0 && $error !== 0xFFFFFFFF) {
             $this->throwTranslationError($linear, $error);
         }
         return $physical;
+    }
+
+    private function stackAddressSize(): int
+    {
+        $cpu = $this->runtime->context()->cpu();
+
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            return 64;
+        }
+
+        $cached = $cpu->getCachedSegmentDescriptor(RegisterType::SS);
+
+        $default = is_array($cached) ? ($cached['default'] ?? null) : null;
+        if ($default === 32 || $default === 16 || $default === 64) {
+            return (int) $default;
+        }
+
+        if ($cpu->isProtectedMode()) {
+            $ss = $this->fetch(RegisterType::SS)->asByte() & 0xFFFF;
+            $descriptor = $this->segmentDescriptor($ss);
+            $segDefault = is_array($descriptor) ? ($descriptor['default'] ?? null) : null;
+            if ($segDefault === 32 || $segDefault === 16) {
+                return (int) $segDefault;
+            }
+            return $cpu->defaultOperandSize() === 32 ? 32 : 16;
+        }
+
+        return 16;
+    }
+
+    private function stackPointerMask(int $stackAddrSize): int
+    {
+        return match ($stackAddrSize) {
+            32 => 0xFFFFFFFF,
+            16 => 0xFFFF,
+            default => -1, // best-effort for 64-bit (PHP int is signed)
+        };
+    }
+
+    private function valueMask(int $valueSize): int
+    {
+        return match ($valueSize) {
+            32 => 0xFFFFFFFF,
+            16 => 0xFFFF,
+            8 => 0xFF,
+            default => ($valueSize >= 63) ? -1 : ((1 << $valueSize) - 1),
+        };
     }
 
     private function throwTranslationError(int $linear, int $error): void
@@ -708,6 +859,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         for ($i = 0; $i < 4; $i++) {
             $this->writeToMemory($address + $i, ($value >> ($i * 8)) & 0xFF);
         }
+        $this->invalidateInstructionCachesOnWrite($address, 4);
     }
 
     public function writePhysical64(int $address, int $value): void
@@ -757,6 +909,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $physical = $linear & $linearMask;
         $this->writeToMemory($physical, $value & 0xFF);
+        $this->invalidateInstructionCachesOnWrite($linear, 1);
         return 0;
     }
 
@@ -765,6 +918,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $physical = $linear & $linearMask;
         $this->writeToMemory($physical, $value & 0xFF);
         $this->writeToMemory($physical + 1, ($value >> 8) & 0xFF);
+        $this->invalidateInstructionCachesOnWrite($linear, 2);
         return 0;
     }
 
@@ -786,6 +940,7 @@ class MemoryAccessor implements MemoryAccessorInterface
     {
         $this->writeToMemory($address, $value & 0xFF);
         $this->writeToMemory($address + 1, ($value >> 8) & 0xFF);
+        $this->invalidateInstructionCachesOnWrite($address, 2);
     }
 
     private function segmentDescriptor(int $selector): ?array
@@ -831,6 +986,7 @@ class MemoryAccessor implements MemoryAccessorInterface
         $dpl = ($b5 >> 5) & 0x3;
         $type = $b5 & 0x0F;
         $executable = ($type & 0x08) !== 0;
+        $default = ($b6 & 0x40) !== 0 ? 32 : 16;
 
         return [
             'base' => $baseAddr & 0xFFFFFFFF,
@@ -839,6 +995,7 @@ class MemoryAccessor implements MemoryAccessorInterface
             'dpl' => $dpl,
             'type' => $type,
             'executable' => $executable,
+            'default' => $default,
         ];
     }
 }

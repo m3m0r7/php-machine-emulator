@@ -9,7 +9,7 @@ namespace PHPMachineEmulator\Util;
  *
  * Uses native PHP int with proper masking for unsigned behavior.
  */
-class UInt32
+class UInt32 implements UnsignedIntegerInterface
 {
     private const MASK_32 = 0xFFFFFFFF;
     private const SIGN_BIT = 0x80000000;
@@ -19,6 +19,17 @@ class UInt32
     private function __construct(int $value)
     {
         $this->value = $value & self::MASK_32;
+    }
+
+    private function otherValue(UnsignedIntegerInterface|int|string $other): int
+    {
+        if ($other instanceof self) {
+            return $other->value;
+        }
+        if ($other instanceof UnsignedIntegerInterface) {
+            return $other->toInt();
+        }
+        return (int) $other;
     }
 
     public static function of(int $value): self
@@ -69,62 +80,62 @@ class UInt32
 
     // Arithmetic operations
 
-    public function add(self|int $other): self
+    public function add(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherVal = $other instanceof self ? $other->value : $other;
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return new self($this->value + $otherVal);
     }
 
-    public function sub(self|int $other): self
+    public function sub(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherVal = $other instanceof self ? $other->value : $other;
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return new self($this->value - $otherVal);
     }
 
-    public function mul(self|int $other): self
+    public function mul(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherVal = $other instanceof self ? $other->value : $other;
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return new self($this->value * $otherVal);
     }
 
     /**
      * Multiply and return full 64-bit result as UInt64.
      */
-    public function mulFull(self|int $other): UInt64
+    public function mulFull(UnsignedIntegerInterface|int|string $other): UInt64
     {
-        $otherVal = $other instanceof self ? $other->value : ($other & self::MASK_32);
-        return UInt64::of($this->value * $otherVal);
+        $otherVal = $this->otherValue($other) & self::MASK_32;
+        return UInt64::of($this->value)->mul($otherVal);
     }
 
-    public function div(self|int $other): self
+    public function div(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherVal = $other instanceof self ? $other->value : $other;
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return new self(intdiv($this->value, $otherVal));
     }
 
-    public function mod(self|int $other): self
+    public function mod(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherVal = $other instanceof self ? $other->value : $other;
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return new self($this->value % $otherVal);
     }
 
     // Bitwise operations
 
-    public function and(self|int $other): self
+    public function and(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherVal = $other instanceof self ? $other->value : $other;
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return new self($this->value & $otherVal);
     }
 
-    public function or(self|int $other): self
+    public function or(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherVal = $other instanceof self ? $other->value : $other;
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return new self($this->value | $otherVal);
     }
 
-    public function xor(self|int $other): self
+    public function xor(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherVal = $other instanceof self ? $other->value : $other;
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return new self($this->value ^ $otherVal);
     }
 
@@ -170,33 +181,33 @@ class UInt32
 
     // Comparison
 
-    public function eq(self|int $other): bool
+    public function eq(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherVal = $other instanceof self ? $other->value : ($other & self::MASK_32);
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return $this->value === $otherVal;
     }
 
-    public function lt(self|int $other): bool
+    public function lt(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherVal = $other instanceof self ? $other->value : ($other & self::MASK_32);
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return $this->value < $otherVal;
     }
 
-    public function lte(self|int $other): bool
+    public function lte(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherVal = $other instanceof self ? $other->value : ($other & self::MASK_32);
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return $this->value <= $otherVal;
     }
 
-    public function gt(self|int $other): bool
+    public function gt(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherVal = $other instanceof self ? $other->value : ($other & self::MASK_32);
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return $this->value > $otherVal;
     }
 
-    public function gte(self|int $other): bool
+    public function gte(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherVal = $other instanceof self ? $other->value : ($other & self::MASK_32);
+        $otherVal = $this->otherValue($other) & self::MASK_32;
         return $this->value >= $otherVal;
     }
 

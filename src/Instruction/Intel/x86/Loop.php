@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -19,7 +19,7 @@ class Loop implements InstructionInterface
      * Key: loop start address, Value: pattern info array or false if not a pattern
      * @var array<int, array|false>
      */
-    private static array $patternCache = [];
+    private array $patternCache = [];
 
     public function opcodes(): array
     {
@@ -57,14 +57,15 @@ class Loop implements InstructionInterface
 
         // Optimization: Detect and bulk execute simple byte copy loops
         // Pattern: MOV AL, [source] / CALL output_routine / LOOP
-        // Only optimize when source and destination do NOT overlap
-        // DISABLED: This optimization has bugs that cause memory corruption
-        // if ($counter > 1 && $operand >= -15 && $operand <= -8) {
-        //     $result = $this->tryBulkByteCopyLoop($runtime, $loopTarget, $pos, $counter, $size);
-        //     if ($result !== null) {
-        //         return $result;
-        //     }
-        // }
+        // Only optimize when source and destination do NOT overlap.
+        $patternConfig = $runtime->logicBoard()->debug()->patterns();
+        $patternEnabled = $patternConfig->enableLzmaPattern && $patternConfig->enableLzmaLoopOptimization;
+        if ($patternEnabled && $counter > 7 && $operand >= -15 && $operand <= -8) {
+            $result = $this->tryBulkByteCopyLoop($runtime, $loopTarget, $pos, $counter, $size);
+            if ($result !== null) {
+                return $result;
+            }
+        }
 
         $counter = ($counter - 1) & ($size === 32 ? 0xFFFFFFFF : 0xFFFF);
 
@@ -72,8 +73,13 @@ class Loop implements InstructionInterface
         $runtime->memoryAccessor()
             ->writeBySize(RegisterType::ECX, $counter, $size);
 
-        $runtime->option()->logger()->debug(sprintf('LOOP: counter=%d, operand=%d, pos=0x%X, target=0x%X',
-            $counter, $operand, $pos, $pos + $operand));
+        $runtime->option()->logger()->debug(sprintf(
+            'LOOP: counter=%d, operand=%d, pos=0x%X, target=0x%X',
+            $counter,
+            $operand,
+            $pos,
+            $pos + $operand
+        ));
 
         // Jump if counter is non-zero
         if ($counter === 0) {
@@ -114,8 +120,8 @@ class Loop implements InstructionInterface
         int $size
     ): ?ExecutionStatus {
         // Check pattern cache first
-        if (isset(self::$patternCache[$loopTarget])) {
-            $pattern = self::$patternCache[$loopTarget];
+        if (isset($this->patternCache[$loopTarget])) {
+            $pattern = $this->patternCache[$loopTarget];
             if ($pattern === false) {
                 return null; // Not a recognized pattern
             }
@@ -134,7 +140,7 @@ class Loop implements InstructionInterface
 
             // Check for MOV r8, r/m8 (opcode 0x8A)
             if ($byte1 !== 0x8A) {
-                self::$patternCache[$loopTarget] = false;
+                $this->patternCache[$loopTarget] = false;
                 return null;
             }
 
@@ -145,7 +151,7 @@ class Loop implements InstructionInterface
 
             // We need MOV AL, [something] - reg should be 0 (AL)
             if ($reg !== 0) {
-                self::$patternCache[$loopTarget] = false;
+                $this->patternCache[$loopTarget] = false;
                 return null;
             }
 
@@ -171,7 +177,7 @@ class Loop implements InstructionInterface
                 } elseif ($sibBase === 6) { // ESI
                     $sourceReg = RegisterType::ESI;
                 } else {
-                    self::$patternCache[$loopTarget] = false;
+                    $this->patternCache[$loopTarget] = false;
                     return null;
                 }
             } else {
@@ -190,7 +196,7 @@ class Loop implements InstructionInterface
             }
 
             if ($sourceReg === null) {
-                self::$patternCache[$loopTarget] = false;
+                $this->patternCache[$loopTarget] = false;
                 return null;
             }
 
@@ -204,7 +210,7 @@ class Loop implements InstructionInterface
             // Next should be CALL (0xE8)
             $callOpcode = $memory->byte();
             if ($callOpcode !== 0xE8) {
-                self::$patternCache[$loopTarget] = false;
+                $this->patternCache[$loopTarget] = false;
                 return null;
             }
 
@@ -229,15 +235,17 @@ class Loop implements InstructionInterface
                 'sibScale' => $sibScale,
             ];
 
-            self::$patternCache[$loopTarget] = $pattern;
+            $this->patternCache[$loopTarget] = $pattern;
 
             $runtime->option()->logger()->debug(sprintf(
                 'LOOP: Detected bulk byte-copy pattern at 0x%X, source=%s, callTarget=0x%X, counter=%d',
-                $loopTarget, $sourceReg->name, $callTarget, $counter
+                $loopTarget,
+                $sourceReg->name,
+                $callTarget,
+                $counter
             ));
 
             return $this->executeBulkByteCopy($runtime, $pattern, $counter, $loopPos, $size);
-
         } finally {
             // Restore original position if we didn't bulk execute
             $memory->setOffset($originalOffset);
@@ -286,7 +294,6 @@ class Loop implements InstructionInterface
                     $indexValue = $indexValue - 0x100000000;
                 }
             }
-
         }
 
         // Calculate initial source address
@@ -330,17 +337,50 @@ class Loop implements InstructionInterface
 
         $runtime->option()->logger()->debug(sprintf(
             'LOOP: Bulk copying %d bytes from 0x%08X to 0x%08X (step=%d, sib=%d)',
-            $counter, $sourceAddr, $destAddr, $step, $useSib ? 1 : 0
+            $counter,
+            $sourceAddr,
+            $destAddr,
+            $step,
+            $useSib ? 1 : 0
         ));
 
-        // Bulk copy bytes
+        // Fast path: contiguous forward copy with no overlap.
+        if ($step === 1) {
+            $srcStart = $sourceAddr & 0xFFFFFFFF;
+            $dstStart = $destAddr & 0xFFFFFFFF;
+            $len = $counter & 0xFFFFFFFF;
+            if ($len > 0) {
+                $srcEnd = ($srcStart + $len - 1) & 0xFFFFFFFF;
+                $dstEnd = ($dstStart + $len - 1) & 0xFFFFFFFF;
+                $overlap = !($dstEnd < $srcStart || $dstStart > $srcEnd);
+                $memory = $runtime->memory();
+                if (
+                    !$overlap
+                    && $memory->ensureCapacity($srcEnd + 1)
+                    && $memory->ensureCapacity($dstEnd + 1)
+                ) {
+                    $memory->copy($memory, $srcStart, $dstStart, $len);
+                    // Update EDI and ECX below, then return.
+                    $newDest = ($dstStart + $len) & 0xFFFFFFFF;
+                    $ma->writeBySize(RegisterType::EDI, $newDest, 32);
+                    $ma->writeBySize(RegisterType::ECX, 0, $size);
+                    if ($len > 0) {
+                        $lastByte = $this->readMemory8($runtime, $srcStart + $len - 1);
+                        $ma->writeToLowBit(RegisterType::EAX, $lastByte);
+                    }
+                    if ($runtime->option()->shouldChangeOffset()) {
+                        $runtime->memory()->setOffset($loopPos);
+                    }
+                    return ExecutionStatus::SUCCESS;
+                }
+            }
+        }
+
+        // Fallback: per-byte copy.
         for ($i = 0; $i < $counter; $i++) {
-            // Read byte from source
-            // For SIB pattern, source moves with destination (copy from history)
             $currentSource = ($sourceAddr + ($i * $step)) & 0xFFFFFFFF;
             $byte = $this->readMemory8($runtime, $currentSource);
 
-            // Write to destination (STOSB behavior)
             $currentDest = ($destAddr + ($i * $step)) & 0xFFFFFFFF;
             $ma->allocate($currentDest, safe: false);
             $ma->writeRawByte($currentDest, $byte);

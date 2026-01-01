@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
+use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -34,32 +34,42 @@ class Movsx implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->context()->cpu()->operandSize();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
+        $cpu = $runtime->context()->cpu();
+        $opSize = $cpu->operandSize();
 
         // Determine if byte or word source based on opcode
         $isByte = ($opcode & 0xFF) === 0xBE || ($opcode === 0x0FBE);
 
-        $value = $isByte
-            ? $this->readRm8($runtime, $reader, $modrm)
-            : $this->readRm16($runtime, $reader, $modrm);
+        $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+        if ($isRegister) {
+            $rmCode = $modrm->registerOrMemoryAddress();
 
-        // Sign extend the value
-        if ($isByte) {
-            // Sign extend 8-bit to 16/32-bit
-            if ($value & 0x80) {
-                $value = $opSize === 32 ? ($value | 0xFFFFFF00) : ($value | 0xFF00);
+            if ($isByte) {
+                $value = $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()
+                    ? $this->read8BitRegister64($runtime, $rmCode, true, $cpu->rexB())
+                    : $this->read8BitRegister($runtime, $rmCode);
+            } else {
+                $rmReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+                    ? Register::findGprByCode($rmCode, $cpu->rexB())
+                    : $rmCode;
+                $value = $this->readRegisterBySize($runtime, $rmReg, 16);
             }
         } else {
-            // Sign extend 16-bit to 32-bit
-            if ($opSize === 32 && ($value & 0x8000)) {
-                $value = $value | 0xFFFF0000;
-            }
+            $addr = $this->rmLinearAddress($runtime, $memory, $modrm);
+            $value = $isByte
+                ? $this->readMemory8($runtime, $addr)
+                : $this->readMemory16($runtime, $addr);
         }
 
-        $mask = $opSize === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $this->writeRegisterBySize($runtime, $modrm->registerOrOPCode(), $value & $mask, $opSize);
+        $value = $this->signExtend($value, $isByte ? 8 : 16);
+
+        $destReg = $modrm->registerOrOPCode();
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $destReg = Register::findGprByCode($destReg, $cpu->rexR());
+        }
+        $this->writeRegisterBySize($runtime, $destReg, $value, $opSize);
 
         return ExecutionStatus::SUCCESS;
     }

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
@@ -20,6 +21,7 @@ class KeyboardController
     private bool $expectingMouseCommand = false;
     private int $commandByte = 0x00;
     private bool $mouseAwaitingData = false;
+    private int $outputPort = 0x01; // bit0=1 (not reset), bit1=A20 (synced from CPU)
 
     // SDL key tracking
     private ?int $lastSDLScancode = null;
@@ -55,14 +57,7 @@ class KeyboardController
 
         if (empty($this->queue)) {
             // Fallback to stdin
-            try {
-                $byte = $runtime->option()->IO()->input()->byte();
-                if ($byte !== null) {
-                    $this->enqueueScancode($byte);
-                }
-            } catch (\Throwable) {
-                // ignore input failures
-            }
+            $this->pollStdinInput($runtime);
         }
 
         if (empty($this->queue)) {
@@ -101,8 +96,10 @@ class KeyboardController
             }
 
             // Check for key repeat
-            if ($sdlScancode->value === $this->lastSDLScancode &&
-                ($currentTimeMs - $this->lastSDLKeyTime) < self::SDL_KEY_REPEAT_DELAY_MS) {
+            if (
+                $sdlScancode->value === $this->lastSDLScancode &&
+                ($currentTimeMs - $this->lastSDLKeyTime) < self::SDL_KEY_REPEAT_DELAY_MS
+            ) {
                 continue;
             }
 
@@ -121,6 +118,42 @@ class KeyboardController
             // Only process one key at a time
             return;
         }
+    }
+
+    private function pollStdinInput(RuntimeInterface $runtime): void
+    {
+        $screenWriter = $runtime->context()->screen()->screenWriter();
+        if ($screenWriter instanceof WindowScreenWriter) {
+            return;
+        }
+
+        try {
+            $byte = $runtime->option()->IO()->input()->byte();
+            if ($byte !== null && $byte !== 0) {
+                // Convert LF to CR for terminal compatibility
+                if ($byte === 0x0A) {
+                    $byte = 0x0D;
+                }
+                $scanCode = $this->scanCodeForAscii($byte & 0xFF);
+                if ($scanCode !== null) {
+                    $this->enqueueScancode($scanCode);
+                }
+            }
+        } catch (\Throwable) {
+            // ignore input failures
+        }
+    }
+
+    private function scanCodeForAscii(int $ascii): ?int
+    {
+        return match ($ascii & 0xFF) {
+            0x0D => 0x1C, // Enter
+            0x1B => 0x01, // Esc
+            0x08 => 0x0E, // Backspace
+            0x09 => 0x0F, // Tab
+            0x20 => 0x39, // Space
+            default => null,
+        };
     }
 
     public function readStatus(): int
@@ -151,6 +184,9 @@ class KeyboardController
         // Poll SDL input if queue is empty
         if (empty($this->queue)) {
             $this->pollSDLInput($runtime);
+        }
+        if (empty($this->queue)) {
+            $this->pollStdinInput($runtime);
         }
         return $this->readStatus();
     }
@@ -192,6 +228,16 @@ class KeyboardController
                 $this->expectingOutputPort = true;
                 $runtime->context()->cpu()->setWaitingA20OutputPort(true);
                 break;
+            case 0xD0: // read output port
+                // Reflect current CPU A20 state in bit 1.
+                $value = $this->outputPort & 0xFF;
+                if ($runtime->context()->cpu()->isA20Enabled()) {
+                    $value |= 0x02;
+                } else {
+                    $value &= ~0x02;
+                }
+                $this->enqueue($value, false);
+                break;
             case 0xD2: // write output buffer for CPU (keyboard)
             case 0xD3: // write output buffer for keyboard interface
                 $this->expectingOutputBuffer = true;
@@ -227,6 +273,7 @@ class KeyboardController
         if ($this->expectingOutputPort) {
             $this->expectingOutputPort = false;
             $runtime->context()->cpu()->setWaitingA20OutputPort(false);
+            $this->outputPort = $value & 0xFF;
             $runtime->context()->cpu()->enableA20(($value & 0x02) !== 0);
             $this->inputBufferFull = false;
             return;

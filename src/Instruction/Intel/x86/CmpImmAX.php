@@ -1,14 +1,13 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -30,12 +29,12 @@ class CmpImmAX implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
         $cpu = $runtime->context()->cpu();
 
         if ($opcode === 0x3C) {
             // CMP AL, imm8
-            $operand = $enhancedStreamReader->streamReader()->byte();
+            $operand = $memory->byte();
             $leftHand = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asLowBit();
             $bitSize = 8;
             $mask = 0xFF;
@@ -43,12 +42,12 @@ class CmpImmAX implements InstructionInterface
             // 0x3D: CMP AX/EAX, imm16/imm32
             $use32 = $cpu->shouldUse32bit();
             if ($use32) {
-                $operand = $enhancedStreamReader->dword();
+                $operand = $memory->dword();
                 $leftHand = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(32);
                 $bitSize = 32;
                 $mask = 0xFFFFFFFF;
             } else {
-                $operand = $enhancedStreamReader->short();
+                $operand = $memory->short();
                 $leftHand = $runtime->memoryAccessor()->fetch(RegisterType::EAX)->asBytesBySize(16);
                 $bitSize = 16;
                 $mask = 0xFFFF;

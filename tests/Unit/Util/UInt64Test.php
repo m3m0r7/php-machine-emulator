@@ -228,4 +228,48 @@ class UInt64Test extends TestCase
 
         $this->assertTrue($a->eq(100));
     }
+
+    #[Test]
+    public function mulFullReturnsHighAndLow(): void
+    {
+        $a = UInt64::of('18446744073709551615'); // 0xFFFFFFFFFFFFFFFF
+        $b = UInt64::of(2);
+        [$low, $high] = $a->mulFull($b);
+
+        $this->assertSame('18446744073709551614', $low->toString()); // 0xFFFFFFFFFFFFFFFE
+        $this->assertSame(1, $high->toNative());
+    }
+
+    #[Test]
+    public function mulFullSignedHandlesNegativeOperands(): void
+    {
+        $a = UInt64::of(-2);
+        $b = UInt64::of(3);
+        [$low, $high] = $a->mulFullSigned($b);
+
+        $this->assertSame('18446744073709551610', $low->toString()); // 0xFFFFFFFFFFFFFFFA
+        $this->assertSame('18446744073709551615', $high->toString()); // 0xFFFFFFFFFFFFFFFF
+    }
+
+    #[Test]
+    public function divMod128DividesUnsigned128(): void
+    {
+        $high = UInt64::of(1);
+        $low = UInt64::of(0);
+        [$quotient, $remainder] = UInt64::divMod128($high, $low, 2);
+
+        $this->assertSame('9223372036854775808', $quotient->toString());
+        $this->assertTrue($remainder->isZero());
+    }
+
+    #[Test]
+    public function divModSigned128DividesSigned128(): void
+    {
+        $high = UInt64::of(0);
+        $low = UInt64::of(6);
+        [$quotient, $remainder] = UInt64::divModSigned128($high, $low, 2);
+
+        $this->assertSame(3, $quotient);
+        $this->assertSame(0, $remainder);
+    }
 }

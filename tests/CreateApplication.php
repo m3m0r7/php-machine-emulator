@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Tests;
 
 use PHPMachineEmulator\ArchitectureType;
+use PHPMachineEmulator\BIOS\BIOS;
 use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\Display\Writer\BufferScreenWriterFactory;
 use PHPMachineEmulator\IO\Buffer;
 use PHPMachineEmulator\IO\IO;
 use PHPMachineEmulator\IO\StdIn;
 use PHPMachineEmulator\LogicBoard\CPU\CPUContext;
+use PHPMachineEmulator\LogicBoard\Debug\DebugContext;
 use PHPMachineEmulator\LogicBoard\Display\DisplayContext;
 use PHPMachineEmulator\LogicBoard\ExternalDevice\ExternalDeviceContext;
 use PHPMachineEmulator\LogicBoard\LogicBoard;
@@ -30,6 +32,15 @@ use Tests\Utils\EmulatedKeyboardStream;
 
 trait CreateApplication
 {
+    protected static function bootBios(MachineInterface $machine): void
+    {
+        BIOS::start(
+            $machine->runtime(BIOS::BIOS_ENTRYPOINT),
+            $machine->logicBoard()->media(),
+            $machine->option(),
+        );
+    }
+
     public static function machineInitialization(): array
     {
         return [
@@ -81,6 +92,7 @@ trait CreateApplication
             storageContext: new StorageContext(new StorageInfo(0x10000)),
             mediaContext: new MediaContext(new MediaInfo($bootStream, $bootType)),
             externalDeviceContext: new ExternalDeviceContext(),
+            debugContext: new DebugContext(),
         );
     }
 }

@@ -12,7 +12,8 @@ class AddressMap implements AddressMapInterface
     protected array $addresses = [];
 
     public function __construct(protected RuntimeInterface $runtime)
-    {}
+    {
+    }
 
     public function register(int $address, DiskInterface $disk): self
     {

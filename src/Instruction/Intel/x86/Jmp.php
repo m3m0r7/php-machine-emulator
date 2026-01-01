@@ -1,14 +1,12 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
-use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Jmp implements InstructionInterface
@@ -23,11 +21,23 @@ class Jmp implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $enhancedStreamReader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
+        $cpu = $runtime->context()->cpu();
 
-        $relOffset = $runtime->context()->cpu()->operandSize() === 32
-            ? $enhancedStreamReader->signedDword()
-            : $enhancedStreamReader->signedShort();
+        // In 64-bit mode, JMP rel32 always uses a 32-bit signed displacement (rel32),
+        // and the operand-size override prefix (0x66) is ignored.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $relOffset = $memory->signedDword();
+            $pos = $runtime->memory()->offset();
+            if ($runtime->option()->shouldChangeOffset()) {
+                $runtime->memory()->setOffset($pos + $relOffset);
+            }
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $relOffset = $cpu->operandSize() === 32
+            ? $memory->signedDword()
+            : $memory->signedShort();
 
         $pos = $runtime
                 ->memory()

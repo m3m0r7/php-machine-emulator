@@ -13,6 +13,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\IterationContext;
 use PHPMachineEmulator\Runtime\IterationContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeCPUContextInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class TestCPUContext implements RuntimeCPUContextInterface
 {
@@ -35,14 +36,30 @@ class TestCPUContext implements RuntimeCPUContextInterface
     private int $iopl = 0;
     private bool $nt = false;
     private int $interruptDeliveryBlock = 0;
-    private int $rex = 0;
+    private int $rex = 0; // lower 4 bits (WRXB)
+    private bool $hasRex = false;
     private ?RegisterType $segmentOverride = null;
+    /** @var array<int, array{linear:int,size:int,bytes:array<int,int>}> */
+    private array $interruptFrames = [];
     private PicState $picState;
     private ApicState $apicState;
     private KeyboardController $keyboardController;
     private Cmos $cmos;
     private Pit $pit;
     private IterationContextInterface $iterationContext;
+    /**
+     * XMM register file (XMM0-XMM15), stored as 4x32-bit dwords.
+     *
+     * @var array<int, array{int,int,int,int}>
+     */
+    private array $xmm = [];
+
+    /**
+     * MXCSR (SSE control/status).
+     */
+    private int $mxcsr = 0x1F80;
+    /** @var array<int, UInt64> */
+    private array $msr = [];
 
     public function __construct()
     {
@@ -68,7 +85,11 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function setDefaultOperandSize(int $size): void
     {
-        $this->defaultOperandSize = $size === 32 ? 32 : 16;
+        $this->defaultOperandSize = match ($size) {
+            64 => 64,
+            32 => 32,
+            default => 16,
+        };
     }
 
     public function defaultOperandSize(): int
@@ -78,6 +99,11 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function shouldUse32bit(bool $consume = true): bool
     {
+        // In 64-bit mode, REX.W takes precedence (operand size becomes 64, not 32)
+        if ($this->longMode && !$this->compatibilityMode && $this->rexW()) {
+            return false;
+        }
+
         $override = $consume ? $this->consumeOperandSizeOverride() : $this->operandSizeOverride;
         $default32 = $this->defaultOperandSize === 32;
         return $override ? !$default32 : $default32;
@@ -85,17 +111,41 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function shouldUse16bit(bool $consume = true): bool
     {
+        if ($this->longMode && !$this->compatibilityMode) {
+            // In 64-bit mode, 0x66 prefix toggles between 32 and 16 when REX.W=0
+            $override = $consume ? $this->consumeOperandSizeOverride() : $this->operandSizeOverride;
+            return $override && !$this->rexW();
+        }
+
         return !$this->shouldUse32bit($consume);
     }
 
     public function operandSize(): int
     {
+        if ($this->longMode && !$this->compatibilityMode) {
+            if ($this->rexW()) {
+                return 64;
+            }
+            if ($this->operandSizeOverride) {
+                return 16;
+            }
+            return 32;
+        }
+
         return $this->shouldUse32bit(false) ? 32 : 16;
     }
 
     public function setProtectedMode(bool $enabled): void
     {
         $this->protectedMode = $enabled;
+        if (!$enabled) {
+            // Real mode defaults to 16-bit and is not in long/compat mode.
+            $this->defaultOperandSize = 16;
+            $this->defaultAddressSize = 16;
+            $this->longMode = false;
+            $this->compatibilityMode = false;
+            $this->clearRex();
+        }
     }
 
     public function isProtectedMode(): bool
@@ -117,7 +167,11 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function setDefaultAddressSize(int $size): void
     {
-        $this->defaultAddressSize = $size === 32 ? 32 : 16;
+        $this->defaultAddressSize = match ($size) {
+            64 => 64,
+            32 => 32,
+            default => 16,
+        };
     }
 
     public function defaultAddressSize(): int
@@ -127,6 +181,12 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function shouldUse32bitAddress(bool $consume = true): bool
     {
+        if ($this->longMode && !$this->compatibilityMode) {
+            // In 64-bit mode, 0x67 prefix toggles to 32-bit addressing
+            $override = $consume ? $this->consumeAddressSizeOverride() : $this->addressSizeOverride;
+            return $override;
+        }
+
         $override = $consume ? $this->consumeAddressSizeOverride() : $this->addressSizeOverride;
         $default32 = $this->defaultAddressSize === 32;
         return $override ? !$default32 : $default32;
@@ -134,11 +194,21 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function shouldUse16bitAddress(bool $consume = true): bool
     {
+        if ($this->longMode && !$this->compatibilityMode) {
+            // 16-bit addressing is not available in 64-bit mode
+            return false;
+        }
+
         return !$this->shouldUse32bitAddress($consume);
     }
 
     public function addressSize(): int
     {
+        if ($this->longMode && !$this->compatibilityMode) {
+            // 64-bit mode: default 64-bit, 0x67 gives 32-bit
+            return $this->addressSizeOverride ? 32 : 64;
+        }
+
         return $this->shouldUse32bitAddress(false) ? 32 : 16;
     }
 
@@ -232,10 +302,11 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function setTaskRegister(int $selector, int $base, int $limit): void
     {
+        $baseValue = $this->longMode ? $base : ($base & 0xFFFFFFFF);
         $this->taskRegister = [
             'selector' => $selector & 0xFFFF,
-            'base' => $base & 0xFFFFFFFF,
-            'limit' => $limit & 0xFFFF,
+            'base' => $baseValue,
+            'limit' => $limit & 0xFFFFFFFF,
         ];
     }
 
@@ -246,10 +317,11 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function setLdtr(int $selector, int $base, int $limit): void
     {
+        $baseValue = $this->longMode ? $base : ($base & 0xFFFFFFFF);
         $this->ldtr = [
             'selector' => $selector & 0xFFFF,
-            'base' => $base & 0xFFFFFFFF,
-            'limit' => $limit & 0xFFFF,
+            'base' => $baseValue,
+            'limit' => $limit & 0xFFFFFFFF,
         ];
     }
 
@@ -290,6 +362,28 @@ class TestCPUContext implements RuntimeCPUContextInterface
             return true;
         }
         return false;
+    }
+
+    public function pushInterruptFrame(array $frame): void
+    {
+        $this->interruptFrames[] = $frame;
+    }
+
+    public function popInterruptFrame(): ?array
+    {
+        if ($this->interruptFrames === []) {
+            return null;
+        }
+        return array_pop($this->interruptFrames);
+    }
+
+    public function peekInterruptFrame(): ?array
+    {
+        $count = count($this->interruptFrames);
+        if ($count === 0) {
+            return null;
+        }
+        return $this->interruptFrames[$count - 1];
     }
 
     public function picState(): PicState
@@ -343,6 +437,12 @@ class TestCPUContext implements RuntimeCPUContextInterface
     public function setLongMode(bool $enabled): void
     {
         $this->longMode = $enabled;
+        if ($enabled) {
+            $this->protectedMode = true;
+            // Long mode defaults: 32-bit operands, 64-bit addresses
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 64;
+        }
     }
 
     public function isLongMode(): bool
@@ -353,6 +453,13 @@ class TestCPUContext implements RuntimeCPUContextInterface
     public function setCompatibilityMode(bool $enabled): void
     {
         $this->compatibilityMode = $enabled;
+        if ($enabled) {
+            $this->longMode = true;
+            $this->protectedMode = true;
+            // Compatibility mode: 32-bit operands and addresses
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 32;
+        }
     }
 
     public function isCompatibilityMode(): bool
@@ -360,9 +467,36 @@ class TestCPUContext implements RuntimeCPUContextInterface
         return $this->compatibilityMode;
     }
 
+    public function syncCompatibilityModeWithCs(): void
+    {
+        if (!$this->longMode) {
+            return;
+        }
+
+        $cached = $this->getCachedSegmentDescriptor(RegisterType::CS);
+        if (!is_array($cached) || !array_key_exists('long', $cached)) {
+            return;
+        }
+
+        $shouldCompat = !($cached['long'] ?? false);
+        if ($shouldCompat === $this->compatibilityMode) {
+            return;
+        }
+
+        $this->compatibilityMode = $shouldCompat;
+        if ($shouldCompat) {
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 32;
+        } else {
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 64;
+        }
+    }
+
     public function setRex(int $rex): void
     {
-        $this->rex = $rex & 0xFF;
+        $this->rex = $rex & 0x0F;
+        $this->hasRex = true;
     }
 
     public function rex(): int
@@ -372,32 +506,33 @@ class TestCPUContext implements RuntimeCPUContextInterface
 
     public function hasRex(): bool
     {
-        return $this->rex !== 0;
+        return $this->hasRex;
     }
 
     public function rexW(): bool
     {
-        return ($this->rex & 0x08) !== 0;
+        return $this->hasRex && (($this->rex & 0x08) !== 0);
     }
 
     public function rexR(): bool
     {
-        return ($this->rex & 0x04) !== 0;
+        return $this->hasRex && (($this->rex & 0x04) !== 0);
     }
 
     public function rexX(): bool
     {
-        return ($this->rex & 0x02) !== 0;
+        return $this->hasRex && (($this->rex & 0x02) !== 0);
     }
 
     public function rexB(): bool
     {
-        return ($this->rex & 0x01) !== 0;
+        return $this->hasRex && (($this->rex & 0x01) !== 0);
     }
 
     public function clearRex(): void
     {
         $this->rex = 0;
+        $this->hasRex = false;
     }
 
     public function iteration(): IterationContextInterface
@@ -440,5 +575,52 @@ class TestCPUContext implements RuntimeCPUContextInterface
             return false;
         }
         return isset($cached['limit']) && $cached['limit'] > 0xFFFF;
+    }
+
+    public function getXmm(int $index): array
+    {
+        $this->initXmm();
+        $index &= 0xF;
+        return $this->xmm[$index];
+    }
+
+    public function setXmm(int $index, array $value): void
+    {
+        $this->initXmm();
+        $index &= 0xF;
+        $this->xmm[$index] = [
+            $value[0] & 0xFFFFFFFF,
+            $value[1] & 0xFFFFFFFF,
+            $value[2] & 0xFFFFFFFF,
+            $value[3] & 0xFFFFFFFF,
+        ];
+    }
+
+    public function mxcsr(): int
+    {
+        return $this->mxcsr & 0xFFFFFFFF;
+    }
+
+    public function setMxcsr(int $mxcsr): void
+    {
+        $this->mxcsr = $mxcsr & 0xFFFFFFFF;
+    }
+
+    public function readMsr(int $index): UInt64
+    {
+        return $this->msr[$index] ?? UInt64::zero();
+    }
+
+    public function writeMsr(int $index, UInt64|int $value): void
+    {
+        $this->msr[$index] = $value instanceof UInt64 ? $value : UInt64::of($value);
+    }
+
+    private function initXmm(): void
+    {
+        if ($this->xmm !== []) {
+            return;
+        }
+        $this->xmm = array_fill(0, 16, [0, 0, 0, 0]);
     }
 }

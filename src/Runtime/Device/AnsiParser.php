@@ -206,17 +206,31 @@ class AnsiParser implements AnsiParserInterface
                     $bg = ($attr >> 4) & 0x0F;
                     $runtime->context()->screen()->setCurrentAttribute(($fg << 4) | $bg);
                     break;
-                case 30: case 31: case 32: case 33: case 34: case 35: case 36: case 37:
+                case 30:
+                case 31:
+                case 32:
+                case 33:
+                case 34:
+                case 35:
+                case 36:
+                case 37:
                     // Foreground color (30-37 -> 0-7)
-                    $attr = $runtime->context()->screen()->getCurrentAttribute();
-                    $fg = $code - 30;
-                    $runtime->context()->screen()->setCurrentAttribute(($attr & 0xF8) | $fg);
+                                            $attr = $runtime->context()->screen()->getCurrentAttribute();
+                                            $fg = $code - 30;
+                                            $runtime->context()->screen()->setCurrentAttribute(($attr & 0xF8) | $fg);
                     break;
-                case 40: case 41: case 42: case 43: case 44: case 45: case 46: case 47:
+                case 40:
+                case 41:
+                case 42:
+                case 43:
+                case 44:
+                case 45:
+                case 46:
+                case 47:
                     // Background color (40-47 -> 0-7)
-                    $attr = $runtime->context()->screen()->getCurrentAttribute();
-                    $bg = $code - 40;
-                    $runtime->context()->screen()->setCurrentAttribute(($attr & 0x0F) | ($bg << 4));
+                                            $attr = $runtime->context()->screen()->getCurrentAttribute();
+                                            $bg = $code - 40;
+                                            $runtime->context()->screen()->setCurrentAttribute(($attr & 0x0F) | ($bg << 4));
                     break;
                 default:
                     // Ignore unknown SGR codes

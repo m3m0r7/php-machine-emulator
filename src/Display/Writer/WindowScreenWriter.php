@@ -43,7 +43,25 @@ class WindowScreenWriter implements ScreenWriterInterface
     protected const REDRAW_INTERVAL = 0.008; // ~120 FPS for smoother updates
 
     /** @var array<int, Color> Cached VGA color objects */
-    protected static array $colorCache = [];
+    protected array $colorCache = [];
+
+    /** @var array<int, array{x: int, y: int, color: Color}> Buffered dot writes */
+    protected array $dotBuffer = [];
+
+    /** @var array<int, int> Packed RGB framebuffer for graphics mode */
+    protected array $graphicsBuffer = [];
+    protected int $graphicsWidth = 0;
+    protected int $graphicsHeight = 0;
+    protected bool $graphicsDirty = false;
+    /** @var array<int, Color> */
+    protected array $graphicsColorCache = [];
+    protected bool $useFramebuffer = false;
+    protected bool $graphicsNeedsClear = false;
+    protected ?\FFI\CData $graphicsTexture = null;
+    protected int $graphicsTextureWidth = 0;
+    protected int $graphicsTextureHeight = 0;
+    protected ?\FFI\CData $graphicsPixelBuffer = null;
+    protected int $graphicsPixelBufferSize = 0;
 
     public function __construct(
         protected VideoTypeInfo $videoTypeInfo,
@@ -63,8 +81,11 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->canvas = $this->window->canvas();
 
         // Clear the screen to black on initialization
-        $this->canvas->clear(Color::asBlack());
+        $this->canvas->clear($this->getColorFromAttribute(0));
         $this->canvas->present();
+        $this->resetGraphicsBuffer();
+        $this->useFramebuffer = $windowOption->useFramebuffer;
+        $this->graphicsNeedsClear = true;
     }
 
     public function write(string $value): void
@@ -104,16 +125,16 @@ class WindowScreenWriter implements ScreenWriterInterface
 
     protected function getColorFromAttribute(int $colorIndex): Color
     {
-        if (!isset(self::$colorCache[$colorIndex])) {
-            self::$colorCache[$colorIndex] = VgaPaletteColor::fromIndex($colorIndex)->toColor();
+        if (!isset($this->colorCache[$colorIndex])) {
+            $this->colorCache[$colorIndex] = VgaPaletteColor::fromIndex($colorIndex)->toColor();
         }
-        return self::$colorCache[$colorIndex];
+        return $this->colorCache[$colorIndex];
     }
 
     protected function redrawScreen(): void
     {
         // Clear screen with default background
-        $this->canvas->clear(Color::asBlack());
+        $this->canvas->clear($this->getColorFromAttribute(0));
 
         $charWidth = 8;
         $charHeight = 16;
@@ -190,7 +211,12 @@ class WindowScreenWriter implements ScreenWriterInterface
             throw new HaltException('Window closed by user');
         }
 
-        // Flush buffered dots (graphics mode)
+        // Flush graphics mode (full redraw from framebuffer)
+        if ($this->useFramebuffer && $this->graphicsDirty) {
+            $this->flushGraphicsBuffer();
+            return;
+        }
+
         if (!empty($this->dotBuffer)) {
             $this->flushDotBuffer();
             return;
@@ -206,19 +232,33 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->redrawScreen();
     }
 
-    /** @var array<int, array{x: int, y: int, color: Color}> Buffered dot writes */
-    protected array $dotBuffer = [];
-
     public function dot(int $x, int $y, ColorInterface $color): void
     {
-        $windowColor = new Color($color->red(), $color->green(), $color->blue());
+        if (!$this->useFramebuffer) {
+            $windowColor = new Color($color->red(), $color->green(), $color->blue());
+            $this->dotBuffer[] = [
+                'x' => $x * $this->pixelSize,
+                'y' => $y * $this->pixelSize,
+                'color' => $windowColor,
+            ];
+            return;
+        }
 
-        // Buffer the dot for batch rendering
-        $this->dotBuffer[] = [
-            'x' => $x * $this->pixelSize,
-            'y' => $y * $this->pixelSize,
-            'color' => $windowColor,
-        ];
+        if ($x < 0 || $y < 0 || $x >= $this->graphicsWidth || $y >= $this->graphicsHeight) {
+            $this->ensureGraphicsBufferSize($x + 1, $y + 1);
+            if ($x < 0 || $y < 0 || $x >= $this->graphicsWidth || $y >= $this->graphicsHeight) {
+                return;
+            }
+        }
+
+        $packed = ($color->red() << 16) | ($color->green() << 8) | $color->blue();
+        $index = ($y * $this->graphicsWidth) + $x;
+        if (($this->graphicsBuffer[$index] ?? 0) === $packed) {
+            return;
+        }
+
+        $this->graphicsBuffer[$index] = $packed;
+        $this->graphicsDirty = true;
     }
 
     /**
@@ -230,13 +270,67 @@ class WindowScreenWriter implements ScreenWriterInterface
             return;
         }
 
+        if ($this->graphicsNeedsClear) {
+            $this->canvas->clear($this->getColorFromAttribute(0));
+            $this->graphicsNeedsClear = false;
+        }
+
         $size = $this->pixelSize;
+        $batches = [];
         foreach ($this->dotBuffer as $dot) {
-            $this->canvas->rect($dot['x'], $dot['y'], $size, $size, $dot['color']);
+            $color = $dot['color'];
+            $packed = ($color->red() << 16) | ($color->green() << 8) | $color->blue();
+            if (!isset($batches[$packed])) {
+                $batches[$packed] = ['color' => $color, 'rects' => []];
+            }
+            $batches[$packed]['rects'][] = [
+                'x' => $dot['x'],
+                'y' => $dot['y'],
+                'w' => $size,
+                'h' => $size,
+            ];
+        }
+
+        foreach ($batches as $batch) {
+            $this->canvas->rectBatch($batch['rects'], $batch['color']);
         }
 
         $this->canvas->present();
         $this->dotBuffer = [];
+    }
+
+    /**
+     * Flush framebuffer to the canvas and present.
+     */
+    protected function flushGraphicsBuffer(): void
+    {
+        if (!$this->graphicsDirty) {
+            return;
+        }
+
+        if ($this->graphicsWidth <= 0 || $this->graphicsHeight <= 0) {
+            $this->graphicsDirty = false;
+            return;
+        }
+
+        $this->ensureGraphicsTexture();
+        $count = $this->graphicsWidth * $this->graphicsHeight;
+        $this->ensureGraphicsPixelBuffer($count);
+        $pixelBuffer = $this->graphicsPixelBuffer;
+        if ($pixelBuffer === null) {
+            $this->graphicsDirty = false;
+            return;
+        }
+
+        for ($index = 0; $index < $count; $index++) {
+            $packed = $this->graphicsBuffer[$index] ?? 0;
+            $pixelBuffer[$index] = 0xFF000000 | ($packed & 0xFFFFFF);
+        }
+
+        $this->canvas->updateTexture($this->graphicsTexture, $pixelBuffer, $this->graphicsWidth * 4);
+        $this->canvas->renderTexture($this->graphicsTexture);
+        $this->canvas->present();
+        $this->graphicsDirty = false;
     }
 
     public function newline(): void
@@ -313,8 +407,11 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->textBuffer = [];
         $this->prevBuffer = [];
         $this->resetCursor();
-        $this->canvas->clear(Color::asBlack());
+        $this->canvas->clear($this->getColorFromAttribute(0));
         $this->canvas->present();
+        $this->dotBuffer = [];
+        $this->resetGraphicsBuffer();
+        $this->graphicsNeedsClear = true;
     }
 
     public function fillArea(int $row, int $col, int $width, int $height, int $attribute): void
@@ -350,6 +447,110 @@ class WindowScreenWriter implements ScreenWriterInterface
 
         $this->window->resize($width, $height);
         $this->clear();
+    }
+
+    protected function resetGraphicsBuffer(): void
+    {
+        if ($this->videoTypeInfo->isTextMode) {
+            $this->graphicsWidth = 0;
+            $this->graphicsHeight = 0;
+            $this->graphicsBuffer = [];
+            $this->graphicsDirty = false;
+            $this->resetGraphicsTexture();
+            return;
+        }
+
+        $this->graphicsWidth = $this->videoTypeInfo->width;
+        $this->graphicsHeight = $this->videoTypeInfo->height;
+        $size = $this->graphicsWidth * $this->graphicsHeight;
+        $this->graphicsBuffer = $size > 0 ? array_fill(0, $size, 0) : [];
+        $this->graphicsDirty = false;
+        $this->graphicsNeedsClear = true;
+        $this->ensureGraphicsTexture();
+        $this->ensureGraphicsPixelBuffer($size);
+    }
+
+    protected function ensureGraphicsBufferSize(int $minWidth, int $minHeight): void
+    {
+        $newWidth = max($this->graphicsWidth, $minWidth);
+        $newHeight = max($this->graphicsHeight, $minHeight);
+        if ($newWidth <= 0 || $newHeight <= 0) {
+            return;
+        }
+        if ($newWidth === $this->graphicsWidth && $newHeight === $this->graphicsHeight) {
+            return;
+        }
+
+        $newSize = $newWidth * $newHeight;
+        $newBuffer = array_fill(0, $newSize, 0);
+        if ($this->graphicsWidth > 0 && $this->graphicsHeight > 0 && !empty($this->graphicsBuffer)) {
+            $copyWidth = min($this->graphicsWidth, $newWidth);
+            $copyHeight = min($this->graphicsHeight, $newHeight);
+            for ($y = 0; $y < $copyHeight; $y++) {
+                $oldOffset = $y * $this->graphicsWidth;
+                $newOffset = $y * $newWidth;
+                for ($x = 0; $x < $copyWidth; $x++) {
+                    $newBuffer[$newOffset + $x] = $this->graphicsBuffer[$oldOffset + $x] ?? 0;
+                }
+            }
+        }
+
+        $this->graphicsWidth = $newWidth;
+        $this->graphicsHeight = $newHeight;
+        $this->graphicsBuffer = $newBuffer;
+        if ($this->useFramebuffer) {
+            $this->ensureGraphicsTexture();
+            $this->ensureGraphicsPixelBuffer($newSize);
+        }
+    }
+
+    protected function ensureGraphicsTexture(): void
+    {
+        if (!$this->useFramebuffer || $this->graphicsWidth <= 0 || $this->graphicsHeight <= 0) {
+            return;
+        }
+
+        if (
+            $this->graphicsTexture !== null
+            && $this->graphicsTextureWidth === $this->graphicsWidth
+            && $this->graphicsTextureHeight === $this->graphicsHeight
+        ) {
+            return;
+        }
+
+        $this->resetGraphicsTexture();
+        $this->graphicsTexture = $this->canvas->createStreamingTexture(
+            $this->graphicsWidth,
+            $this->graphicsHeight,
+        );
+        $this->graphicsTextureWidth = $this->graphicsWidth;
+        $this->graphicsTextureHeight = $this->graphicsHeight;
+    }
+
+    protected function resetGraphicsTexture(): void
+    {
+        if ($this->graphicsTexture !== null) {
+            $this->canvas->destroyTexture($this->graphicsTexture);
+            $this->graphicsTexture = null;
+        }
+        $this->graphicsTextureWidth = 0;
+        $this->graphicsTextureHeight = 0;
+        $this->graphicsPixelBuffer = null;
+        $this->graphicsPixelBufferSize = 0;
+    }
+
+    protected function ensureGraphicsPixelBuffer(int $size): void
+    {
+        if (!$this->useFramebuffer || $size <= 0) {
+            return;
+        }
+
+        if ($this->graphicsPixelBuffer !== null && $this->graphicsPixelBufferSize >= $size) {
+            return;
+        }
+
+        $this->graphicsPixelBuffer = $this->canvas->createPixelBuffer($size);
+        $this->graphicsPixelBufferSize = $size;
     }
 
     public function present(): void
@@ -426,7 +627,7 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->window->resize($imgWidth, $imgHeight);
 
         // Draw splash image
-        $this->canvas->clear(Color::asBlack());
+        $this->canvas->clear($this->getColorFromAttribute(0));
         $this->canvas->image($imagePath, 0, 0);
         $this->canvas->present();
 
@@ -441,7 +642,7 @@ class WindowScreenWriter implements ScreenWriterInterface
         }
 
         // Clear screen after splash
-        $this->canvas->clear(Color::asBlack());
+        $this->canvas->clear($this->getColorFromAttribute(0));
         $this->canvas->present();
     }
 }

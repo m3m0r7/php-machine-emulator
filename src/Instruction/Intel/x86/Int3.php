@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -30,11 +30,15 @@ class Int3 implements InstructionInterface
 
         // Raise interrupt vector 3 (breakpoint exception)
         $returnIp = $runtime->memory()->offset();
-        // TODO: Here implementation is invalid, because always true. you need to read memory directly.
-//        $intHandler = $this->instructionList->instructionList()[Int_::class] ?? null;
-//        if ($intHandler instanceof Int_) {
-//            $intHandler->raise($runtime, 3, $returnIp, null);
-//        }
+        try {
+            $handler = $this->instructionList->findInstruction(0xCD);
+        } catch (\Throwable) {
+            return ExecutionStatus::SUCCESS;
+        }
+
+        if ($handler instanceof Int_) {
+            $handler->raiseSoftware($runtime, 3, $returnIp, null);
+        }
 
         return ExecutionStatus::SUCCESS;
     }

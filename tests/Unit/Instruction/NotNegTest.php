@@ -174,6 +174,27 @@ class NotNegTest extends InstructionTestCase
         $this->assertFalse($this->getZeroFlag(), 'ZF should be clear');
     }
 
+    public function testNegSetsAuxiliaryFlagFromLowNibbleBorrow(): void
+    {
+        // 0x00 - 0x01 borrows from bit 4 -> AF=1
+        $this->setRegister(RegisterType::EAX, 0x01, 32);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(false);
+        $this->executeBytes([0xF6, 0xD8]); // NEG AL
+        $this->assertTrue($this->memoryAccessor->shouldAuxiliaryCarryFlag(), 'AF should be set for 0x00-0x01');
+
+        // 0x00 - 0x10 does not borrow from low nibble -> AF=0
+        $this->setRegister(RegisterType::EAX, 0x10, 32);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true);
+        $this->executeBytes([0xF6, 0xD8]); // NEG AL
+        $this->assertFalse($this->memoryAccessor->shouldAuxiliaryCarryFlag(), 'AF should be clear when low nibble is 0');
+
+        // NEG 0 leaves AF cleared (no borrow)
+        $this->setRegister(RegisterType::EAX, 0x00, 32);
+        $this->memoryAccessor->setAuxiliaryCarryFlag(true);
+        $this->executeBytes([0xF6, 0xD8]); // NEG AL
+        $this->assertFalse($this->memoryAccessor->shouldAuxiliaryCarryFlag(), 'AF should be clear for 0');
+    }
+
     /**
      * Test NEG AL with zero - CF should be clear
      */

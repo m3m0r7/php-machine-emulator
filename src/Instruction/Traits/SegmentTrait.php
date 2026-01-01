@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Traits;
 
 use PHPMachineEmulator\Exception\FaultException;
+use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -51,14 +52,15 @@ trait SegmentTrait
     {
         $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = match ($addressSize) {
-            64 => 0xFFFFFFFFFFFFFFFF,
+            // 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit mask.
+            64 => -1,
             32 => 0xFFFFFFFF,
             default => 0xFFFF,
         };
         $linearMask = $this->linearMask($runtime);
+        $selector = $runtime->memoryAccessor()->fetch($segment)->asByte();
 
         if ($runtime->context()->cpu()->isProtectedMode()) {
-            $selector = $runtime->memoryAccessor()->fetch($segment)->asByte();
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor !== null && $descriptor['present']) {
                 $effOffset = $offset & $offsetMask;
@@ -70,22 +72,22 @@ trait SegmentTrait
         }
 
         // Big Real Mode (Unreal Mode) support:
-        // If we have a cached descriptor with extended limit, use it
-        // This happens when code loads a 4GB segment in PM, then returns to RM
+        // If we have a cached descriptor (loaded in PM), use that base/limit even in real mode.
+        // This models Unreal Mode where segment caches retain 32-bit bases/limits after PE is cleared.
         $cachedDescriptor = $runtime->context()->cpu()->getCachedSegmentDescriptor($segment);
-        if ($cachedDescriptor !== null && $addressSize === 32) {
-            // Using 32-bit addressing in real mode with cached descriptor
-            $effOffset = $offset & 0xFFFFFFFF;
-
-            // Check against cached limit (usually 4GB for Big Real Mode)
-            if (isset($cachedDescriptor['limit']) && $effOffset > $cachedDescriptor['limit']) {
-                // Limit exceeded - fall back to normal real mode
+        if ($cachedDescriptor !== null) {
+            $cachedLimit = $cachedDescriptor['limit'] ?? $offsetMask;
+            $realBase = ($this->segmentBase($runtime, $segment) & $linearMask);
+            $cachedBase = $cachedDescriptor['base'] ?? $realBase;
+            if ($cachedLimit <= 0xFFFF || (($cachedBase & 0xF) !== 0)) {
+                return ($realBase + ($offset & $offsetMask)) & $linearMask;
+            }
+            $effOffset = $offset & $offsetMask;
+            if ($effOffset > $cachedLimit) {
+                // Clamp to 16-bit wraparound if offset exceeds the cached limit
                 $effOffset = $offset & 0xFFFF;
             }
-
-            // In Big Real Mode, base is from the cached descriptor (usually 0)
-            $base = $cachedDescriptor['base'] ?? 0;
-            return ($base + $effOffset) & $linearMask;
+            return (($cachedBase & $linearMask) + $effOffset) & $linearMask;
         }
 
         return ($this->segmentBase($runtime, $segment) + ($offset & $offsetMask)) & $linearMask;
@@ -96,8 +98,8 @@ trait SegmentTrait
      */
     protected function linearMask(RuntimeInterface $runtime): int
     {
-        // In 64-bit mode, linear addresses are 48 bits (canonical)
-        if ($runtime->context()->cpu()->isLongMode() && !$runtime->context()->cpu()->isCompatibilityMode()) {
+        // In IA-32e mode (long mode, including compatibility mode), linear addresses are 48 bits (canonical)
+        if ($runtime->context()->cpu()->isLongMode()) {
             return 0x0000FFFFFFFFFFFF;
         }
         return $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
@@ -109,13 +111,31 @@ trait SegmentTrait
     protected function linearCodeAddress(RuntimeInterface $runtime, int $selector, int $offset, int $opSize): int
     {
         $mask = match ($opSize) {
-            64 => 0xFFFFFFFFFFFFFFFF,
+            // 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit mask.
+            64 => -1,
             32 => 0xFFFFFFFF,
             default => 0xFFFF,
         };
         $linearMask = $this->linearMask($runtime);
+        $cpu = $runtime->context()->cpu();
 
-        if ($runtime->context()->cpu()->isProtectedMode()) {
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            if ($cpu->isProtectedMode()) {
+                $descriptor = $this->readSegmentDescriptor($runtime, $selector);
+                if ($descriptor === null || !$descriptor['present']) {
+                    throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
+                }
+                if (($descriptor['system'] ?? false)) {
+                    throw new FaultException(0x0D, $selector, sprintf('Selector 0x%04X is not a code segment', $selector));
+                }
+                if (!($descriptor['executable'] ?? false)) {
+                    throw new FaultException(0x0D, $selector, sprintf('Selector 0x%04X is not executable', $selector));
+                }
+            }
+            return ($offset & $mask) & $linearMask;
+        }
+
+        if ($cpu->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
@@ -156,13 +176,19 @@ trait SegmentTrait
     protected function codeOffsetFromLinear(RuntimeInterface $runtime, int $selector, int $linear, int $opSize): int
     {
         $mask = match ($opSize) {
-            64 => 0xFFFFFFFFFFFFFFFF,
+            // 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit mask.
+            64 => -1,
             32 => 0xFFFFFFFF,
             default => 0xFFFF,
         };
         $linearMask = $this->linearMask($runtime);
+        $cpu = $runtime->context()->cpu();
 
-        if ($runtime->context()->cpu()->isProtectedMode()) {
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            return ($linear & $linearMask) & $mask;
+        }
+
+        if ($cpu->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
@@ -203,11 +229,14 @@ trait SegmentTrait
         $index = ($selector >> 3) & 0x1FFF;
         $offset = $base + ($index * 8);
 
-        if ($offset + 7 > $base + $limit) {
+        $end = $offset + 7;
+        // Some system descriptors are 16 bytes wide in IA-32e mode (e.g., 64-bit TSS/LDT).
+        // We conservatively fetch the upper 8 bytes when needed below.
+        if ($end > $base + $limit) {
             return null;
         }
 
-        // Read all 8 bytes at once using readMemory64
+        // Read all 8 bytes at once using readMemory64.
         $desc = $this->readMemory64($runtime, $offset);
         $descLow = $desc->low32();
         $descHigh = $desc->high32();
@@ -238,9 +267,26 @@ trait SegmentTrait
         $system = ($access & 0x10) === 0;
         $executable = ($access & 0x08) !== 0;
         $dpl = ($access >> 5) & 0x3;
+        $long = ($gran & 0x20) !== 0;
+
+        $baseOut = $baseAddr & 0xFFFFFFFF;
+        // In IA-32e mode, some system descriptors (TSS/LDT) have an additional base[63:32] in bytes 8..11.
+        if ($runtime->context()->cpu()->isLongMode() && $system) {
+            $systemType = $type & 0x0F;
+            $isWideSystemDescriptor = in_array($systemType, [0x2, 0x1, 0x3, 0x9, 0xB], true);
+            if ($isWideSystemDescriptor) {
+                $end16 = $offset + 15;
+                if ($end16 > $base + $limit) {
+                    return null;
+                }
+                $desc2 = $this->readMemory64($runtime, $offset + 8);
+                $baseUpper = $desc2->low32();
+                $baseOut = ($baseOut & 0xFFFFFFFF) | (($baseUpper & 0xFFFFFFFF) << 32);
+            }
+        }
 
         return [
-            'base' => $baseAddr & 0xFFFFFFFF,
+            'base' => $baseOut,
             'limit' => $fullLimit & 0xFFFFFFFF,
             'present' => $present,
             'type' => $type,
@@ -248,6 +294,7 @@ trait SegmentTrait
             'executable' => $executable,
             'dpl' => $dpl,
             'default' => ($gran & 0x40) !== 0 ? 32 : 16,
+            'long' => $long,
         ];
     }
 
@@ -284,11 +331,126 @@ trait SegmentTrait
         $ctx = $runtime->context()->cpu();
         if ($ctx->isProtectedMode()) {
             $descriptor ??= $this->readSegmentDescriptor($runtime, $normalized);
+            // Cache CS hidden descriptor state (base/limit/default size).
+            // CS cannot be loaded via MOV/POP, so far control transfers must populate the cache.
+            if (is_array($descriptor) && ($descriptor['present'] ?? false)) {
+                $ctx->cacheSegmentDescriptor(RegisterType::CS, $descriptor);
+            }
+        } else {
+            // Real mode always defaults to 16-bit code; ignore cached descriptor size
+            $descriptor = null;
+            // In real mode, loading CS (via far jump/call/ret/iret) resets its hidden cache
+            // to real-mode base/limit, disabling Unreal Mode for CS.
+            $ctx->cacheSegmentDescriptor(RegisterType::CS, [
+                'base' => (($normalized << 4) & 0xFFFFF),
+                'limit' => 0xFFFF,
+                'present' => true,
+                'type' => 0,
+                'system' => false,
+                'executable' => false,
+                'dpl' => 0,
+                'default' => 16,
+            ]);
         }
-        $defaultSize = $descriptor['default'] ?? ($ctx->isProtectedMode() ? 32 : 16);
-        $ctx->setDefaultOperandSize($defaultSize);
-        $ctx->setDefaultAddressSize($defaultSize);
+        if ($ctx->isLongMode() && $ctx->isProtectedMode()) {
+            $is64bitCs = ($descriptor['long'] ?? false) && !($descriptor['system'] ?? false) && ($descriptor['executable'] ?? false);
+            if ($is64bitCs) {
+                $ctx->setCompatibilityMode(false);
+                $ctx->setDefaultOperandSize(32);
+                $ctx->setDefaultAddressSize(64);
+            } else {
+                // IA-32e compatibility mode uses legacy CS.D defaults (16/32).
+                $ctx->setCompatibilityMode(true);
+                $defaultSize = $descriptor['default'] ?? 32;
+                $ctx->setDefaultOperandSize($defaultSize);
+                $ctx->setDefaultAddressSize($defaultSize);
+            }
+        } else {
+            $defaultSize = $descriptor['default'] ?? ($ctx->isProtectedMode() ? 32 : 16);
+            $ctx->setDefaultOperandSize($defaultSize);
+            $ctx->setDefaultAddressSize($defaultSize);
+        }
         $this->updateCplFromSelector($runtime, $normalized, $overrideCpl, $descriptor);
+    }
+
+    /**
+     * Update IA-32e (long mode) state based on CR0/CR4/EFER.
+     *
+     * This keeps the CPUContext flags (longMode/compatibilityMode) in sync with the architectural
+     * activation rules:
+     * - IA-32e active when CR0.PE=1, CR0.PG=1, CR4.PAE=1, EFER.LME=1
+     * - EFER.LMA is set/cleared by hardware when IA-32e becomes active/inactive
+     */
+    protected function updateIa32eMode(RuntimeInterface $runtime): void
+    {
+        $ma = $runtime->memoryAccessor();
+        $cpu = $runtime->context()->cpu();
+
+        $cr0 = $ma->readControlRegister(0);
+        $cr4 = $ma->readControlRegister(4);
+        $efer = $ma->readEfer();
+
+        $pe = ($cr0 & 0x1) !== 0;
+        $pg = ($cr0 & 0x80000000) !== 0;
+        $pae = ($cr4 & (1 << 5)) !== 0;
+        $lme = ($efer & (1 << 8)) !== 0;
+
+        $ia32eActive = $pe && $pg && $pae && $lme;
+        $lmaBit = 1 << 10;
+
+        if ($ia32eActive) {
+            if (!$cpu->isLongMode()) {
+                // Long mode requires protected mode; keep defaults reasonable until CS is (re)loaded.
+                $cpu->setLongMode(true);
+
+                if ($runtime->logicBoard()->debug()->stopOnIa32eActive()) {
+                    $runtime->option()->logger()->warning(sprintf(
+                        'STOP: IA-32e activated at ip=0x%08X CR0=0x%08X CR4=0x%08X EFER=0x%08X CS=0x%04X SS=0x%04X RSP=0x%016X',
+                        $runtime->memory()->offset() & 0xFFFFFFFF,
+                        $cr0 & 0xFFFFFFFF,
+                        $cr4 & 0xFFFFFFFF,
+                        $efer & 0xFFFFFFFF,
+                        $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF,
+                        $ma->fetch(RegisterType::SS)->asByte() & 0xFFFF,
+                        $ma->fetch(RegisterType::ESP)->asBytesBySize(64),
+                    ));
+                    throw new HaltException('Stopped by PHPME_STOP_ON_IA32E_ACTIVE');
+                }
+            }
+
+            $cs = $ma->fetch(RegisterType::CS)->asByte();
+            $desc = $cpu->isProtectedMode() ? $this->readSegmentDescriptor($runtime, $cs) : null;
+            $is64bitCs = is_array($desc)
+                && ($desc['present'] ?? false)
+                && !($desc['system'] ?? false)
+                && ($desc['executable'] ?? false)
+                && ($desc['long'] ?? false);
+
+            if ($is64bitCs) {
+                $cpu->setCompatibilityMode(false);
+                $cpu->setDefaultOperandSize(32);
+                $cpu->setDefaultAddressSize(64);
+            } else {
+                $cpu->setCompatibilityMode(true);
+                $defaultSize = is_array($desc) ? ($desc['default'] ?? 32) : 32;
+                $cpu->setDefaultOperandSize((int) $defaultSize);
+                $cpu->setDefaultAddressSize((int) $defaultSize);
+            }
+
+            if (($efer & $lmaBit) === 0) {
+                $ma->writeEfer($efer | $lmaBit);
+            }
+            return;
+        }
+
+        // Leaving IA-32e mode (best-effort): clear flags and LMA.
+        if ($cpu->isLongMode()) {
+            $cpu->setCompatibilityMode(false);
+            $cpu->setLongMode(false);
+        }
+        if (($efer & $lmaBit) !== 0) {
+            $ma->writeEfer($efer & (~$lmaBit));
+        }
     }
 
     /**
@@ -334,6 +496,25 @@ trait SegmentTrait
         }
 
         return $dpl;
+    }
+
+    /**
+     * Cache the current segment descriptors for all segment registers.
+     * This is used when leaving protected mode so that the real-mode
+     * execution can continue to use the cached bases/limits (Unreal Mode).
+     */
+    protected function cacheCurrentSegmentDescriptors(RuntimeInterface $runtime): void
+    {
+        foreach ([RegisterType::CS, RegisterType::DS, RegisterType::ES, RegisterType::FS, RegisterType::GS, RegisterType::SS] as $seg) {
+            $selector = $runtime->memoryAccessor()->fetch($seg)->asByte();
+            if ($selector === 0) {
+                continue;
+            }
+            $descriptor = $this->readSegmentDescriptor($runtime, $selector);
+            if ($descriptor !== null && ($descriptor['present'] ?? false)) {
+                $runtime->context()->cpu()->cacheSegmentDescriptor($seg, $descriptor);
+            }
+        }
     }
 
     // Abstract methods that must be implemented by using class/trait

@@ -33,9 +33,19 @@ class FileBootStream implements BootableStreamInterface
         return $this->fileStream->short();
     }
 
+    public function signedShort(): int
+    {
+        return $this->fileStream->signedShort();
+    }
+
     public function dword(): int
     {
         return $this->fileStream->dword();
+    }
+
+    public function signedDword(): int
+    {
+        return $this->fileStream->signedDword();
     }
 
     public function read(int $length): string
@@ -77,5 +87,34 @@ class FileBootStream implements BootableStreamInterface
     public function fileSize(): int
     {
         return $this->fileStream->fileSize();
+    }
+
+    public function bootImage(): ?BootImageInterface
+    {
+        return null;
+    }
+
+    public function bootLoadSize(): int
+    {
+        return min($this->fileSize(), 512);
+    }
+
+    public function isNoEmulation(): bool
+    {
+        return false;
+    }
+
+    public function readIsoSectors(int $lba, int $sectorCount): ?string
+    {
+        return null;
+    }
+
+    public function backingFileSize(): int
+    {
+        return $this->fileSize();
+    }
+
+    public function replaceRange(int $offset, string $data): void
+    {
     }
 }

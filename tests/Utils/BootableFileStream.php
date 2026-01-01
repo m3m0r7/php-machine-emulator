@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Utils;
 
 use PHPMachineEmulator\Exception\StreamReaderException;
+use PHPMachineEmulator\Stream\BootImageInterface;
 use PHPMachineEmulator\Stream\BootableStreamInterface;
 use PHPMachineEmulator\Stream\GenericStream;
 use PHPMachineEmulator\Stream\StreamReaderProxy;
@@ -53,6 +54,35 @@ class BootableFileStream implements BootableStreamInterface
     public function fileSize(): int
     {
         return $this->fileSize;
+    }
+
+    public function bootImage(): ?BootImageInterface
+    {
+        return null;
+    }
+
+    public function bootLoadSize(): int
+    {
+        return min($this->fileSize(), 512);
+    }
+
+    public function isNoEmulation(): bool
+    {
+        return false;
+    }
+
+    public function readIsoSectors(int $lba, int $sectorCount): ?string
+    {
+        return null;
+    }
+
+    public function backingFileSize(): int
+    {
+        return $this->fileSize();
+    }
+
+    public function replaceRange(int $offset, string $data): void
+    {
     }
 
     public function proxy(): StreamReaderProxyInterface

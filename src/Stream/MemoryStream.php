@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Stream;
 
+use PHPMachineEmulator\Instruction\Stream\ModRegRM;
+use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
+use PHPMachineEmulator\Instruction\Stream\SIB;
+use PHPMachineEmulator\Instruction\Stream\SIBInterface;
+
 /**
  * Unified memory stream with hybrid storage.
  *
@@ -23,11 +28,17 @@ class MemoryStream implements MemoryStreamInterface
     /** @var int Expansion chunk size (1MB) */
     public const EXPANSION_CHUNK_SIZE = 0x100000;
 
-    /** @var array<int, int> Lookup table for ord() optimization (char -> int) */
-    private static array $ordMap = [];
+    /** @var array<string, int> Lookup table for ord() optimization (char -> int) */
+    private array $ordMap = [];
 
     /** @var array<int, string> Lookup table for chr() optimization (int -> char) */
-    private static array $chrMap = [];
+    private array $chrMap = [];
+
+    /** @var array<int, SIBInterface> */
+    private array $sibCache = [];
+
+    /** @var array<int, ModRegRMInterface> */
+    private array $modRegRMCache = [];
 
     /** @var array<int, array{min: int, max: int, resource: resource, type: string}> Storage segments */
     private array $segments = [];
@@ -59,13 +70,7 @@ class MemoryStream implements MemoryStreamInterface
         private int $physicalMaxMemorySize = 0x1000000,
         private int $swapSize = 0x10000000
     ) {
-        // Initialize lookup tables if not already done
-        if (empty(self::$ordMap)) {
-            for ($i = 0; $i < 256; $i++) {
-                self::$ordMap[chr($i)] = $i;
-                self::$chrMap[$i] = chr($i);
-            }
-        }
+        $this->initCharMaps();
 
         // Create initial memory segments in chunks
         $offset = 0;
@@ -76,6 +81,28 @@ class MemoryStream implements MemoryStreamInterface
             $this->createSegment($offset, $chunkEnd, $type);
             $offset = $chunkEnd;
         }
+    }
+
+    private function initCharMaps(): void
+    {
+        if ($this->ordMap !== []) {
+            return;
+        }
+        for ($i = 0; $i < 256; $i++) {
+            $char = chr($i);
+            $this->ordMap[$char] = $i;
+            $this->chrMap[$i] = $char;
+        }
+    }
+
+    private function sibFromByte(int $byte): SIBInterface
+    {
+        return $this->sibCache[$byte] ??= new SIB($byte);
+    }
+
+    private function modRegRMFromByte(int $byte): ModRegRMInterface
+    {
+        return $this->modRegRMCache[$byte] ??= new ModRegRM($byte);
     }
 
     /** @var int Maximum chunk size for pre-allocation (use half of typical memory limit to be safe) */
@@ -227,7 +254,7 @@ class MemoryStream implements MemoryStreamInterface
             return 0;
         }
 
-        return self::$ordMap[$char] ?? ord($char);
+        return $this->ordMap[$char] ?? ord($char);
     }
 
     /**
@@ -248,7 +275,7 @@ class MemoryStream implements MemoryStreamInterface
 
         $localOffset = $offset - $segment['min'];
         fseek($segment['resource'], $localOffset, SEEK_SET);
-        fwrite($segment['resource'], self::$chrMap[$value & 0xFF] ?? chr($value & 0xFF));
+        fwrite($segment['resource'], $this->chrMap[$value & 0xFF] ?? chr($value & 0xFF));
     }
 
     // ========================================
@@ -295,7 +322,7 @@ class MemoryStream implements MemoryStreamInterface
         if ($this->offset >= $this->bufferStart && $this->offset < $this->bufferEnd) {
             $char = $this->readBuffer[$this->offset - $this->bufferStart];
             $this->offset++;
-            return self::$ordMap[$char] ?? ord($char);
+            return $this->ordMap[$char] ?? ord($char);
         }
 
         // Safety check: don't allow access beyond logical max (swap inclusive)
@@ -315,7 +342,7 @@ class MemoryStream implements MemoryStreamInterface
         if ($this->offset >= $this->bufferStart && $this->offset < $this->bufferEnd) {
             $char = $this->readBuffer[$this->offset - $this->bufferStart];
             $this->offset++;
-            return self::$ordMap[$char] ?? ord($char);
+            return $this->ordMap[$char] ?? ord($char);
         }
 
         // Fallback (should not happen normally)
@@ -336,6 +363,12 @@ class MemoryStream implements MemoryStreamInterface
         return $low | ($high << 8);
     }
 
+    public function signedShort(): int
+    {
+        $value = $this->short();
+        return $value >= 0x8000 ? $value - 0x10000 : $value;
+    }
+
     public function dword(): int
     {
         $b0 = $this->byte();
@@ -343,6 +376,27 @@ class MemoryStream implements MemoryStreamInterface
         $b2 = $this->byte();
         $b3 = $this->byte();
         return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+    }
+
+    public function signedDword(): int
+    {
+        $value = $this->dword();
+        return $value >= 0x80000000 ? $value - 0x100000000 : $value;
+    }
+
+    public function byteAsSIB(): SIBInterface
+    {
+        return $this->sibFromByte($this->byte());
+    }
+
+    public function byteAsModRegRM(): ModRegRMInterface
+    {
+        return $this->modRegRMFromByte($this->byte());
+    }
+
+    public function modRegRM(int $byte): ModRegRMInterface
+    {
+        return $this->modRegRMFromByte($byte);
     }
 
     public function read(int $length): string
@@ -429,7 +483,7 @@ class MemoryStream implements MemoryStreamInterface
 
         // Write across potentially multiple segments
         for ($i = 0; $i < $len; $i++) {
-            $this->writeByteAt($this->offset + $i, self::$ordMap[$value[$i]] ?? ord($value[$i]));
+            $this->writeByteAt($this->offset + $i, $this->ordMap[$value[$i]] ?? ord($value[$i]));
         }
         $this->offset += $len;
         return $this;
@@ -462,6 +516,41 @@ class MemoryStream implements MemoryStreamInterface
         $this->writeByte(($value >> 8) & 0xFF);
         $this->writeByte(($value >> 16) & 0xFF);
         $this->writeByte(($value >> 24) & 0xFF);
+    }
+
+    public function copyFromString(string $data, int $destOffset): void
+    {
+        $len = strlen($data);
+        if ($len === 0) {
+            return;
+        }
+
+        $endOffset = $destOffset + $len;
+        if ($endOffset >= $this->size) {
+            $this->ensureCapacity($endOffset);
+        }
+
+        $remaining = $len;
+        $currentDestOffset = $destOffset;
+        $dataOffset = 0;
+
+        while ($remaining > 0) {
+            $segment = $this->findSegment($currentDestOffset);
+            if ($segment === null) {
+                break;
+            }
+
+            $segmentRemaining = $segment['max'] - $currentDestOffset;
+            $chunkSize = min($remaining, $segmentRemaining);
+            $localOffset = $currentDestOffset - $segment['min'];
+
+            fseek($segment['resource'], $localOffset, SEEK_SET);
+            fwrite($segment['resource'], substr($data, $dataOffset, $chunkSize));
+
+            $currentDestOffset += $chunkSize;
+            $dataOffset += $chunkSize;
+            $remaining -= $chunkSize;
+        }
     }
 
     public function copy(StreamReaderInterface $source, int $sourceOffset, int $destOffset, int $size): void

@@ -25,32 +25,3 @@ class TestIO implements IOInterface
         return new TestOutput();
     }
 }
-
-class TestInput implements InputInterface
-{
-    public function key(): string
-    {
-        return '';
-    }
-
-    public function byte(): int
-    {
-        return 0;
-    }
-}
-
-class TestOutput implements OutputInterface
-{
-    private string $buffer = '';
-
-    public function write(string $value): self
-    {
-        $this->buffer .= $value;
-        return $this;
-    }
-
-    public function getBuffer(): string
-    {
-        return $this->buffer;
-    }
-}

@@ -11,7 +11,6 @@ class StdOut implements OutputInterface
 {
     public function __construct(protected StreamWriterInterface $streamWriter = new ResourceWriterStream(STDOUT))
     {
-
     }
 
     public function write(string $value): self

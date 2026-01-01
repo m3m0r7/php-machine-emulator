@@ -1,14 +1,14 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class SbbRegRm implements InstructionInterface
 {
@@ -23,8 +23,8 @@ class SbbRegRm implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
         $isByte = in_array($opcode, [0x18, 0x1A], true);
         $opSize = $isByte ? 8 : $runtime->context()->cpu()->operandSize();
@@ -34,16 +34,16 @@ class SbbRegRm implements InstructionInterface
         // Cache effective address to avoid reading displacement twice
         $rmAddress = null;
         if ($destIsRm && $modRegRM->mode() !== 0b11) {
-            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $reader, $modRegRM), true);
+            $rmAddress = $this->translateLinearWithMmio($runtime, $this->rmLinearAddress($runtime, $memory, $modRegRM), true);
         }
 
         $src = $isByte
             ? ($destIsRm
                 ? $this->read8BitRegister($runtime, $modRegRM->registerOrOPCode())
-                : $this->readRm8($runtime, $reader, $modRegRM))
+                : $this->readRm8($runtime, $memory, $modRegRM))
             : ($destIsRm
                 ? $this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $opSize)
-                : $this->readRm($runtime, $reader, $modRegRM, $opSize));
+                : $this->readRm($runtime, $memory, $modRegRM, $opSize));
 
         if ($isByte) {
             $dest = $destIsRm
@@ -65,11 +65,67 @@ class SbbRegRm implements InstructionInterface
             $signB = ($src >> 7) & 1;
             $signR = ($maskedResult >> 7) & 1;
             $of = ($signA !== $signB) && ($signB === $signR);
+            $af = (($dest & 0x0F) - ($src & 0x0F) - $borrow) < 0;
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, 8)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         } else {
+            if ($opSize === 64) {
+                $ma = $runtime->memoryAccessor();
+
+                $srcU = $src instanceof UInt64 ? $src : UInt64::of($src);
+
+                if ($destIsRm) {
+                    $destU = $rmAddress !== null
+                        ? $this->readMemory64($runtime, $rmAddress)
+                        : UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), 64));
+                } else {
+                    $destU = UInt64::of($this->readRegisterBySize($runtime, $modRegRM->registerOrOPCode(), 64));
+                }
+
+                $tempU = $destU->sub($srcU);
+                $resultU = $tempU->sub($borrow);
+
+                if ($destIsRm) {
+                    if ($rmAddress !== null) {
+                        $this->writeMemory64($runtime, $rmAddress, $resultU);
+                    } else {
+                        $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $resultU->toInt(), 64);
+                    }
+                } else {
+                    $this->writeRegisterBySize($runtime, $modRegRM->registerOrOPCode(), $resultU->toInt(), 64);
+                }
+
+                $ma->setZeroFlag($resultU->isZero());
+                $ma->setSignFlag($resultU->isNegativeSigned());
+                $lowByte = $resultU->low32() & 0xFF;
+                $ones = 0;
+                for ($i = 0; $i < 8; $i++) {
+                    $ones += ($lowByte >> $i) & 1;
+                }
+                $ma->setParityFlag(($ones % 2) === 0);
+
+                $borrow1 = $destU->lt($srcU);
+                $borrow2 = $borrow !== 0 && $tempU->lt($borrow);
+                $ma->setCarryFlag($borrow1 || $borrow2);
+
+                $subtrahend = $srcU->add($borrow);
+                $signMask = UInt64::of('9223372036854775808'); // 0x8000000000000000
+                $overflow = !$destU
+                    ->xor($subtrahend)
+                    ->and($destU->xor($resultU))
+                    ->and($signMask)
+                    ->isZero();
+                $ma->setOverflowFlag($overflow);
+
+                $af = (($destU->low32() & 0x0F) < (($srcU->low32() & 0x0F) + $borrow));
+                $ma->setAuxiliaryCarryFlag($af);
+
+                return ExecutionStatus::SUCCESS;
+            }
+
             $dest = $destIsRm
                 ? ($rmAddress !== null
                     ? ($opSize === 32 ? $this->readMemory32($runtime, $rmAddress) : $this->readMemory16($runtime, $rmAddress))
@@ -97,10 +153,12 @@ class SbbRegRm implements InstructionInterface
             $signB = ($src >> $signBit) & 1;
             $signR = ($maskedResult >> $signBit) & 1;
             $of = ($signA !== $signB) && ($signB === $signR);
+            $af = (($dest & 0x0F) - ($src & 0x0F) - $borrow) < 0;
             $runtime->memoryAccessor()
                 ->updateFlags($maskedResult, $opSize)
                 ->setCarryFlag($calc < 0)
-                ->setOverflowFlag($of);
+                ->setOverflowFlag($of)
+                ->setAuxiliaryCarryFlag($af);
         }
 
         return ExecutionStatus::SUCCESS;

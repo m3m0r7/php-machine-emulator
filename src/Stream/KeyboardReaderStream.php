@@ -22,6 +22,9 @@ class KeyboardReaderStream implements StreamReaderInterface
         if (!is_resource($this->resource)) {
             throw new StreamReaderException('The parameter is not a resource');
         }
+
+        // Keep keyboard polling non-blocking to avoid stalling the emulator loop.
+        @stream_set_blocking($this->resource, false);
     }
 
     public function offset(): int
@@ -91,7 +94,27 @@ class KeyboardReaderStream implements StreamReaderInterface
         );
     }
 
+    public function signedShort(): int
+    {
+        throw new KeyboardException(
+            sprintf(
+                'The keyboard reader is not supported %s',
+                __FUNCTION__,
+            ),
+        );
+    }
+
     public function dword(): int
+    {
+        throw new KeyboardException(
+            sprintf(
+                'The keyboard reader is not supported %s',
+                __FUNCTION__,
+            ),
+        );
+    }
+
+    public function signedDword(): int
     {
         throw new KeyboardException(
             sprintf(

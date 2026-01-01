@@ -119,6 +119,8 @@ use PHPMachineEmulator\Instruction\Intel\x86\Stosw;
 use PHPMachineEmulator\Instruction\Intel\x86\SubRegRm;
 use PHPMachineEmulator\Instruction\Intel\x86\TestImmAl;
 use PHPMachineEmulator\Instruction\Intel\x86\TestRegRm;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Andnps;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Andps;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\BitOp;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bsf;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Bsr;
@@ -137,10 +139,26 @@ use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\ImulRegRm;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\JccNear;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Lxs;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovFromCr;
-use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movsx;
-use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovToCr;
-use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movzx;
-use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\NopModrm;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movaps;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovdMovq;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movdqa;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movdqu;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movsx;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovToCr;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movups;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movzx;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\NopModrm;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Nopl;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Orps;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pand;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pandn;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pcmpeqb;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pcmpeqd;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pmovmskb;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Por;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pshufd;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PshiftDq;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pxor;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PopFsGs;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\PushFsGs;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Rdmsr;
@@ -153,6 +171,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Sysexit;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Ud2;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Wrmsr;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Xadd;
+use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Xorps;
 use PHPMachineEmulator\Instruction\Intel\x86\Xchg;
 use PHPMachineEmulator\Instruction\Intel\x86\Xlat;
 use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
@@ -198,6 +217,11 @@ class x86 implements InstructionListInterface
         return $this->register ??= new Register();
     }
 
+    public function __debugInfo(): array
+    {
+        return [];
+    }
+
     /**
      * Find instruction by opcode bytes.
      * Uses longest-first matching to find the best match.
@@ -208,9 +232,92 @@ class x86 implements InstructionListInterface
     public function findInstruction(int|array $opcodes): InstructionInterface
     {
         $opcodeArray = is_array($opcodes) ? $opcodes : [$opcodes];
+        // Real x86 allows redundant/repeated prefixes (e.g., multiple LOCK bytes). Our opcode table
+        // only includes at most one prefix per class, so normalize duplicates for lookup.
+        $opcodeArray = $this->normalizeRedundantPrefixes($opcodeArray);
         $key = $this->makeKeyByOpCodes($opcodeArray);
 
         return $this->sortedOpcodes[$key] ?? throw new NotFoundInstructionException(sprintf("No found instruction: %s", $key));
+    }
+
+    /**
+     * Normalize redundant prefix bytes for instruction-table lookup.
+     *
+     * CPUs ignore repeated prefixes of the same class and use the last occurrence.
+     * The instruction list only registers patterns with at most one prefix per class, so
+     * we canonicalize the prefix run at the start of the opcode stream.
+     *
+     * @param array<int> $opcodes
+     * @return array<int>
+     */
+    private function normalizeRedundantPrefixes(array $opcodes): array
+    {
+        if (count($opcodes) <= 1) {
+            return $opcodes;
+        }
+
+        // Prefix bytes handled by InstructionPrefixApplyable (REP/REPNZ are separate instructions).
+        $isPrefix = static function (int $b): bool {
+            return in_array($b & 0xFF, [0x66, 0x67, 0xF0, 0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65], true);
+        };
+
+        $prefixEnd = 0;
+        $count = count($opcodes);
+        while ($prefixEnd < $count && $isPrefix($opcodes[$prefixEnd])) {
+            $prefixEnd++;
+        }
+        if ($prefixEnd <= 1) {
+            return $opcodes;
+        }
+
+        $prefixes = array_slice($opcodes, 0, $prefixEnd);
+        $rest = array_slice($opcodes, $prefixEnd);
+
+        $lastOperand = null;
+        $lastAddress = null;
+        $lastLock = null;
+        $lastSegment = null;
+        $lastSegmentByte = null;
+
+        foreach ($prefixes as $pos => $byte) {
+            $b = $byte & 0xFF;
+            if ($b === 0x66) {
+                $lastOperand = $pos;
+                continue;
+            }
+            if ($b === 0x67) {
+                $lastAddress = $pos;
+                continue;
+            }
+            if ($b === 0xF0) {
+                $lastLock = $pos;
+                continue;
+            }
+            if (in_array($b, [0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65], true)) {
+                $lastSegment = $pos;
+                $lastSegmentByte = $b;
+            }
+        }
+
+        /** @var array<int, array{pos:int,byte:int}> $kept */
+        $kept = [];
+        if ($lastOperand !== null) {
+            $kept[] = ['pos' => $lastOperand, 'byte' => 0x66];
+        }
+        if ($lastAddress !== null) {
+            $kept[] = ['pos' => $lastAddress, 'byte' => 0x67];
+        }
+        if ($lastLock !== null) {
+            $kept[] = ['pos' => $lastLock, 'byte' => 0xF0];
+        }
+        if ($lastSegment !== null && $lastSegmentByte !== null) {
+            $kept[] = ['pos' => $lastSegment, 'byte' => $lastSegmentByte];
+        }
+
+        usort($kept, static fn (array $a, array $b): int => $a['pos'] <=> $b['pos']);
+
+        $normalizedPrefixes = array_map(static fn (array $row): int => $row['byte'], $kept);
+        return array_merge($normalizedPrefixes, $rest);
     }
 
     public function getMaxOpcodeLength(): int
@@ -364,13 +471,32 @@ class x86 implements InstructionListInterface
             Wrmsr::class,
             Sysenter::class,
             Sysexit::class,
-            Cmpxchg8b::class,
-            Group0::class,
-            Group6::class,
-            NopModrm::class,
-            Ud2::class,
-            CacheOp::class,
-            Emms::class,
+                Cmpxchg8b::class,
+                Group0::class,
+                Group6::class,
+                Nopl::class,
+                NopModrm::class,
+                Ud2::class,
+                CacheOp::class,
+                Emms::class,
+                Andps::class,
+            Andnps::class,
+            Orps::class,
+            Xorps::class,
+            Pand::class,
+            Pandn::class,
+            Pcmpeqb::class,
+            Pcmpeqd::class,
+            Pmovmskb::class,
+            Por::class,
+            Pshufd::class,
+            PshiftDq::class,
+            Pxor::class,
+            Movaps::class,
+            Movups::class,
+            MovdMovq::class,
+            Movdqa::class,
+            Movdqu::class,
             Fxsave::class,
         ];
     }

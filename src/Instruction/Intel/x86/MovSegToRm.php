@@ -1,15 +1,14 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
-use PHPMachineEmulator\Exception\ExecutionException;
+use PHPMachineEmulator\Exception\InvalidOpcodeException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -25,24 +24,24 @@ class MovSegToRm implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modRegRM = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modRegRM = $memory->byteAsModRegRM();
 
-        $seg = $this->segmentFromDigit($modRegRM->registerOrOPCode());
+        $opcode = $opcodes[array_key_last($opcodes)] ?? 0x8C;
+        $seg = $this->segmentFromDigit($modRegRM->registerOrOPCode(), $opcode);
         $value = $runtime->memoryAccessor()->fetch($seg)->asByte();
 
         if (ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER) {
             $runtime->memoryAccessor()->write16Bit($modRegRM->registerOrMemoryAddress(), $value);
         } else {
-            $address = $this->rmLinearAddress($runtime, $reader, $modRegRM);
-            $runtime->memoryAccessor()->allocate($address, safe: false);
-            $runtime->memoryAccessor()->write16Bit($address, $value);
+            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
+            $this->writeMemory16($runtime, $address, $value);
         }
 
         return ExecutionStatus::SUCCESS;
     }
 
-    private function segmentFromDigit(int $digit): RegisterType
+    private function segmentFromDigit(int $digit, int $opcode): RegisterType
     {
         return match ($digit & 0b111) {
             0b000 => RegisterType::ES,
@@ -51,7 +50,10 @@ class MovSegToRm implements InstructionInterface
             0b011 => RegisterType::DS,
             0b100 => RegisterType::FS,
             0b101 => RegisterType::GS,
-            default => throw new ExecutionException('Invalid segment register encoding'),
+            default => throw new InvalidOpcodeException(
+                $opcode & 0xFF,
+                sprintf('Invalid segment register encoding (reg=%d)', $digit & 0b111)
+            ),
         };
     }
 }

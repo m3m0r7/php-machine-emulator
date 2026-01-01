@@ -1,14 +1,13 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class AddImm8 implements InstructionInterface
@@ -34,10 +33,10 @@ class AddImm8 implements InstructionInterface
         $mask = $size === 32 ? 0xFFFFFFFF : ($size === 16 ? 0xFFFF : 0xFF);
         $signBit = $size - 1;
 
-        $reader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
         $operand = $isByte
-            ? $reader->streamReader()->byte()
-            : ($size === 32 ? $reader->dword() : $reader->short());
+            ? $memory->byte()
+            : ($size === 32 ? $memory->dword() : $memory->short());
 
         $acc = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
         $left = $isByte ? $acc->asLowBit() : $acc->asBytesBySize($size);

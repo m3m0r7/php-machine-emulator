@@ -11,7 +11,6 @@ class StdErr implements OutputInterface
 {
     public function __construct(protected StreamWriterInterface $streamWriter = new ResourceWriterStream(STDERR))
     {
-
     }
 
     public function write(string $value): self

@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Traits;
 
+use PHPMachineEmulator\Display\Pixel\Color;
+use PHPMachineEmulator\Display\Writer\TerminalScreenWriter;
 use PHPMachineEmulator\Exception\FaultException;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Util\UInt64;
 
@@ -120,10 +123,50 @@ trait MemoryAccessTrait
     }
 
     /**
+     * Best-effort debug hook for unexpected writes into code segments.
+     */
+    protected function logSuspiciousWrite(RuntimeInterface $runtime, int $address, int $width): void
+    {
+        $logger = $runtime->option()->logger();
+        if (!$logger->isHandling(\Monolog\Level::Debug)) {
+            return;
+        }
+
+        $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+        $mask = $this->linearMask($runtime);
+        $base = (($cs << 4) & $mask);
+        $offset = ($address - $base) & 0xFFFFFFFF;
+        if ($address < 0x12E00 || $address > 0x13000) {
+            return;
+        }
+
+        $executor = $runtime->architectureProvider()->instructionExecutor();
+        $lastOpcodes = $executor->lastOpcodes();
+        $lastOpcodeStr = $lastOpcodes === null
+            ? 'n/a'
+            : implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $lastOpcodes));
+        $lastInstruction = $executor->lastInstruction();
+        $lastInstructionName = $lastInstruction === null
+            ? 'n/a'
+            : (preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($lastInstruction)) ?? 'n/a');
+        $logger->debug(sprintf(
+            'WRITE into CS region: addr=0x%08X cs=0x%04X off=0x%04X width=%d ip=0x%08X lastIns=%s lastOp=%s',
+            $address & 0xFFFFFFFF,
+            $cs,
+            $offset & 0xFFFF,
+            $width,
+            $runtime->memory()->offset() & 0xFFFFFFFF,
+            $lastInstructionName,
+            $lastOpcodeStr
+        ));
+    }
+
+    /**
      * Write 8-bit value to linear address.
      */
     protected function writeMemory8(RuntimeInterface $runtime, int $address, int $value): void
     {
+        $this->logSuspiciousWrite($runtime, $address, 8);
         $ma = $runtime->memoryAccessor();
         $mask = $this->linearMask($runtime);
         $isUser = $runtime->context()->cpu()->cpl() === 3;
@@ -155,6 +198,7 @@ trait MemoryAccessTrait
      */
     protected function writeMemory16(RuntimeInterface $runtime, int $address, int $value): void
     {
+        $this->logSuspiciousWrite($runtime, $address, 16);
         $ma = $runtime->memoryAccessor();
         $mask = $this->linearMask($runtime);
         $isUser = $runtime->context()->cpu()->cpl() === 3;
@@ -185,6 +229,7 @@ trait MemoryAccessTrait
      */
     protected function writeMemory32(RuntimeInterface $runtime, int $address, int $value): void
     {
+        $this->logSuspiciousWrite($runtime, $address, 32);
         $ma = $runtime->memoryAccessor();
         $mask = $this->linearMask($runtime);
         $isUser = $runtime->context()->cpu()->cpl() === 3;
@@ -274,7 +319,20 @@ trait MemoryAccessTrait
     {
         $vector = ($error >> 16) & 0xFF;
         $errorCode = $error & 0xFFFF;
-        $runtime->memoryAccessor()->writeControlRegister(2, $linear & 0xFFFFFFFF);
+        $cpu = $runtime->context()->cpu();
+
+        // CR2 holds the faulting linear address.
+        // In IA-32e (64-bit mode), it is a canonical 64-bit address (sign-extended from bit 47).
+        // In legacy modes, CR2 is effectively 32-bit.
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $masked = $linear & 0x0000FFFFFFFFFFFF;
+            $canonical = ($masked & 0x0000800000000000) !== 0
+                ? ($masked | (-1 << 48))
+                : $masked;
+            $runtime->memoryAccessor()->writeControlRegister(2, $canonical);
+        } else {
+            $runtime->memoryAccessor()->writeControlRegister(2, $linear & 0xFFFFFFFF);
+        }
         throw new FaultException($vector, $errorCode, 'Page fault');
     }
 
@@ -356,6 +414,12 @@ trait MemoryAccessTrait
      */
     private function readMmio(RuntimeInterface $runtime, int $address, int $width): ?int
     {
+        $video = $runtime->context()->devices()->video();
+        $lfb = $video->linearFramebufferInfo();
+        if ($lfb !== null && $address >= $lfb['base'] && $address < ($lfb['base'] + $lfb['size'])) {
+            return $video->linearFramebufferRead($address, $width);
+        }
+
         $apic = $runtime->context()->cpu()->apicState();
         if ($address >= 0xFEE00000 && $address < 0xFEE01000) {
             $offset = $address - 0xFEE00000;
@@ -380,6 +444,51 @@ trait MemoryAccessTrait
      */
     private function writeMmio(RuntimeInterface $runtime, int $address, int $value, int $width): bool
     {
+        $video = $runtime?->context()->devices()->video() ?? null;
+        if ($video !== null) {
+            $lfb = $video->linearFramebufferInfo();
+            if ($lfb !== null && $address >= $lfb['base'] && $address < ($lfb['base'] + $lfb['size'])) {
+                if (!$video->linearFramebufferWrite($address, $value, $width)) {
+                    return false;
+                }
+
+                // Render 32bpp pixels on aligned 32-bit writes.
+                if ($width === 32 && $lfb['bitsPerPixel'] === 32) {
+                    $offset = ($address - $lfb['base']) & 0xFFFFFFFF;
+                    if (($offset & 0x3) === 0) {
+                        $x = intdiv($offset % $lfb['bytesPerScanLine'], 4);
+                        $y = intdiv($offset, $lfb['bytesPerScanLine']);
+
+                        if ($x >= 0 && $x < $lfb['width'] && $y >= 0 && $y < $lfb['height']) {
+                            $writer = $runtime->context()->screen()->screenWriter();
+                            $renderTerminal = $runtime->logicBoard()->debug()->memoryAccess()->renderLfbToTerminal;
+                            $shouldRender = !($writer instanceof TerminalScreenWriter)
+                                || $renderTerminal;
+
+                            if ($shouldRender) {
+                                $b = $value & 0xFF;
+                                $g = ($value >> 8) & 0xFF;
+                                $r = ($value >> 16) & 0xFF;
+                                $writer->dot($x, $y, new Color($r, $g, $b));
+
+                                // Prevent unbounded dot buffering during long REP fills.
+                                if (($offset & 0xFFF) === 0) {
+                                    $writer->flushIfNeeded();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if ($runtime->logicBoard()->debug()->memoryAccess()->stopOnLfbWrite) {
+                    $runtime->option()->logger()->warning(sprintf('LFB: write%d addr=0x%08X value=0x%X', $width, $address & 0xFFFFFFFF, $value & 0xFFFFFFFF));
+                    throw new \PHPMachineEmulator\Exception\HaltException('Stopped by PHPME_STOP_ON_LFB_WRITE');
+                }
+
+                return true;
+            }
+        }
+
         $apic = $runtime?->context()->cpu()->apicState() ?? null;
         if ($apic === null) {
             return false;

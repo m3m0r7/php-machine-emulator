@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -30,12 +30,14 @@ class Dec implements InstructionInterface
 
         $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
         $result = ($value - 1) & $mask;
+        $af = (($value & 0x0F) === 0x00);
 
         // Preserve CF - DEC does not affect carry flag
         $savedCf = $ma->shouldCarryFlag();
 
         $ma->writeBySize($reg, $result, $size);
         $ma->updateFlags($result, $size);
+        $ma->setAuxiliaryCarryFlag($af);
 
         // Restore CF
         $ma->setCarryFlag($savedCf);

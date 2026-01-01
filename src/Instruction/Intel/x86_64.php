@@ -85,7 +85,6 @@ class x86_64 implements InstructionListInterface
 
         // Only use 64-bit specific instructions when actually in 64-bit mode
         if ($isIn64BitMode) {
-
             // Check cache first
             if (isset($this->findInstructionCache64[$key])) {
                 return $this->findInstructionCache64[$key];

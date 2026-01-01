@@ -18,6 +18,19 @@ class BufferScreenWriter implements ScreenWriterInterface
     {
     }
 
+    public function start(): void
+    {
+    }
+
+    public function stop(): void
+    {
+    }
+
+    public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void
+    {
+        $this->videoTypeInfo = $videoTypeInfo;
+    }
+
     public function write(string $value): void
     {
         $this->runtime

@@ -1,13 +1,12 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -23,10 +22,10 @@ class JmpFar implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        $reader = new EnhanceStreamReader($runtime->memory());
+        $memory = $runtime->memory();
         $opSize = $runtime->context()->cpu()->operandSize();
-        $offset = $opSize === 32 ? $reader->dword() : $reader->short();
-        $segment = $reader->short();
+        $offset = $opSize === 32 ? $memory->dword() : $memory->short();
+        $segment = $memory->short();
 
         $runtime->option()->logger()->debug(sprintf('JMP FAR: segment=0x%04X offset=0x%04X', $segment, $offset));
 

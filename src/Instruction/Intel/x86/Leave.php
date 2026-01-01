@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -31,9 +31,15 @@ class Leave implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $hasOperandSizeOverridePrefix = in_array(self::PREFIX_OPERAND_SIZE, $opcodes, true);
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $ma = $runtime->memoryAccessor();
-        $stackSize = $runtime->context()->cpu()->operandSize();
+        $cpu = $runtime->context()->cpu();
+
+        $stackSize = $cpu->operandSize();
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $stackSize = $hasOperandSizeOverridePrefix ? 16 : 64;
+        }
 
         // Set SP = BP (release local variable space)
         $bp = $ma->fetch(RegisterType::EBP)->asBytesBySize($stackSize);

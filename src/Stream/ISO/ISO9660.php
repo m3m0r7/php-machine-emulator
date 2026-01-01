@@ -168,9 +168,11 @@ class ISO9660
     private function readAtRaw(int $offset, int $length): string|false
     {
         // Check if data is in buffer
-        if ($this->bufferStart >= 0 &&
+        if (
+            $this->bufferStart >= 0 &&
             $offset >= $this->bufferStart &&
-            $offset + $length <= $this->bufferStart + strlen($this->buffer)) {
+            $offset + $length <= $this->bufferStart + strlen($this->buffer)
+        ) {
             return substr($this->buffer, $offset - $this->bufferStart, $length);
         }
 
@@ -178,8 +180,10 @@ class ISO9660
         $this->fillBuffer($offset);
 
         // Try again from buffer
-        if ($offset >= $this->bufferStart &&
-            $offset + $length <= $this->bufferStart + strlen($this->buffer)) {
+        if (
+            $offset >= $this->bufferStart &&
+            $offset + $length <= $this->bufferStart + strlen($this->buffer)
+        ) {
             return substr($this->buffer, $offset - $this->bufferStart, $length);
         }
 

@@ -18,7 +18,8 @@ class FloppyDisk implements DiskInterface
         private readonly int $loadSegment = self::DEFAULT_LOAD_SEGMENT,
         private readonly int $loadAddress = self::DEFAULT_LOAD_ADDRESS,
         private readonly int $sectorCount = 1,
-    ) {}
+    ) {
+    }
 
     public function offset(): int
     {

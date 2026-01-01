@@ -70,8 +70,8 @@ enum Ata: int
 
     public static function isRegisterPort(int $port): bool
     {
-        return ($port >= self::PRIMARY_SECTOR_COUNT->value && $port <= self::PRIMARY_DRIVE_HEAD->value)
-            || ($port >= self::SECONDARY_SECTOR_COUNT->value && $port <= self::SECONDARY_DRIVE_HEAD->value);
+        return ($port >= self::PRIMARY_ERROR->value && $port <= self::PRIMARY_DRIVE_HEAD->value)
+            || ($port >= self::SECONDARY_ERROR->value && $port <= self::SECONDARY_DRIVE_HEAD->value);
     }
 
     public static function isWritableRegisterPort(int $port): bool

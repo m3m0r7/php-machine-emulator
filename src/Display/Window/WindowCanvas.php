@@ -6,9 +6,15 @@ namespace PHPMachineEmulator\Display\Window;
 
 use FFI;
 use PHPMachineEmulator\Display\Pixel\Color;
+use PHPMachineEmulator\Exception\WindowException;
 
 class WindowCanvas
 {
+    private const SDL_PIXELFORMAT_ARGB8888 = 0x16362004;
+    private const SDL_TEXTUREACCESS_STREAMING = 1;
+
+    protected BitmapFont $font;
+
     /** @var \FFI\CData Reusable SDL_Rect for single rect operations */
     protected \FFI\CData $reusableRect;
 
@@ -28,11 +34,18 @@ class WindowCanvas
         protected Window $window,
         protected FFI $ffi,
         protected mixed $renderer,
+        ?BitmapFont $font = null,
     ) {
+        $this->font = $font ?? new BitmapFont();
         $this->reusableRect = $this->ffi->new('SDL_Rect');
         // Pre-allocate batch buffer
         $this->batchBuffer = $this->ffi->new('SDL_Rect[' . self::MAX_BATCH_SIZE . ']');
         $this->batchBufferSize = self::MAX_BATCH_SIZE;
+    }
+
+    public function __debugInfo(): array
+    {
+        return [];
     }
 
     /**
@@ -81,18 +94,23 @@ class WindowCanvas
 
         $this->setColor($color);
         $count = count($rects);
-        $sdlRects = $this->getBatchBuffer($count);
+        $chunkSize = 8192;
+        for ($offset = 0; $offset < $count; $offset += $chunkSize) {
+            $slice = array_slice($rects, $offset, $chunkSize);
+            $sliceCount = count($slice);
+            $sdlRects = $this->getBatchBuffer($sliceCount);
 
-        $i = 0;
-        foreach ($rects as $rect) {
-            $sdlRects[$i]->x = $rect['x'];
-            $sdlRects[$i]->y = $rect['y'];
-            $sdlRects[$i]->w = $rect['w'];
-            $sdlRects[$i]->h = $rect['h'];
-            $i++;
+            $i = 0;
+            foreach ($slice as $rect) {
+                $sdlRects[$i]->x = $rect['x'];
+                $sdlRects[$i]->y = $rect['y'];
+                $sdlRects[$i]->w = $rect['w'];
+                $sdlRects[$i]->h = $rect['h'];
+                $i++;
+            }
+
+            $this->ffi->SDL_RenderFillRects($this->renderer, $sdlRects, $sliceCount);
         }
-
-        $this->ffi->SDL_RenderFillRects($this->renderer, $sdlRects, $count);
 
         return $this;
     }
@@ -112,13 +130,13 @@ class WindowCanvas
     public function text(int $x, int $y, string $text, Color $color, int $scale = 1): self
     {
         $this->setColor($color);
-        $charWidth = BitmapFont::charWidth() * $scale;
+        $charWidth = $this->font->charWidth() * $scale;
 
         // First pass: count total pixels using cached counts
         $totalPixels = 0;
         $len = strlen($text);
         for ($i = 0; $i < $len; $i++) {
-            $totalPixels += BitmapFont::getGlyphPixelCount($text[$i]);
+            $totalPixels += $this->font->getGlyphPixelCount($text[$i]);
         }
 
         if ($totalPixels === 0) {
@@ -130,7 +148,7 @@ class WindowCanvas
 
         // Second pass: fill buffer directly
         for ($i = 0; $i < $len; $i++) {
-            $pixels = BitmapFont::getGlyphPixels($text[$i]);
+            $pixels = $this->font->getGlyphPixels($text[$i]);
             if ($pixels === null) {
                 continue;
             }
@@ -165,7 +183,7 @@ class WindowCanvas
         $totalPixels = 0;
         $count = count($chars);
         for ($c = 0; $c < $count; $c++) {
-            $totalPixels += BitmapFont::getGlyphPixelCount($chars[$c]['char']);
+            $totalPixels += $this->font->getGlyphPixelCount($chars[$c]['char']);
         }
 
         if ($totalPixels === 0) {
@@ -177,7 +195,7 @@ class WindowCanvas
 
         // Second pass: fill buffer directly
         for ($c = 0; $c < $count; $c++) {
-            $pixels = BitmapFont::getGlyphPixels($chars[$c]['char']);
+            $pixels = $this->font->getGlyphPixels($chars[$c]['char']);
             if ($pixels === null) {
                 continue;
             }
@@ -199,20 +217,72 @@ class WindowCanvas
 
     public function textWidth(string $text, int $scale = 1): int
     {
-        return strlen($text) * BitmapFont::charWidth() * $scale;
+        return strlen($text) * $this->font->charWidth() * $scale;
     }
 
     public function textHeight(int $scale = 1): int
     {
-        return BitmapFont::charHeight() * $scale;
+        return $this->font->charHeight() * $scale;
     }
 
     public function clear(Color $color): self
     {
         $this->ffi->SDL_SetRenderDrawColor($this->renderer, $color->red(), $color->green(), $color->blue(), 255);
         $this->ffi->SDL_RenderClear($this->renderer);
+        $this->lastColorPacked = ($color->red() << 16) | ($color->green() << 8) | $color->blue();
 
         return $this;
+    }
+
+    /**
+     * Create a streaming texture for direct pixel updates.
+     */
+    public function createStreamingTexture(int $width, int $height): \FFI\CData
+    {
+        $texture = $this->ffi->SDL_CreateTexture(
+            $this->renderer,
+            self::SDL_PIXELFORMAT_ARGB8888,
+            self::SDL_TEXTUREACCESS_STREAMING,
+            $width,
+            $height,
+        );
+
+        if ($texture === null) {
+            throw new WindowException('SDL_CreateTexture failed: ' . $this->ffi->SDL_GetError());
+        }
+
+        return $texture;
+    }
+
+    /**
+     * Allocate a pixel buffer for a streaming texture (ARGB8888).
+     */
+    public function createPixelBuffer(int $size): \FFI\CData
+    {
+        return $this->ffi->new('Uint32[' . $size . ']');
+    }
+
+    /**
+     * Update a streaming texture with a packed ARGB buffer.
+     */
+    public function updateTexture(\FFI\CData $texture, \FFI\CData $pixels, int $pitch): void
+    {
+        $nullRect = $this->ffi->cast('SDL_Rect*', 0);
+        $this->ffi->SDL_UpdateTexture($texture, $nullRect, $pixels, $pitch);
+    }
+
+    /**
+     * Render a texture to the entire window.
+     */
+    public function renderTexture(\FFI\CData $texture): void
+    {
+        $nullRect = $this->ffi->cast('SDL_Rect*', 0);
+        $this->ffi->SDL_RenderCopy($this->renderer, $texture, $nullRect, $nullRect);
+    }
+
+    public function destroyTexture(\FFI\CData $texture): void
+    {
+        $this->ffi->SDL_DestroyTexture($texture);
     }
 
     public function present(): self
@@ -240,6 +310,10 @@ class WindowCanvas
 
         $imageInfo = getimagesize($path);
         if ($imageInfo === false) {
+            return $this;
+        }
+
+        if (!function_exists('imagecreatefrompng')) {
             return $this;
         }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Stream\ISO;
 
 use PHPMachineEmulator\Exception\StreamReaderException;
+use PHPMachineEmulator\Stream\BootImageInterface;
 use PHPMachineEmulator\Stream\BootableStreamInterface;
 use PHPMachineEmulator\Stream\StreamReaderProxyInterface;
 
@@ -40,7 +41,7 @@ class ISOBootImageStream implements BootableStreamInterface
         $this->fileSize = strlen($this->bootData);
     }
 
-    public function bootImage(): BootImage
+    public function bootImage(): BootImageInterface
     {
         return $this->bootImage;
     }
@@ -95,6 +96,12 @@ class ISOBootImageStream implements BootableStreamInterface
         return $low | ($high << 8);
     }
 
+    public function signedShort(): int
+    {
+        $value = $this->short();
+        return $value >= 0x8000 ? $value - 0x10000 : $value;
+    }
+
     public function dword(): int
     {
         $b0 = $this->byte();
@@ -102,6 +109,12 @@ class ISOBootImageStream implements BootableStreamInterface
         $b2 = $this->byte();
         $b3 = $this->byte();
         return $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
+    }
+
+    public function signedDword(): int
+    {
+        $value = $this->dword();
+        return $value >= 0x80000000 ? $value - 0x100000000 : $value;
     }
 
     public function read(int $length): string
@@ -113,6 +126,20 @@ class ISOBootImageStream implements BootableStreamInterface
         $result = substr($this->bootData, $this->offset, $length);
         $this->offset += strlen($result);
         return $result;
+    }
+
+    public function replaceRange(int $offset, string $data): void
+    {
+        $len = strlen($data);
+        if ($len === 0) {
+            return;
+        }
+        if ($offset < 0 || ($offset + $len) > $this->fileSize) {
+            return;
+        }
+
+        $this->bootData = substr_replace($this->bootData, $data, $offset, $len);
+        $this->bootImage->replaceRange($offset, $data);
     }
 
     public function offset(): int
@@ -145,6 +172,16 @@ class ISOBootImageStream implements BootableStreamInterface
         return $this->fileSize;
     }
 
+    public function bootLoadSize(): int
+    {
+        if ($this->isNoEmulation()) {
+            $catalogSectors = max(1, $this->bootImage->catalogSectorCount());
+            return min($this->fileSize, $catalogSectors * 512);
+        }
+
+        return min($this->fileSize, 512);
+    }
+
     /**
      * Check if this is a No Emulation boot image (CD-ROM boot).
      */
@@ -175,5 +212,10 @@ class ISOBootImageStream implements BootableStreamInterface
     public function iso(): ISO9660
     {
         return $this->isoStream->iso();
+    }
+
+    public function backingFileSize(): int
+    {
+        return $this->isoStream->iso()->fileSize();
     }
 }

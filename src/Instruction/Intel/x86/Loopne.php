@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -49,11 +49,15 @@ class Loopne implements InstructionInterface
 
         $zf = $runtime->memoryAccessor()->shouldZeroFlag();
         $target = $pos + $operand;
-        $targetMask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-        $target &= $targetMask;
 
-        $runtime->option()->logger()->debug(sprintf('LOOPNE: counter=%d, ZF=%d, operand=%d, pos=0x%X, target=0x%X',
-            $counter, $zf ? 1 : 0, $operand, $pos, $target));
+        $runtime->option()->logger()->debug(sprintf(
+            'LOOPNE: counter=%d, ZF=%d, operand=%d, pos=0x%X, target=0x%X',
+            $counter,
+            $zf ? 1 : 0,
+            $operand,
+            $pos,
+            $target
+        ));
 
         // Jump if counter is non-zero AND ZF is clear
         if ($counter === 0 || $zf) {
@@ -61,9 +65,7 @@ class Loopne implements InstructionInterface
         }
 
         if ($runtime->option()->shouldChangeOffset()) {
-            $runtime
-                ->memory()
-                ->setOffset($target);
+            $runtime->memory()->setOffset($target);
         }
 
         return ExecutionStatus::SUCCESS;

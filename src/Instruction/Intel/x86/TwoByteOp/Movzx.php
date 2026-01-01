@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
+use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -34,18 +34,39 @@ class Movzx implements InstructionInterface
     {
         $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[array_key_last($opcodes)];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
-        $opSize = $runtime->context()->cpu()->operandSize();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
+        $cpu = $runtime->context()->cpu();
+        $opSize = $cpu->operandSize();
 
         // Determine if byte or word source based on opcode
         $isByte = ($opcode & 0xFF) === 0xB6 || ($opcode === 0x0FB6);
 
-        $value = $isByte
-            ? $this->readRm8($runtime, $reader, $modrm)
-            : $this->readRm16($runtime, $reader, $modrm);
+        $isRegister = ModType::from($modrm->mode()) === ModType::REGISTER_TO_REGISTER;
+        if ($isRegister) {
+            $rmCode = $modrm->registerOrMemoryAddress();
+
+            if ($isByte) {
+                $value = $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()
+                    ? $this->read8BitRegister64($runtime, $rmCode, true, $cpu->rexB())
+                    : $this->read8BitRegister($runtime, $rmCode);
+            } else {
+                $rmReg = $cpu->isLongMode() && !$cpu->isCompatibilityMode()
+                    ? Register::findGprByCode($rmCode, $cpu->rexB())
+                    : $rmCode;
+                $value = $this->readRegisterBySize($runtime, $rmReg, 16);
+            }
+        } else {
+            $addr = $this->rmLinearAddress($runtime, $memory, $modrm);
+            $value = $isByte
+                ? $this->readMemory8($runtime, $addr)
+                : $this->readMemory16($runtime, $addr);
+        }
 
         $destReg = $modrm->registerOrOPCode();
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $destReg = Register::findGprByCode($destReg, $cpu->rexR());
+        }
 
         $this->writeRegisterBySize($runtime, $destReg, $value, $opSize);
 

@@ -9,16 +9,20 @@ use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\NotFoundInstructionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\InstructionListInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\InstructionExecutorInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Instruction\Intel\TranslationBlock;
+use PHPMachineEmulator\Instruction\Intel\PatternedInstruction\PatternedInstructionsList;
+use PHPMachineEmulator\Instruction\Intel\PatternedInstruction\PatternedInstructionsListStats;
 
 class InstructionExecutor implements InstructionExecutorInterface
 {
     private ?InstructionInterface $lastInstruction = null;
     private ?array $lastOpcodes = null;
     private int $lastInstructionPointer = 0;
+    private int $prevInstructionPointer = 0;
     private int $zeroOpcodeCount = 0;
 
     /**
@@ -28,10 +32,21 @@ class InstructionExecutor implements InstructionExecutorInterface
     private array $decodeCache = [];
 
     /**
+     * Pages that have been executed (for best-effort self-modifying code handling).
+     * @var array<int,true>
+     */
+    private array $executedPages = [];
+
+    /**
      * Execution hit count per IP for hotspot detection
      * @var array<int, int>
      */
     private array $hitCount = [];
+
+    /**
+     * Debug/helper state (trace/stop logic, counters).
+     */
+    private ?InstructionExecutorDebug $debug = null;
 
     /**
      * Translation Blocks: startIP => TranslationBlock
@@ -39,16 +54,40 @@ class InstructionExecutor implements InstructionExecutorInterface
      */
     private array $translationBlocks = [];
 
-    private const HOTSPOT_THRESHOLD = 1;  // この回数を超えたらホット
+    /**
+     * Patterned instructions list for optimizing frequently-executed code patterns
+     */
+    private ?PatternedInstructionsList $patternedInstructionsList = null;
+
+    private const HOTSPOT_THRESHOLD = 1;
+
+    public function __construct()
+    {
+    }
 
     public function execute(RuntimeInterface $runtime): ExecutionStatus
     {
         $ip = $runtime->memory()->offset();
+        $runtime->context()->cpu()->syncCompatibilityModeWithCs();
+        $this->prevInstructionPointer = $this->lastInstructionPointer;
         $this->lastInstructionPointer = $ip;
+        $this->executedPages[($ip & 0xFFFFFFFF) >> 12] = true;
+        $debug = $this->debug($runtime);
+        $debug->maybeStopAtIp($runtime, $ip, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
+        $debug->maybeStopOnRspBelow($runtime, $ip, $this->prevInstructionPointer);
 
         // REP/iteration handler active? Fall back to single-step to keep lastInstruction accurate.
         if ($runtime->context()->cpu()->iteration()->isActive()) {
             return $this->executeSingleInstruction($runtime, $ip);
+        }
+
+        // Try hot pattern detection first (fastest path for known patterns)
+        $patternResult = $this->patterns($runtime)->tryExecutePattern($runtime, $ip);
+        if ($patternResult !== null && $patternResult->isSuccess()) {
+            $debug->recordExecution($runtime, $ip);
+            $debug->maybeTraceControlFlowTarget($runtime, $ip, $patternResult->ip(), 'pattern');
+            $debug->maybeStopOnControlFlowTarget($runtime, $ip, $patternResult->ip(), null, null, 'pattern');
+            return $patternResult->executionStatus();
         }
 
         // Execute existing translation block if present
@@ -72,6 +111,26 @@ class InstructionExecutor implements InstructionExecutorInterface
         return $this->executeSingleInstruction($runtime, $ip);
     }
 
+    private function debug(RuntimeInterface $runtime): InstructionExecutorDebug
+    {
+        if ($this->debug === null) {
+            $this->debug = new InstructionExecutorDebug($runtime->logicBoard()->debug());
+        }
+
+        return $this->debug;
+    }
+
+    private function patterns(RuntimeInterface $runtime): PatternedInstructionsList
+    {
+        if ($this->patternedInstructionsList === null) {
+            $this->patternedInstructionsList = new PatternedInstructionsList(
+                $runtime->logicBoard()->debug()->patterns(),
+            );
+        }
+
+        return $this->patternedInstructionsList;
+    }
+
     /**
      * Execute a single instruction, using decode cache if available.
      */
@@ -79,6 +138,12 @@ class InstructionExecutor implements InstructionExecutorInterface
     {
         $memory = $runtime->memory();
         $memoryAccessor = $runtime->memoryAccessor();
+        $debug = $this->debug($runtime);
+
+        $debug->maybeTraceIp($runtime, $ip);
+        $debug->maybeStopAtIp($runtime, $ip, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
+        $debug->maybeStopOnRspBelow($runtime, $ip, $this->prevInstructionPointer);
+        $debug->recordExecution($runtime, $ip);
 
         // Use decode cache when available
         if (isset($this->decodeCache[$ip])) {
@@ -90,29 +155,53 @@ class InstructionExecutor implements InstructionExecutorInterface
 
             $startPos = $ip;
             $maxOpcodeLength = $runtime->architectureProvider()->instructionList()->getMaxOpcodeLength();
+            $instructionList = $runtime->architectureProvider()->instructionList();
+
+            // NOTE: x86 allows redundant/repeated legacy prefixes. Our opcode table max length (e.g. 6 bytes)
+            // can be shorter than a prefix run, so we may need to peek beyond maxOpcodeLength to reach the
+            // actual opcode. Cap at 15 bytes (architectural maximum instruction length).
             $peekBytes = [];
             for ($i = 0; $i < $maxOpcodeLength && !$memory->isEOF(); $i++) {
                 $peekBytes[] = $memory->byte();
             }
 
-            // Try to find instruction from longest to shortest pattern
             $instruction = null;
             $lastException = null;
             $length = 0;
-            for ($len = count($peekBytes); $len >= 1; $len--) {
-                $tryBytes = array_slice($peekBytes, 0, $len);
-                try {
-                    $instruction = $runtime->architectureProvider()->instructionList()->findInstruction($tryBytes);
-                    $length = $len;
-                    break;
-                } catch (NotFoundInstructionException $e) {
-                    $lastException = $e;
-                    continue;
-                }
-            }
 
-            if ($instruction === null && $lastException !== null) {
-                throw $lastException;
+            $canExtend = isset($peekBytes[0]) && $this->isLegacyPrefixByte($peekBytes[0]);
+            while (true) {
+                [$instruction, $length, $lastException] = $this->tryFindInstructionFromPeekBytes(
+                    $instructionList,
+                    $peekBytes
+                );
+
+                if ($instruction !== null) {
+                    break;
+                }
+
+                if (!$canExtend || count($peekBytes) >= 15 || $memory->isEOF()) {
+                    if ($lastException !== null) {
+                        $cs = $memoryAccessor->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                        $bytesStr = implode(' ', array_map(
+                            static fn (int $b): string => sprintf('%02X', $b & 0xFF),
+                            $peekBytes
+                        ));
+                        $runtime->option()->logger()->error(sprintf(
+                            'Decode failed at CS:IP=%04X:%08X bytes=%s len=%d last=%s',
+                            $cs,
+                            $startPos & 0xFFFFFFFF,
+                            $bytesStr,
+                            count($peekBytes),
+                            $lastException->getMessage()
+                        ));
+                        throw $lastException;
+                    }
+                    throw new NotFoundInstructionException('No found instruction (decode failed)');
+                }
+
+                // Extend peek window to include opcode after an unusually long legacy-prefix run.
+                $peekBytes[] = $memory->byte();
             }
 
             $opcodes = array_slice($peekBytes, 0, $length);
@@ -126,22 +215,20 @@ class InstructionExecutor implements InstructionExecutorInterface
         $this->lastOpcodes = $opcodes;
         $this->lastInstruction = $instruction;
 
-        // Detect infinite loop
-        if ($opcodes === [0x00]) {
-            $this->zeroOpcodeCount++;
-            if ($this->zeroOpcodeCount >= 255) {
-                throw new ExecutionException(sprintf(
-                    'Infinite loop detected: 255 consecutive 0x00 opcodes at IP=0x%05X',
-                    $this->lastInstructionPointer
-                ));
-            }
-        } else {
-            $this->zeroOpcodeCount = 0;
+        $this->maybeStopOnZeroOpcodeLoop($debug, $opcodes, $this->lastInstructionPointer);
+
+        if ($debug->shouldTraceExecution($runtime)) {
+            $debug->logExecution($runtime, $ip, $opcodes);
         }
 
-        $this->logExecution($runtime, $ip, $opcodes);
-
-        return $this->executeInstruction($runtime, $instruction, $opcodes);
+        $status = $this->executeInstruction($runtime, $instruction, $opcodes);
+        // Clear transient prefix state after executing a real instruction.
+        // Prefix-only instructions (REX/REP) return CONTINUE and must keep the state for the next instruction.
+        if ($status !== ExecutionStatus::CONTINUE) {
+            $runtime->context()->cpu()->clearTransientOverrides();
+        }
+        $this->maybeTraceControlFlow($runtime, $ip, $instruction, $opcodes);
+        return $status;
     }
 
     /**
@@ -152,28 +239,41 @@ class InstructionExecutor implements InstructionExecutorInterface
         $maxChainDepth = 16;
         $chainDepth = 0;
 
-        $beforeInstruction = function (int $ipBefore, InstructionInterface $instruction, array $opcodes) use ($runtime): void {
+        $cflowIpBefore = 0;
+        $cflowInstruction = null;
+        $cflowOpcodes = null;
+
+        $debug = $this->debug($runtime);
+
+        $beforeInstruction = function (int $ipBefore, InstructionInterface $instruction, array $opcodes) use ($runtime, $debug, &$cflowIpBefore, &$cflowInstruction, &$cflowOpcodes): void {
+            $runtime->context()->cpu()->syncCompatibilityModeWithCs();
+            $debug->maybeTraceIp($runtime, $ipBefore);
+            $debug->maybeStopAtIp($runtime, $ipBefore, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
+            $debug->maybeStopOnRspBelow($runtime, $ipBefore, $this->prevInstructionPointer);
+            $debug->recordExecution($runtime, $ipBefore);
             $this->lastInstructionPointer = $ipBefore;
             $this->lastInstruction = $instruction;
             $this->lastOpcodes = $opcodes;
+            $this->executedPages[($ipBefore & 0xFFFFFFFF) >> 12] = true;
 
-            if ($opcodes === [0x00]) {
-                $this->zeroOpcodeCount++;
-                if ($this->zeroOpcodeCount >= 255) {
-                    throw new ExecutionException(sprintf(
-                        'Infinite loop detected: 255 consecutive 0x00 opcodes at IP=0x%05X',
-                        $this->lastInstructionPointer
-                    ));
-                }
-            } else {
-                $this->zeroOpcodeCount = 0;
+            // Stash for post-execution control-flow tracing.
+            $cflowIpBefore = $ipBefore;
+            $cflowInstruction = $instruction;
+            $cflowOpcodes = $opcodes;
+
+            $this->maybeStopOnZeroOpcodeLoop($debug, $opcodes, $this->lastInstructionPointer);
+
+            if ($debug->shouldTraceExecution($runtime)) {
+                $debug->logExecution($runtime, $ipBefore, $opcodes);
             }
-
-            $this->logExecution($runtime, $ipBefore, $opcodes);
         };
 
-        $instructionRunner = function (InstructionInterface $instruction, array $opcodes) use ($runtime): ExecutionStatus {
-            return $this->executeInstruction($runtime, $instruction, $opcodes);
+        $instructionRunner = function (InstructionInterface $instruction, array $opcodes) use ($runtime, &$cflowIpBefore, &$cflowInstruction, &$cflowOpcodes): ExecutionStatus {
+            $status = $this->executeInstruction($runtime, $instruction, $opcodes);
+            if ($cflowInstruction !== null && $cflowOpcodes !== null) {
+                $this->maybeTraceControlFlow($runtime, $cflowIpBefore, $cflowInstruction, $cflowOpcodes);
+            }
+            return $status;
         };
 
         while ($block !== null && $chainDepth < $maxChainDepth) {
@@ -181,6 +281,22 @@ class InstructionExecutor implements InstructionExecutorInterface
 
             if ($status !== ExecutionStatus::SUCCESS) {
                 return $status;
+            }
+
+            // Allow hot patterns to override TB chaining (important for CALL-heavy loops).
+            // When a TB ends at a hot call target, chaining would otherwise bypass the pattern engine.
+            $debug->maybeTraceIp($runtime, $exitIp);
+            $debug->maybeStopAtIp($runtime, $exitIp, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
+            $patternResult = $this->patternedInstructionsList->tryExecutePattern($runtime, $exitIp);
+            if ($patternResult !== null && $patternResult->isSuccess()) {
+                $debug->recordExecution($runtime, $exitIp);
+                $debug->maybeTraceControlFlowTarget($runtime, $exitIp, $patternResult->ip(), 'pattern');
+                $debug->maybeStopOnControlFlowTarget($runtime, $exitIp, $patternResult->ip(), null, null, 'pattern');
+                $status = $patternResult->executionStatus();
+                if ($status !== ExecutionStatus::SUCCESS) {
+                    return $status;
+                }
+                $exitIp = $patternResult->ip();
             }
 
             // Try to chain to next block
@@ -196,6 +312,7 @@ class InstructionExecutor implements InstructionExecutorInterface
 
                 if (isset($this->translationBlocks[$exitIp])) {
                     $candidateBlock = $this->translationBlocks[$exitIp];
+
                     // Avoid chaining to the same block to prevent tight self-cycles inside chaining loop
                     if ($candidateBlock !== $block) {
                         $nextBlock = $candidateBlock;
@@ -212,12 +329,53 @@ class InstructionExecutor implements InstructionExecutorInterface
             $runtime->tickerRegistry()->tick($runtime);
             $runtime->interruptDeliveryHandler()->deliverPendingInterrupts($runtime);
             $runtime->context()->screen()->flushIfNeeded();
+            // If an interrupt changed the IP, stop chaining so execution resumes at the handler.
+            if ($runtime->memory()->offset() !== $exitIp) {
+                return $status;
+            }
 
             $block = $nextBlock;
             $chainDepth++;
         }
 
         return ExecutionStatus::SUCCESS;
+    }
+
+    private function maybeTraceControlFlow(RuntimeInterface $runtime, int $ipBefore, InstructionInterface $instruction, array $opcodes): void
+    {
+        if (!$this->isControlFlowInstruction($opcodes)) {
+            return;
+        }
+
+        $ipAfter = $runtime->memory()->offset();
+        $debug = $this->debug($runtime);
+        $debug->maybeStopOnControlFlowTarget($runtime, $ipBefore, $ipAfter, $instruction, $opcodes, 'instruction');
+        $opcodeStr = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $opcodes));
+        $mnemonic = preg_replace('/^.+\\\\(.+?)$/', '$1', get_class($instruction)) ?? 'insn';
+
+        $debug->maybeTraceControlFlowTarget($runtime, $ipBefore, $ipAfter, $mnemonic, $opcodeStr);
+    }
+
+    private function maybeStopOnZeroOpcodeLoop(InstructionExecutorDebug $debug, array $opcodes, int $ip): void
+    {
+        $limit = $debug->zeroOpcodeLoopLimit();
+        if ($limit <= 0) {
+            $this->zeroOpcodeCount = 0;
+            return;
+        }
+
+        if ($opcodes === [0x00]) {
+            $this->zeroOpcodeCount++;
+            if ($this->zeroOpcodeCount >= $limit) {
+                throw new ExecutionException(sprintf(
+                    'Infinite loop detected: %d consecutive 0x00 opcodes at IP=0x%05X',
+                    $limit,
+                    $ip
+                ));
+            }
+        } else {
+            $this->zeroOpcodeCount = 0;
+        }
     }
 
     /**
@@ -258,15 +416,19 @@ class InstructionExecutor implements InstructionExecutorInterface
 
                 $instruction = null;
                 $length = 0;
-                for ($len = count($peekBytes); $len >= 1; $len--) {
-                    $tryBytes = array_slice($peekBytes, 0, $len);
-                    try {
-                        $instruction = $instructionList->findInstruction($tryBytes);
-                        $length = $len;
+
+                $canExtend = isset($peekBytes[0]) && $this->isLegacyPrefixByte($peekBytes[0]);
+                while (true) {
+                    [$instruction, $length] = $this->tryFindInstructionFromPeekBytes($instructionList, $peekBytes);
+                    if ($instruction !== null) {
                         break;
-                    } catch (NotFoundInstructionException) {
-                        continue;
                     }
+
+                    if (!$canExtend || count($peekBytes) >= 15 || $memory->isEOF()) {
+                        break;
+                    }
+
+                    $peekBytes[] = $memory->byte();
                 }
 
                 if ($instruction === null) {
@@ -310,7 +472,16 @@ class InstructionExecutor implements InstructionExecutorInterface
             return false;
         }
 
-        $op = $opcodes[0];
+        $i = 0;
+        $count = count($opcodes);
+        while ($i < $count && $this->isLegacyPrefixByte($opcodes[$i])) {
+            $i++;
+        }
+        if ($i >= $count) {
+            return false;
+        }
+
+        $op = $opcodes[$i];
 
         // Jumps, calls, returns, interrupts
         return match (true) {
@@ -330,11 +501,45 @@ class InstructionExecutor implements InstructionExecutorInterface
             // Interrupts (0xCC: INT3, 0xCD: INT, 0xCE: INTO, 0xCF: IRET)
             $op >= 0xCC && $op <= 0xCF => true,
             // 0x0F prefix (two-byte opcodes: Jcc near, etc.)
-            $op === 0x0F && isset($opcodes[1]) => $this->isTwoByteControlFlow($opcodes[1]),
+            $op === 0x0F && isset($opcodes[$i + 1]) => $this->isTwoByteControlFlow($opcodes[$i + 1]),
             // Group 5 (0xFF) - INC/DEC/CALL/JMP indirect
             $op === 0xFF => true,
             default => false,
         };
+    }
+
+    private function isLegacyPrefixByte(int $byte): bool
+    {
+        // Legacy x86 prefixes that are embedded in opcode patterns via InstructionPrefixApplyable.
+        return in_array($byte & 0xFF, [0x66, 0x67, 0xF0, 0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65], true);
+    }
+
+    /**
+     * Try to find an instruction by matching longest to shortest prefix/opcode pattern.
+     *
+     * @param array<int> $peekBytes
+     * @return array{0: ?InstructionInterface, 1: int, 2?: ?NotFoundInstructionException}
+     */
+    private function tryFindInstructionFromPeekBytes(
+        InstructionListInterface $instructionList,
+        array $peekBytes,
+    ): array {
+        $instruction = null;
+        $lastException = null;
+        $length = 0;
+
+        for ($len = count($peekBytes); $len >= 1; $len--) {
+            $tryBytes = array_slice($peekBytes, 0, $len);
+            try {
+                $instruction = $instructionList->findInstruction($tryBytes);
+                $length = $len;
+                break;
+            } catch (NotFoundInstructionException $e) {
+                $lastException = $e;
+            }
+        }
+
+        return [$instruction, $length, $lastException];
     }
 
     /**
@@ -354,13 +559,41 @@ class InstructionExecutor implements InstructionExecutorInterface
         try {
             return $instruction->process($runtime, $opcodes);
         } catch (FaultException $e) {
-            $runtime->option()->logger()->error(sprintf('CPU fault: %s', $e->getMessage()));
-            if ($runtime->interruptDeliveryHandler()->raiseFault(
-                $runtime,
-                $e->vector(),
-                $runtime->memory()->offset(),
-                $e->errorCode()
-            )) {
+            $cpu = $runtime->context()->cpu();
+            $ma = $runtime->memoryAccessor();
+            $ip = $runtime->memory()->offset();
+            $faultIp = $ip;
+            $opcodeLen = count($opcodes);
+            if ($opcodeLen > 0) {
+                $faultIp = ($ip - $opcodeLen) & 0xFFFFFFFF;
+            }
+            $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+            $cr2 = $ma->readControlRegister(2);
+
+            $bytes = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $opcodes));
+            $runtime->option()->logger()->error(sprintf(
+                'CPU fault: %s vec=0x%02X err=%s ip=0x%08X rip=0x%016X cs=0x%04X cr2=0x%016X PM=%d PG=%d LM=%d bytes=%s',
+                $e->getMessage(),
+                $e->vector() & 0xFF,
+                $e->errorCode() === null ? 'n/a' : sprintf('0x%04X', $e->errorCode() & 0xFFFF),
+                $ip & 0xFFFFFFFF,
+                $ip,
+                $cs,
+                $cr2,
+                $cpu->isProtectedMode() ? 1 : 0,
+                $cpu->isPagingEnabled() ? 1 : 0,
+                $cpu->isLongMode() ? 1 : 0,
+                $bytes,
+            ));
+            $this->debug($runtime)->maybeDumpPageFaultContext($runtime, $e, $ip);
+            if (
+                $runtime->interruptDeliveryHandler()->raiseFault(
+                    $runtime,
+                    $e->vector(),
+                    $faultIp,
+                    $e->errorCode()
+                )
+            ) {
                 return ExecutionStatus::SUCCESS;
             }
             throw $e;
@@ -368,28 +601,6 @@ class InstructionExecutor implements InstructionExecutorInterface
             $runtime->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
             throw $e;
         }
-    }
-
-    private function logExecution(RuntimeInterface $runtime, int $ipBefore, array $opcodes): void
-    {
-        $memoryAccessor = $runtime->memoryAccessor();
-        $cf = $memoryAccessor->shouldCarryFlag() ? 1 : 0;
-        $zf = $memoryAccessor->shouldZeroFlag() ? 1 : 0;
-        $sf = $memoryAccessor->shouldSignFlag() ? 1 : 0;
-        $of = $memoryAccessor->shouldOverflowFlag() ? 1 : 0;
-        $eax = $memoryAccessor->fetch(RegisterType::EAX)->asBytesBySize(32);
-        $ebx = $memoryAccessor->fetch(RegisterType::EBX)->asBytesBySize(32);
-        $ecx = $memoryAccessor->fetch(RegisterType::ECX)->asBytesBySize(32);
-        $edx = $memoryAccessor->fetch(RegisterType::EDX)->asBytesBySize(32);
-        $esi = $memoryAccessor->fetch(RegisterType::ESI)->asBytesBySize(32);
-        $edi = $memoryAccessor->fetch(RegisterType::EDI)->asBytesBySize(32);
-        $ebp = $memoryAccessor->fetch(RegisterType::EBP)->asBytesBySize(32);
-        $esp = $memoryAccessor->fetch(RegisterType::ESP)->asBytesBySize(32);
-        $opcodeStr = implode(' ', array_map(fn($b) => sprintf('0x%02X', $b), $opcodes));
-        $runtime->option()->logger()->debug(sprintf(
-            'EXEC: IP=0x%05X op=%-12s FL[CF=%d ZF=%d SF=%d OF=%d] EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X',
-            $ipBefore, $opcodeStr, $cf, $zf, $sf, $of, $eax, $ebx, $ecx, $edx, $esi, $edi, $ebp, $esp
-        ));
     }
 
     public function lastInstruction(): ?InstructionInterface
@@ -430,6 +641,34 @@ class InstructionExecutor implements InstructionExecutorInterface
     }
 
     /**
+     * Get total executed instruction count (when `PHPME_COUNT_INSNS` or IP sampling is enabled).
+     */
+    public function instructionCount(): int
+    {
+        return $this->debug?->instructionCount() ?? 0;
+    }
+
+    /**
+     * Get IP sampling report.
+     *
+     * @return array{every:int,instructions:int,samples:int,unique:int,top:array<int,array{int,int}>}
+     */
+    public function getIpSampleReport(int $top = 20): array
+    {
+        if ($this->debug === null) {
+            return [
+                'every' => 0,
+                'instructions' => 0,
+                'samples' => 0,
+                'unique' => 0,
+                'top' => [],
+            ];
+        }
+
+        return $this->debug->getIpSampleReport($top);
+    }
+
+    /**
      * Invalidate decode/translation caches (e.g., on CR0 mode switch).
      */
     public function invalidateCaches(): void
@@ -437,5 +676,54 @@ class InstructionExecutor implements InstructionExecutorInterface
         $this->decodeCache = [];
         $this->hitCount = [];
         $this->translationBlocks = [];
+        $this->debug?->resetTraceCache();
+        $this->patternedInstructionsList?->invalidateCaches();
+    }
+
+    /**
+     * Best-effort cache invalidation when code is written into an already-executed page.
+     *
+     * This protects against stale decode/translation caches when boot loaders relocate
+     * or load modules into memory regions that previously contained executed code.
+     */
+    public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
+    {
+        if ($length <= 0 || $this->executedPages === []) {
+            return;
+        }
+
+        $s = $start & 0xFFFFFFFF;
+        $e = ($s + ($length - 1)) & 0xFFFFFFFF;
+        $startPage = $s >> 12;
+        $endPage = $e >> 12;
+
+        // Handle wrap-around conservatively.
+        if ($endPage < $startPage) {
+            $this->invalidateCaches();
+            return;
+        }
+
+        for ($page = $startPage; $page <= $endPage; $page++) {
+            if (isset($this->executedPages[$page])) {
+                $this->invalidateCaches();
+                return;
+            }
+        }
+    }
+
+    /**
+     * Get hot pattern detector statistics.
+     */
+    public function getHotPatternStats(): PatternedInstructionsListStats
+    {
+        return $this->patternedInstructionsList->getStats();
+    }
+
+    /**
+     * Get patterned instructions list.
+     */
+    public function patternedInstructionsList(): PatternedInstructionsList
+    {
+        return $this->patternedInstructionsList;
     }
 }

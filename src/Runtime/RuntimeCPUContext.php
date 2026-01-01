@@ -10,6 +10,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Cmos;
 use PHPMachineEmulator\Instruction\Intel\x86\KeyboardController;
 use PHPMachineEmulator\Instruction\Intel\x86\PicState;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * CPU context for x86/x64 emulation.
@@ -63,6 +64,12 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
 
     // Interrupt handling
     private int $interruptDeliveryBlock = 0;
+    /**
+     * Real-mode interrupt frames pushed by INT (linear address + bytes).
+     *
+     * @var array<int, array{linear:int,size:int,bytes:array<int,int>}>
+     */
+    private array $interruptFrameStack = [];
 
     // Segment override
     private ?RegisterType $segmentOverride = null;
@@ -87,6 +94,21 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
 
     // Current instruction pointer (for iteration rewind)
     private int $currentInstructionPointer = 0;
+
+    /**
+     * XMM register file (XMM0-XMM15), stored as 4x32-bit dwords.
+     *
+     * @var array<int, array{int,int,int,int}>
+     */
+    private array $xmm = [];
+
+    /**
+     * MXCSR (SSE control/status).
+     */
+    private int $mxcsr = 0x1F80;
+
+    /** @var array<int, UInt64|int> */
+    private array $msr = [];
 
     public function __construct()
     {
@@ -225,6 +247,36 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function isCompatibilityMode(): bool
     {
         return $this->compatibilityMode;
+    }
+
+    /**
+     * Ensure compatibility mode reflects the cached CS descriptor in IA-32e.
+     * This guards against transient mis-sync when CS cache is updated.
+     */
+    public function syncCompatibilityModeWithCs(): void
+    {
+        if (!$this->longMode) {
+            return;
+        }
+
+        $cached = $this->getCachedSegmentDescriptor(RegisterType::CS);
+        if (!is_array($cached) || !array_key_exists('long', $cached)) {
+            return;
+        }
+
+        $shouldCompat = !($cached['long'] ?? false);
+        if ($shouldCompat === $this->compatibilityMode) {
+            return;
+        }
+
+        $this->compatibilityMode = $shouldCompat;
+        if ($shouldCompat) {
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 32;
+        } else {
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 64;
+        }
     }
 
     public function setAddressSizeOverride(bool $flag = true): void
@@ -442,10 +494,13 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
 
     public function setTaskRegister(int $selector, int $base, int $limit): void
     {
+        // In IA-32e mode, system descriptor bases (TSS/LDT) are 64-bit.
+        // In legacy modes, bases are 32-bit.
+        $baseValue = $this->longMode ? $base : ($base & 0xFFFFFFFF);
         $this->taskRegister = [
             'selector' => $selector & 0xFFFF,
-            'base' => $base & 0xFFFFFFFF,
-            'limit' => $limit & 0xFFFF,
+            'base' => $baseValue,
+            'limit' => $limit & 0xFFFFFFFF,
         ];
     }
 
@@ -456,10 +511,13 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
 
     public function setLdtr(int $selector, int $base, int $limit): void
     {
+        // In IA-32e mode, system descriptor bases (TSS/LDT) are 64-bit.
+        // In legacy modes, bases are 32-bit.
+        $baseValue = $this->longMode ? $base : ($base & 0xFFFFFFFF);
         $this->ldtr = [
             'selector' => $selector & 0xFFFF,
-            'base' => $base & 0xFFFFFFFF,
-            'limit' => $limit & 0xFFFF,
+            'base' => $baseValue,
+            'limit' => $limit & 0xFFFFFFFF,
         ];
     }
 
@@ -543,6 +601,39 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
         return false;
     }
 
+    /**
+     * Track the last real-mode interrupt frames to restore if overwritten.
+     *
+     * @param array{linear:int,size:int,bytes:array<int,int>} $frame
+     */
+    public function pushInterruptFrame(array $frame): void
+    {
+        $this->interruptFrameStack[] = $frame;
+    }
+
+    /**
+     * @return array{linear:int,size:int,bytes:array<int,int>}|null
+     */
+    public function popInterruptFrame(): ?array
+    {
+        if ($this->interruptFrameStack === []) {
+            return null;
+        }
+        return array_pop($this->interruptFrameStack);
+    }
+
+    /**
+     * @return array{linear:int,size:int,bytes:array<int,int>}|null
+     */
+    public function peekInterruptFrame(): ?array
+    {
+        $count = count($this->interruptFrameStack);
+        if ($count === 0) {
+            return null;
+        }
+        return $this->interruptFrameStack[$count - 1];
+    }
+
     public function picState(): PicState
     {
         return $this->picState;
@@ -581,5 +672,53 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function setCurrentInstructionPointer(int $ip): void
     {
         $this->currentInstructionPointer = $ip;
+    }
+
+    public function getXmm(int $index): array
+    {
+        $this->initXmm();
+        $index &= 0xF;
+        return $this->xmm[$index];
+    }
+
+    public function setXmm(int $index, array $value): void
+    {
+        $this->initXmm();
+        $index &= 0xF;
+        $this->xmm[$index] = [
+            $value[0] & 0xFFFFFFFF,
+            $value[1] & 0xFFFFFFFF,
+            $value[2] & 0xFFFFFFFF,
+            $value[3] & 0xFFFFFFFF,
+        ];
+    }
+
+    public function mxcsr(): int
+    {
+        return $this->mxcsr & 0xFFFFFFFF;
+    }
+
+    public function setMxcsr(int $mxcsr): void
+    {
+        $this->mxcsr = $mxcsr & 0xFFFFFFFF;
+    }
+
+    public function readMsr(int $index): UInt64
+    {
+        $value = $this->msr[$index] ?? 0;
+        return $value instanceof UInt64 ? $value : UInt64::of($value);
+    }
+
+    public function writeMsr(int $index, UInt64|int $value): void
+    {
+        $this->msr[$index] = $value instanceof UInt64 ? $value : UInt64::of($value);
+    }
+
+    private function initXmm(): void
+    {
+        if ($this->xmm !== []) {
+            return;
+        }
+        $this->xmm = array_fill(0, 16, [0, 0, 0, 0]);
     }
 }

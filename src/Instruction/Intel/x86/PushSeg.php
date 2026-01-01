@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -30,12 +30,9 @@ class PushSeg implements InstructionInterface
             0x1E => RegisterType::DS,
         };
 
+        // Segment registers are always pushed as 16-bit values, regardless of operand size.
         $value = $runtime->memoryAccessor()->fetch($seg)->asByte();
-        $runtime->memoryAccessor()->push(
-            RegisterType::ESP,
-            $value,
-            $runtime->context()->cpu()->operandSize(),
-        );
+        $runtime->memoryAccessor()->push(RegisterType::ESP, $value, 16);
 
         return ExecutionStatus::SUCCESS;
     }

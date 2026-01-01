@@ -1,19 +1,26 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
+use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\Intel\ServiceFunction\VideoServiceFunction;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\Device\VideoContextInterface;
 use PHPMachineEmulator\Runtime\MemoryAccessorFetchResultInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Video\VideoColorType;
+use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class Video implements InterruptInterface
 {
-    private static bool $vbeInitialized = false;
-    private static int $vbeModeInfoAddr = 0x2200;
-    private static int $vbeModeListAddr = 0x2000;
+    private ?int $traceInt10CallsLimit = null;
+    private int $traceInt10Calls = 0;
+
+    private bool $vbeInitialized = false;
+    private int $vbeModeInfoAddr = 0x2200;
+    private int $vbeModeListAddr = 0x2000;
 
     public function __construct(protected RuntimeInterface $runtime)
     {
@@ -34,6 +41,9 @@ class Video implements InterruptInterface
         $fetchResult = $runtime->memoryAccessor()->fetch(RegisterType::EAX);
         $ah = $fetchResult->asHighBit();
         $al = $fetchResult->asLowBit();
+
+        $this->maybeTraceInt10Call($runtime, $ah, $al);
+
         // Only log visible ASCII characters for teletype output
         if ($ah === 0x0E && $al >= 0x20 && $al < 0x7F) {
             $runtime->option()->logger()->debug(sprintf('PRINT: %s (0x%02X)', chr($al), $al));
@@ -59,15 +69,153 @@ class Video implements InterruptInterface
             VideoServiceFunction::WRITE_PIXEL => null, // stub
             VideoServiceFunction::GET_CURRENT_VIDEO_MODE => $this->getCurrentVideoMode($runtime),
             VideoServiceFunction::PALETTE_ATTRIBUTE_CONTROL => $this->handlePaletteControl($runtime, $fetchResult),
+            VideoServiceFunction::WRITE_STRING => $this->writeString($runtime, $fetchResult),
             // VBE extensions (0x4Fxx) or unsupported functions
             default => $this->handleExtendedOrUnsupported($runtime, $fetchResult, $ah),
         };
+    }
+
+    private function traceInt10CallsLimit(RuntimeInterface $runtime): int
+    {
+        if ($this->traceInt10CallsLimit !== null) {
+            return $this->traceInt10CallsLimit;
+        }
+
+        $limit = $runtime->logicBoard()->debug()->trace()->traceInt10CallsLimit;
+        $this->traceInt10CallsLimit = max(0, $limit);
+        return $this->traceInt10CallsLimit;
+    }
+
+    private function maybeTraceInt10Call(RuntimeInterface $runtime, int $ah, int $al): void
+    {
+        $limit = $this->traceInt10CallsLimit($runtime);
+        if ($limit <= 0 || $this->traceInt10Calls >= $limit) {
+            return;
+        }
+        $this->traceInt10Calls++;
+
+        $ma = $runtime->memoryAccessor();
+        $ax = $ma->fetch(RegisterType::EAX)->asBytesBySize(16) & 0xFFFF;
+        $bx = $ma->fetch(RegisterType::EBX)->asBytesBySize(16) & 0xFFFF;
+        $cx = $ma->fetch(RegisterType::ECX)->asBytesBySize(16) & 0xFFFF;
+        $dx = $ma->fetch(RegisterType::EDX)->asBytesBySize(16) & 0xFFFF;
+        $runtime->option()->logger()->warning(sprintf(
+            'INT 10h: AH=0x%02X AL=0x%02X AX=0x%04X BX=0x%04X CX=0x%04X DX=0x%04X (%d/%d)',
+            $ah & 0xFF,
+            $al & 0xFF,
+            $ax,
+            $bx,
+            $cx,
+            $dx,
+            $this->traceInt10Calls,
+            $limit,
+        ));
+    }
+
+    /**
+     * INT 10h AH=13h - Write String.
+     *
+     * AL:
+     *   00h: chars only, attribute in BL, update cursor
+     *   01h: chars only, attribute in BL, do not update cursor
+     *   02h: char+attr pairs, update cursor
+     *   03h: char+attr pairs, do not update cursor
+     *
+     * BH: page (ignored)
+     * BL: attribute (when AL bit1=0)
+     * CX: length (characters)
+     * DH: row, DL: col
+     * ES:BP -> string
+     */
+    protected function writeString(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
+    {
+        $ax = $fetchResult->asBytesBySize(16);
+        $al = $ax & 0xFF;
+
+        $len = $runtime->memoryAccessor()->fetch(RegisterType::ECX)->asBytesBySize(16) & 0xFFFF;
+        if ($len <= 0) {
+            return;
+        }
+
+        if ($runtime->logicBoard()->debug()->trace()->stopOnInt10WriteString) {
+            $dx = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asBytesBySize(16) & 0xFFFF;
+            $row = ($dx >> 8) & 0xFF;
+            $col = $dx & 0xFF;
+            $runtime->option()->logger()->warning(sprintf(
+                'INT10: write string AL=0x%02X len=%d row=%d col=%d',
+                $al,
+                $len,
+                $row,
+                $col,
+            ));
+            throw new HaltException('Stopped by PHPME_STOP_ON_INT10_WRITE_STRING');
+        }
+
+        $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize(16) & 0xFFFF;
+        $defaultAttr = $bx & 0xFF; // BL
+
+        $dx = $runtime->memoryAccessor()->fetch(RegisterType::EDX)->asBytesBySize(16) & 0xFFFF;
+        $row = ($dx >> 8) & 0xFF; // DH
+        $col = $dx & 0xFF;        // DL
+
+        $cpu = $runtime->context()->cpu();
+        $addrSize = $cpu->addressSize();
+        $bp = $runtime->memoryAccessor()->fetch(RegisterType::EBP)->asBytesBySize($addrSize);
+        $src = $this->segmentOffsetAddress($runtime, RegisterType::ES, $bp);
+
+        $hasAttrInString = ($al & 0x02) !== 0;
+        $updateCursor = ($al & 0x01) === 0;
+
+        $videoContext = $this->videoContext();
+        $prevRow = $videoContext->getCursorRow();
+        $prevCol = $videoContext->getCursorCol();
+
+        $screenWidth = 80;
+        $mode = $videoContext->getCurrentMode();
+        $videoTypeInfo = $runtime->video()->supportedVideoModes()[$mode] ?? null;
+        if ($videoTypeInfo !== null && $videoTypeInfo->isTextMode) {
+            $screenWidth = $videoTypeInfo->width;
+        }
+
+        $posRow = $row;
+        $posCol = $col;
+
+        for ($i = 0; $i < $len; $i++) {
+            if ($hasAttrInString) {
+                $charCode = $this->readMemory8($runtime, $src + ($i * 2));
+                $attr = $this->readMemory8($runtime, $src + ($i * 2) + 1) & 0xFF;
+            } else {
+                $charCode = $this->readMemory8($runtime, $src + $i);
+                $attr = $defaultAttr;
+            }
+
+            $char = chr($charCode & 0xFF);
+            $runtime->context()->screen()->writeCharAt($posRow, $posCol, $char, $attr);
+
+            $posCol++;
+            if ($posCol >= $screenWidth) {
+                $posCol = 0;
+                $posRow++;
+            }
+        }
+
+        if ($updateCursor) {
+            $videoContext->setCursorPosition($posRow, $posCol);
+            $runtime->context()->screen()->setCursorPosition($posRow, $posCol);
+        } else {
+            $videoContext->setCursorPosition($prevRow, $prevCol);
+        }
     }
 
     protected function setVideoMode(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
     {
         $videoType = $fetchResult->asLowBit();
         $runtime->option()->logger()->debug(sprintf('Set Video Mode: 0x%02X', $videoType));
+
+        if ($runtime->logicBoard()->debug()->trace()->stopOnSetVideoMode) {
+            $runtime->option()->logger()->warning(sprintf('INT10: set video mode 0x%02X', $videoType));
+            throw new HaltException('Stopped by PHPME_STOP_ON_SET_VIDEO_MODE');
+        }
 
         // NOTE: validate video type
         $video = $runtime->video()->supportedVideoModes()[$videoType] ?? null;
@@ -76,20 +224,21 @@ class Video implements InterruptInterface
             return;
         }
         $this->videoContext()->setCurrentMode($videoType);
+        $this->videoContext()->disableLinearFramebuffer();
 
         $runtime
             ->memoryAccessor()
                         ->writeBySize(
-                $runtime->video()->videoTypeFlagAddress(),
-                // NOTE: Store width, height, and video type in a single flag address.
-                // width: 16 bits (bits 48..63)
-                // height: 16 bits (bits 32..47)
-                // video type: 8 bits (bits 0..7)
-                (($video->width & 0xFFFF) << 48) +
-                (($video->height & 0xFFFF) << 32) +
-                ($videoType & 0xFF),
-                64,
-            );
+                            $runtime->video()->videoTypeFlagAddress(),
+                            // NOTE: Store width, height, and video type in a single flag address.
+                            // width: 16 bits (bits 48..63)
+                            // height: 16 bits (bits 32..47)
+                            // video type: 8 bits (bits 0..7)
+                            (($video->width & 0xFFFF) << 48) +
+                            (($video->height & 0xFFFF) << 32) +
+                            ($videoType & 0xFF),
+                            64,
+                        );
 
         // Update screen writer with new video mode
         $runtime->context()->screen()->updateVideoMode($video);
@@ -219,7 +368,12 @@ class Video implements InterruptInterface
 
         $runtime->option()->logger()->debug(sprintf(
             'SCROLL_UP: AL=%d, attr=0x%02X, top=%d, left=%d, bottom=%d, right=%d',
-            $al, $attribute, $topRow, $leftCol, $bottomRow, $rightCol
+            $al,
+            $attribute,
+            $topRow,
+            $leftCol,
+            $bottomRow,
+            $rightCol
         ));
 
         if ($al === 0) {
@@ -279,90 +433,115 @@ class Video implements InterruptInterface
 
     protected function handleVbe(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void
     {
-        $ax = $fetchResult->asByte();
+        // VBE entrypoint uses AX=0x4Fxx where:
+        //   AH = 0x4F (VBE), AL = function number
+        $ax = $fetchResult->asBytesBySize(16);
         $ah = ($ax >> 8) & 0xFF;
-        $al = $ax & 0xFF;
+        $func = $ax & 0xFF;
         $ma = $runtime->memoryAccessor();
 
-        if (!self::$vbeInitialized) {
+        if (!$this->vbeInitialized) {
             $this->initVbeStructures($runtime);
-            self::$vbeInitialized = true;
+            $this->vbeInitialized = true;
         }
 
-        if ($al !== 0x4F) {
-            $ma->write16Bit(RegisterType::AX, 0x014F);
-            return;
-        }
-
-        $func = $ah;
-        if ($func === 0x00) {
-            $this->vbeGetInfo($runtime);
-            return;
-        }
-        if ($func === 0x01) {
-            $this->vbeGetModeInfo($runtime);
-            return;
-        }
-        if ($func === 0x02) {
-            $this->vbeSetMode($runtime);
-            return;
-        }
-        if ($func === 0x03) {
-            $this->vbeGetCurrentMode($runtime);
+        // If this wasn't actually a VBE call, return "function call failed".
+        if ($ah !== 0x4F) {
+            $ma->write16Bit(RegisterType::EAX, 0x014F);
             return;
         }
 
-        $ma->write16Bit(RegisterType::AX, 0x014F);
+        match ($func) {
+            0x00 => $this->vbeGetInfo($runtime),
+            0x01 => $this->vbeGetModeInfo($runtime),
+            0x02 => $this->vbeSetMode($runtime),
+            0x03 => $this->vbeGetCurrentMode($runtime),
+            default => $ma->write16Bit(RegisterType::EAX, 0x014F),
+        };
     }
 
     private function initVbeStructures(RuntimeInterface $runtime): void
     {
         // Mode list at 0x2000: terminate with 0xFFFF
-        $list = [0x118, 0x141, 0xFFFF];
-        $addr = self::$vbeModeListAddr;
+        $list = [0x141, 0xFFFF];
+        $addr = $this->vbeModeListAddr;
         foreach ($list as $mode) {
             $this->writeMemory16($runtime, $addr, $mode & 0xFFFF);
             $addr += 2;
         }
 
-        // Mode info block at 0x2200 for mode 0x141 (1024x768x32)
-        $base = self::$vbeModeInfoAddr;
-        $this->writeMemory16($runtime, $base + 0x00, 0x009B); // attributes: mode supported, color, graphics, LFB
-        $this->writeMemory8($runtime, $base + 0x02, 0); // window A
-        $this->writeMemory8($runtime, $base + 0x03, 0);
-        $this->writeMemory16($runtime, $base + 0x04, 0);
-        $this->writeMemory16($runtime, $base + 0x06, 0);
-        $this->writeMemory16($runtime, $base + 0x08, 0);
-        $this->writeMemory16($runtime, $base + 0x0A, 0);
-        $this->writeMemory8($runtime, $base + 0x0C, 0);
-        $this->writeMemory8($runtime, $base + 0x0D, 0);
-        $this->writeMemory16($runtime, $base + 0x12, 1024); // X
-        $this->writeMemory16($runtime, $base + 0x14, 768);  // Y
-        $this->writeMemory8($runtime, $base + 0x18, 32);   // bpp
-        $this->writeMemory8($runtime, $base + 0x19, 1);    // memory model packed pixel
-        $this->writeMemory16($runtime, $base + 0x10, 1);   // number of planes
-        $this->writeMemory16($runtime, $base + 0x1A, 32);  // bytes per scan line / pixel byte?
-        $this->writeMemory16($runtime, $base + 0x1A, 4096); // line length
-        $this->writeMemory16($runtime, $base + 0x1C, 32);  // image base?
-        $this->writeMemory16($runtime, $base + 0x1E, 1);   // pages
-        $this->writeMemory8($runtime, $base + 0x1F, 8);    // red mask
-        $this->writeMemory8($runtime, $base + 0x20, 16);   // red position
-        $this->writeMemory8($runtime, $base + 0x21, 8);    // green mask
-        $this->writeMemory8($runtime, $base + 0x22, 8);    // green pos
-        $this->writeMemory8($runtime, $base + 0x23, 8);    // blue mask
-        $this->writeMemory8($runtime, $base + 0x24, 0);    // blue pos
-        $this->writeMemory8($runtime, $base + 0x25, 8);    // rsvd mask
-        $this->writeMemory8($runtime, $base + 0x26, 0);
-        $this->writeMemory8($runtime, $base + 0x27, 0);    // direct color
-        $this->writeMemory32($runtime, $base + 0x28, 0xE0000000); // phys base
-        $this->writeMemory16($runtime, $base + 0x2E, 1);   // lin bytes per scan line in 32bpp
-        $this->writeMemory16($runtime, $base + 0x2E, 4096);
+        // Mode info block at 0x2200 for mode 0x141 (1024x768x32, LFB at 0xE0000000)
+        $base = $this->vbeModeInfoAddr;
+        // Clear 256 bytes.
+        for ($i = 0; $i < 256; $i++) {
+            $this->writeMemory8($runtime, $base + $i, 0);
+        }
+
+        $width = 1024;
+        $height = 768;
+        $bytesPerPixel = 4;
+        $bytesPerScanLine = $width * $bytesPerPixel;
+
+        // VBE ModeInfoBlock (VBE 3.0, 256 bytes)
+        // https://pdos.csail.mit.edu/6.828/2018/readings/hardware/vbe3.pdf
+        $this->writeMemory16($runtime, $base + 0x00, 0x009B); // ModeAttributes: supported + graphics + color + LFB
+        $this->writeMemory8($runtime, $base + 0x02, 0x00);   // WinAAttributes
+        $this->writeMemory8($runtime, $base + 0x03, 0x00);   // WinBAttributes
+        $this->writeMemory16($runtime, $base + 0x04, 0x0000); // WinGranularity
+        $this->writeMemory16($runtime, $base + 0x06, 0x0000); // WinSize
+        $this->writeMemory16($runtime, $base + 0x08, 0x0000); // WinASegment
+        $this->writeMemory16($runtime, $base + 0x0A, 0x0000); // WinBSegment
+        $this->writeMemory32($runtime, $base + 0x0C, 0x00000000); // WinFuncPtr
+        $this->writeMemory16($runtime, $base + 0x10, $bytesPerScanLine & 0xFFFF); // BytesPerScanLine
+        $this->writeMemory16($runtime, $base + 0x12, $width & 0xFFFF); // XResolution
+        $this->writeMemory16($runtime, $base + 0x14, $height & 0xFFFF); // YResolution
+        $this->writeMemory8($runtime, $base + 0x16, 8);  // XCharSize
+        $this->writeMemory8($runtime, $base + 0x17, 16); // YCharSize
+        $this->writeMemory8($runtime, $base + 0x18, 1);  // NumberOfPlanes
+        $this->writeMemory8($runtime, $base + 0x19, 32); // BitsPerPixel
+        $this->writeMemory8($runtime, $base + 0x1A, 1);  // NumberOfBanks
+        $this->writeMemory8($runtime, $base + 0x1B, 0x06); // MemoryModel: Direct Color
+        $this->writeMemory8($runtime, $base + 0x1C, 0);  // BankSize
+        $this->writeMemory8($runtime, $base + 0x1D, 0);  // NumberOfImagePages
+        $this->writeMemory8($runtime, $base + 0x1E, 0);  // Reserved1
+
+        // Direct Color fields (legacy/banked)
+        $this->writeMemory8($runtime, $base + 0x1F, 8);  // RedMaskSize
+        $this->writeMemory8($runtime, $base + 0x20, 16); // RedFieldPosition
+        $this->writeMemory8($runtime, $base + 0x21, 8);  // GreenMaskSize
+        $this->writeMemory8($runtime, $base + 0x22, 8);  // GreenFieldPosition
+        $this->writeMemory8($runtime, $base + 0x23, 8);  // BlueMaskSize
+        $this->writeMemory8($runtime, $base + 0x24, 0);  // BlueFieldPosition
+        $this->writeMemory8($runtime, $base + 0x25, 8);  // RsvdMaskSize
+        $this->writeMemory8($runtime, $base + 0x26, 24); // RsvdFieldPosition
+        $this->writeMemory8($runtime, $base + 0x27, 0);  // DirectColorModeInfo
+
+        // Linear Frame Buffer
+        $this->writeMemory32($runtime, $base + 0x28, 0xE0000000); // PhysBasePtr
+        $this->writeMemory32($runtime, $base + 0x2C, 0x00000000); // OffScreenMemOffset
+        $this->writeMemory16($runtime, $base + 0x30, 0x0000); // OffScreenMemSize
+
+        // VBE 3.0 linear-mode variants
+        $this->writeMemory16($runtime, $base + 0x32, $bytesPerScanLine & 0xFFFF); // LinBytesPerScanLine
+        $this->writeMemory8($runtime, $base + 0x34, 0); // BnkNumberOfImagePages
+        $this->writeMemory8($runtime, $base + 0x35, 0); // LinNumberOfImagePages
+        $this->writeMemory8($runtime, $base + 0x36, 8);  // LinRedMaskSize
+        $this->writeMemory8($runtime, $base + 0x37, 16); // LinRedFieldPosition
+        $this->writeMemory8($runtime, $base + 0x38, 8);  // LinGreenMaskSize
+        $this->writeMemory8($runtime, $base + 0x39, 8);  // LinGreenFieldPosition
+        $this->writeMemory8($runtime, $base + 0x3A, 8);  // LinBlueMaskSize
+        $this->writeMemory8($runtime, $base + 0x3B, 0);  // LinBlueFieldPosition
+        $this->writeMemory8($runtime, $base + 0x3C, 8);  // LinRsvdMaskSize
+        $this->writeMemory8($runtime, $base + 0x3D, 24); // LinRsvdFieldPosition
+        $this->writeMemory32($runtime, $base + 0x3E, 0x00000000); // MaxPixelClock
     }
 
     private function vbeGetInfo(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor();
-        $addr = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize()));
+        $cpu = $runtime->context()->cpu();
+        $addrSize = $cpu->addressSize();
+        $addr = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($addrSize));
         // Zero 512 bytes
         for ($i = 0; $i < 512; $i++) {
             $this->writeMemory8($runtime, $addr + $i, 0);
@@ -374,28 +553,30 @@ class Video implements InterruptInterface
         $this->writeMemory16($runtime, $addr + 4, 0x0300); // version
         // OEM, vendor/product strings omitted
         // Video mode pointer
-        $this->writeMemory16($runtime, $addr + 0x0E, self::$vbeModeListAddr & 0xF); // offset
-        $this->writeMemory16($runtime, $addr + 0x10, (self::$vbeModeListAddr >> 4) & 0xFFFF); // segment
+        $this->writeMemory16($runtime, $addr + 0x0E, $this->vbeModeListAddr & 0xF); // offset
+        $this->writeMemory16($runtime, $addr + 0x10, ($this->vbeModeListAddr >> 4) & 0xFFFF); // segment
         $this->writeMemory16($runtime, $addr + 0x12, 0x0080); // total memory (64KB blocks) -> 8MB
-        $ma->write16Bit(RegisterType::AX, 0x004F);
+        $ma->write16Bit(RegisterType::EAX, 0x004F);
     }
 
     private function vbeGetModeInfo(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor();
+        $cpu = $runtime->context()->cpu();
+        $addrSize = $cpu->addressSize();
         $mode = $ma->fetch(RegisterType::ECX)->asBytesBySize(16) & 0xFFFF;
-        $dest = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($runtime->context()->cpu()->addressSize()));
+        $dest = $this->segmentOffsetAddress($runtime, RegisterType::ES, $ma->fetch(RegisterType::EDI)->asBytesBySize($addrSize));
         // Only one mode: 0x141
         if ($mode !== 0x141) {
-            $ma->write16Bit(RegisterType::AX, 0x014F);
+            $ma->write16Bit(RegisterType::EAX, 0x014F);
             return;
         }
         // copy mode info block
         for ($i = 0; $i < 256; $i++) {
-            $byte = $this->readMemory8($runtime, self::$vbeModeInfoAddr + $i);
+            $byte = $this->readMemory8($runtime, $this->vbeModeInfoAddr + $i);
             $this->writeMemory8($runtime, $dest + $i, $byte);
         }
-        $ma->write16Bit(RegisterType::AX, 0x004F);
+        $ma->write16Bit(RegisterType::EAX, 0x004F);
     }
 
     private function vbeSetMode(RuntimeInterface $runtime): void
@@ -404,32 +585,90 @@ class Video implements InterruptInterface
         $mode = $ma->fetch(RegisterType::EBX)->asBytesBySize(16) & 0x1FF;
         if ($mode === 0x141) {
             $this->videoContext()->setCurrentMode($mode);
-            $ma->write16Bit(RegisterType::AX, 0x004F);
+            $this->videoContext()->enableLinearFramebuffer(
+                0xE0000000,
+                1024,
+                768,
+                1024 * 4,
+                32,
+            );
+
+            $runtime->context()->screen()->updateVideoMode(
+                new VideoTypeInfo(1024, 768, 1 << 24, VideoColorType::COLOR),
+            );
+            $ma->write16Bit(RegisterType::EAX, 0x004F);
+
+            if ($runtime->logicBoard()->debug()->trace()->stopOnVbeSetMode) {
+                $runtime->option()->logger()->warning(sprintf('VBE: set mode 0x%X', $mode));
+                throw new HaltException('Stopped by PHPME_STOP_ON_VBE_SETMODE');
+            }
             return;
         }
-        $ma->write16Bit(RegisterType::AX, 0x014F);
+        $ma->write16Bit(RegisterType::EAX, 0x014F);
     }
 
     private function vbeGetCurrentMode(RuntimeInterface $runtime): void
     {
         $ma = $runtime->memoryAccessor();
-        $ma->write16Bit(RegisterType::BX, $this->videoContext()->getCurrentMode() & 0x1FF);
-        $ma->write16Bit(RegisterType::AX, 0x004F);
+        $ma->write16Bit(RegisterType::EBX, $this->videoContext()->getCurrentMode() & 0x1FF);
+        $ma->write16Bit(RegisterType::EAX, 0x004F);
     }
 
     /**
      * Calculate segment:offset to linear address.
      */
-    protected function segmentOffsetAddress(RuntimeInterface $runtime, int $segment, int $offset): int
+    protected function segmentOffsetAddress(RuntimeInterface $runtime, RegisterType $segment, int $offset): int
     {
+        $cpu = $runtime->context()->cpu();
+        $addressSize = $cpu->addressSize();
+        $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+        $linearMask = $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+        $selector = $runtime->memoryAccessor()->fetch($segment)->asBytesBySize(16) & 0xFFFF;
+        $effOffset = $offset & $offsetMask;
+
         if ($runtime->context()->cpu()->isProtectedMode()) {
-            // In protected mode, segment is a selector - for simplicity use offset directly
-            // Real implementation would look up GDT/LDT for base address
-            return $offset;
+            $segBase = $this->selectorBaseAddress($runtime, $selector);
+            if ($segBase !== null) {
+                return ($segBase + $effOffset) & $linearMask;
+            }
+            return $effOffset & $linearMask;
         }
-        // Real mode: segment * 16 + offset
-        $segBase = $runtime->memoryAccessor()->fetch($segment)->asBytesBySize(16);
-        return ($segBase << 4) + $offset;
+
+        // Big Real Mode (Unreal Mode) support: if we have a cached descriptor, use its base.
+        $cached = $runtime->context()->cpu()->getCachedSegmentDescriptor($segment);
+        $segBase = $cached['base'] ?? (($selector << 4) & 0xFFFFF);
+
+        return ($segBase + $effOffset) & $linearMask;
+    }
+
+    private function selectorBaseAddress(RuntimeInterface $runtime, int $selector): ?int
+    {
+        $ti = ($selector >> 2) & 0x1;
+        if ($ti === 1) {
+            $ldtr = $runtime->context()->cpu()->ldtr();
+            if (($ldtr['selector'] ?? 0) === 0) {
+                return null;
+            }
+            $tableBase = $ldtr['base'] ?? 0;
+            $tableLimit = $ldtr['limit'] ?? 0;
+        } else {
+            $gdtr = $runtime->context()->cpu()->gdtr();
+            $tableBase = $gdtr['base'] ?? 0;
+            $tableLimit = $gdtr['limit'] ?? 0;
+        }
+
+        $index = ($selector >> 3) & 0x1FFF;
+        $descAddr = $tableBase + ($index * 8);
+        if ($descAddr + 7 > $tableBase + $tableLimit) {
+            return null;
+        }
+
+        $b2 = $this->readMemory8($runtime, $descAddr + 2);
+        $b3 = $this->readMemory8($runtime, $descAddr + 3);
+        $b4 = $this->readMemory8($runtime, $descAddr + 4);
+        $b7 = $this->readMemory8($runtime, $descAddr + 7);
+
+        return (($b2) | ($b3 << 8) | ($b4 << 16) | ($b7 << 24)) & 0xFFFFFFFF;
     }
 
     /**

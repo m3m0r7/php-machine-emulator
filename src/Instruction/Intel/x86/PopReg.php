@@ -1,13 +1,14 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
+use PHPMachineEmulator\Instruction\Intel\Register;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -22,23 +23,24 @@ class PopReg implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
+        $hasOperandSizeOverridePrefix = in_array(self::PREFIX_OPERAND_SIZE, $opcodes, true);
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $size = $runtime->context()->cpu()->operandSize();
-        $stackedValue = $runtime
-            ->memoryAccessor()
-            ->pop(RegisterType::ESP, $size)
-            ->asBytesBySize($size);
+        $cpu = $runtime->context()->cpu();
 
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $popSize = $hasOperandSizeOverridePrefix ? 16 : 64;
+            $regCode = $opcode & 0x7;
+            $targetReg = Register::findGprByCode($regCode, $cpu->rexB());
+            $value = $runtime->memoryAccessor()->pop(RegisterType::ESP, $popSize)->asBytesBySize($popSize);
+            $runtime->memoryAccessor()->writeBySize($targetReg, $value, $popSize);
+            return ExecutionStatus::SUCCESS;
+        }
+
+        $size = $cpu->operandSize();
+        $stackedValue = $runtime->memoryAccessor()->pop(RegisterType::ESP, $size)->asBytesBySize($size);
         $targetReg = $this->registersAndOPCodes()[$opcode];
-
-        $runtime
-            ->memoryAccessor()
-            ->writeBySize(
-                $targetReg,
-                $stackedValue,
-                $size,
-            );
+        $runtime->memoryAccessor()->writeBySize($targetReg, $stackedValue, $size);
 
         return ExecutionStatus::SUCCESS;
     }

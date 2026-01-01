@@ -1,13 +1,12 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Stream\EnhanceStreamReader;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -24,19 +23,19 @@ class ImulImmediate implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
-        $reader = new EnhanceStreamReader($runtime->memory());
-        $modrm = $reader->byteAsModRegRM();
+        $memory = $runtime->memory();
+        $modrm = $memory->byteAsModRegRM();
         $opSize = $runtime->context()->cpu()->operandSize();
         $isImm8 = $opcode === 0x6B;
 
         // x86 encoding order: ModR/M -> SIB -> displacement -> immediate
         // Read src first (consumes displacement), THEN read immediate
-        $src = $this->readRm($runtime, $reader, $modrm, $opSize);
+        $src = $this->readRm($runtime, $memory, $modrm, $opSize);
 
         // NOW read immediate (after displacement has been consumed)
         $imm = $isImm8
-            ? $this->signExtend($reader->streamReader()->byte(), 8)
-            : ($opSize === 32 ? $this->signExtend($reader->dword(), 32) : $this->signExtend($reader->short(), 16));
+            ? $this->signExtend($memory->byte(), 8)
+            : ($opSize === 32 ? $this->signExtend($memory->dword(), 32) : $this->signExtend($memory->short(), 16));
 
         $signedSrc = $this->signExtend($src, $opSize);
         $product = $signedSrc * $imm;

@@ -22,20 +22,54 @@ class PitTicker implements TickerInterface
 
     public function __construct(
         private readonly Pit $pit,
-    ) {}
-
-    public function tick(RuntimeInterface $runtime): void
-    {
-        // For now, increment BDA timer every tick for faster timer updates
-        // TODO: This should be tied to actual PIT counter reaching 0
-        $this->incrementBdaTimer($runtime);
+    ) {
     }
 
     /**
-     * Increment BDA timer tick counter (like INT 8 handler would do).
+     * BIOS timer tick rate (~18.2065 Hz).
+     *
+     * 24h rollover: 18.2065 * 60 * 60 * 24 ≈ 1,573,040 ticks (0x1800B0).
      */
-    private function incrementBdaTimer(RuntimeInterface $runtime): void
+    private const PIT_TICK_HZ = 18.206481;
+
+    private float $lastTickTimeSec = 0.0;
+    private float $fractionalTicks = 0.0;
+
+    public function tick(RuntimeInterface $runtime): void
     {
+        // Advance BIOS tick counter in (approximate) real time so bootloader timeouts
+        // behave correctly even when the emulator executes slowly in PHP.
+        $now = microtime(true);
+        if ($this->lastTickTimeSec <= 0.0) {
+            $this->lastTickTimeSec = $now;
+            return;
+        }
+
+        $elapsed = $now - $this->lastTickTimeSec;
+        if ($elapsed <= 0.0) {
+            return;
+        }
+        $this->lastTickTimeSec = $now;
+
+        $this->fractionalTicks += $elapsed * self::PIT_TICK_HZ;
+        $ticks = (int) floor($this->fractionalTicks);
+        if ($ticks <= 0) {
+            return;
+        }
+        $this->fractionalTicks -= $ticks;
+
+        $this->addBdaTicks($runtime, $ticks);
+    }
+
+    /**
+     * Advance BDA timer tick counter (like INT 8 handler would do).
+     */
+    private function addBdaTicks(RuntimeInterface $runtime, int $delta): void
+    {
+        if ($delta <= 0) {
+            return;
+        }
+
         $mem = $runtime->memoryAccessor();
 
         // Read current tick count (32-bit DWORD at 0x46C)
@@ -45,12 +79,11 @@ class PitTicker implements TickerInterface
         $b3 = $mem->readRawByte(self::BDA_TIMER_TICK + 3) ?? 0;
         $tickCount = $b0 | ($b1 << 8) | ($b2 << 16) | ($b3 << 24);
 
-        // Increment
-        $tickCount++;
+        $tickCount = ($tickCount + $delta);
 
         // Check for 24-hour overflow
         if ($tickCount >= self::TICKS_PER_DAY) {
-            $tickCount = 0;
+            $tickCount %= self::TICKS_PER_DAY;
             $mem->writeBySize(self::BDA_TIMER_OVERFLOW, 1, 8);
         }
 

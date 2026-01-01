@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
 use PHPMachineEmulator\Display\Writer\WindowScreenWriter;
+use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\Device\KeyboardContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -98,6 +99,7 @@ class Keyboard implements InterruptInterface
             $key = $keyboard->dequeueKey();
             if ($key !== null) {
                 $keyCode = ($key['scancode'] << 8) | $key['ascii'];
+                $keyboard->setWaitingForKey(false);
                 $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
 
                 $runtime->option()->logger()->debug(sprintf(
@@ -118,6 +120,7 @@ class Keyboard implements InterruptInterface
 
                 $keyCode = $screenWriter->pollKeyPress();
                 if ($keyCode !== null) {
+                    $keyboard->setWaitingForKey(false);
                     $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
 
                     $runtime->option()->logger()->debug(sprintf(
@@ -135,18 +138,26 @@ class Keyboard implements InterruptInterface
                 if ($byte === 0x0A) {
                     $byte = 0x0D;
                 }
-                // Return key in AX (scancode 0, ascii = byte)
-                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $byte);
+                $scanCode = $this->scanCodeForAscii($byte & 0xFF);
+                // Return key in AX (AH=scancode, AL=ascii)
+                $keyboard->setWaitingForKey(false);
+                $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, (($scanCode & 0xFF) << 8) | ($byte & 0xFF));
 
                 $runtime->option()->logger()->debug(sprintf(
-                    'INT 16h: polled key, ascii=0x%02X',
-                    $byte
+                    'INT 16h: polled key, ascii=0x%02X scancode=0x%02X',
+                    $byte,
+                    $scanCode & 0xFF,
                 ));
                 return;
             }
         }
 
         // Set waiting state for async completion by DeviceManagerTicker
+        if ($runtime->logicBoard()->debug()->trace()->stopOnInt16Wait) {
+            $runtime->option()->logger()->warning(sprintf('INT 16h: waiting for key (AH=0x%02X)', $function));
+            throw new HaltException('Stopped by PHPME_STOP_ON_INT16_WAIT');
+        }
+
         $keyboard->setWaitingForKey(true, $function);
 
         $runtime->option()->logger()->debug('INT 16h: waiting for key (async)');
@@ -158,6 +169,18 @@ class Keyboard implements InterruptInterface
 
         // Return with AX=0 for now, will be updated by DeviceManagerTicker
         $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, 0);
+    }
+
+    private function scanCodeForAscii(int $ascii): int
+    {
+        return match ($ascii & 0xFF) {
+            0x0D => 0x1C, // Enter
+            0x1B => 0x01, // Esc
+            0x08 => 0x0E, // Backspace
+            0x09 => 0x0F, // Tab
+            0x20 => 0x39, // Space
+            default => 0x00, // best-effort: unknown
+        };
     }
 
     /**
@@ -180,6 +203,29 @@ class Keyboard implements InterruptInterface
                     $keyCode
                 ));
                 return;
+            }
+        }
+
+        if (!$this->useSDL) {
+            $byte = $runtime->option()->IO()->input()->byte();
+            if ($byte !== null && $byte !== 0) {
+                // Convert LF to CR for terminal compatibility
+                if ($byte === 0x0A) {
+                    $byte = 0x0D;
+                }
+                $scanCode = $this->scanCodeForAscii($byte & 0xFF);
+                $keyboard->enqueueKey($scanCode & 0xFF, $byte & 0xFF);
+                $key = $keyboard->peekKey();
+                if ($key !== null) {
+                    $keyCode = ($key['scancode'] << 8) | $key['ascii'];
+                    $runtime->memoryAccessor()->write16Bit(RegisterType::EAX, $keyCode);
+                    $runtime->memoryAccessor()->setZeroFlag(false);
+                    $runtime->option()->logger()->debug(sprintf(
+                        'INT 16h: key check - polled, keyCode=0x%04X, ZF=0',
+                        $keyCode
+                    ));
+                    return;
+                }
             }
         }
 
