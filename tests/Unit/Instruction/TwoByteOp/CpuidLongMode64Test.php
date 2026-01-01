@@ -23,7 +23,7 @@ class CpuidLongMode64Test extends TwoByteOpTestCase
         return $this->cpuid;
     }
 
-    public function testCpuidLeaf1AdvertisesX86_64BaselineBits(): void
+    public function testCpuidLeaf1AdvertisesX8664BaselineBits(): void
     {
         $this->setRegister(RegisterType::EAX, 0x1, 32);
         $this->executeCpuid();
@@ -69,4 +69,3 @@ class CpuidLongMode64Test extends TwoByteOpTestCase
         $this->cpuid->process($this->runtime, [$opcodeKey]);
     }
 }
-

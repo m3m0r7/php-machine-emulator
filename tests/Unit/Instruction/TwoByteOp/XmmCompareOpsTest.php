@@ -103,4 +103,3 @@ final class XmmCompareOpsTest extends TwoByteOpTestCase
         $this->writeMemory($address + 12, $dwords[3], 32);
     }
 }
-

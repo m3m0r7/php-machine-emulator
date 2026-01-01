@@ -94,4 +94,3 @@ class FxsaveSimdStateTest extends TwoByteOpTestCase
         $this->fxsave->process($this->runtime, [$opcodeKey]);
     }
 }
-

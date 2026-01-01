@@ -118,4 +118,3 @@ class MovdMovqTest extends TwoByteOpTestCase
         $this->movdMovq->process($this->runtime, [0x66, $opcodeKey]);
     }
 }
-

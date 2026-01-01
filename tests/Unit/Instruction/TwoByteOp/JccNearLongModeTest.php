@@ -68,4 +68,3 @@ class JccNearLongModeTest extends TwoByteOpTestCase
         $this->jccNear->process($this->runtime, [$opcodeKey]);
     }
 }
-

@@ -63,4 +63,3 @@ final class StackPushPopAddressSizeTest extends TestCase
         $this->assertSame(0x0007FFF0, $memoryAccessor->fetch(RegisterType::ESP)->asBytesBySize(32));
     }
 }
-

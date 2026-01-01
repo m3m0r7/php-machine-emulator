@@ -151,4 +151,3 @@ final class Group4Test extends InstructionTestCase
         $this->assertTrue($this->getZeroFlag());
     }
 }
-

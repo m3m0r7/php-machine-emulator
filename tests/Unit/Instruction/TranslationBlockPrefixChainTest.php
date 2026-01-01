@@ -38,4 +38,3 @@ final class TranslationBlockPrefixChainTest extends TestCase
         $this->assertTrue($runtime->cpuContext()->rexW(), 'REX.W must remain active after CONTINUE');
     }
 }
-

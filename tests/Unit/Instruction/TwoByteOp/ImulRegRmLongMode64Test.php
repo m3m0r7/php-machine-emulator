@@ -82,4 +82,3 @@ class ImulRegRmLongMode64Test extends TwoByteOpTestCase
         $this->imul->process($this->runtime, [$opcodeKey]);
     }
 }
-

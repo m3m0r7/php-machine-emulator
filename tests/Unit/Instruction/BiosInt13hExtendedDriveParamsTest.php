@@ -59,4 +59,3 @@ final class BiosInt13hExtendedDriveParamsTest extends InstructionTestCase
         $this->assertSame(63, $this->readMemory($buffer + 0x0C, 32));
     }
 }
-

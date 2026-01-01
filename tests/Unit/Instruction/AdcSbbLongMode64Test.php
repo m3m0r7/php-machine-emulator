@@ -83,4 +83,3 @@ class AdcSbbLongMode64Test extends InstructionTestCase
         $this->assertTrue($this->memoryAccessor->shouldParityFlag());
     }
 }
-

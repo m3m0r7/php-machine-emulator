@@ -71,4 +71,3 @@ final class BiosInt13hExtendedDapBuffer64LayoutTest extends InstructionTestCase
         $this->assertSame(0x5A, $this->readMemory($buffer + 0x10, 8));
     }
 }
-

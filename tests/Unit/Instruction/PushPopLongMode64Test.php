@@ -172,4 +172,3 @@ final class PushPopLongMode64Test extends InstructionTestCase
         $this->assertSame($value, $this->readMemory($destBase + 0x10, 64));
     }
 }
-

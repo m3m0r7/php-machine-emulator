@@ -123,4 +123,3 @@ final class LongModeEntryActivationTest extends InstructionTestCase
         }
     }
 }
-

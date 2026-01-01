@@ -47,7 +47,7 @@ class EscSeqFormatTest extends TestCase
     {
         try {
             self::bootBios($machine);
-        } catch (ExitException|HaltException) {
+        } catch (ExitException | HaltException) {
             // Expected - test halts after completion
         }
 

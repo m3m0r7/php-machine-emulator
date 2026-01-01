@@ -76,4 +76,3 @@ class TestLongMode64Test extends InstructionTestCase
         $this->assertFalse($this->memoryAccessor->shouldAuxiliaryCarryFlag());
     }
 }
-

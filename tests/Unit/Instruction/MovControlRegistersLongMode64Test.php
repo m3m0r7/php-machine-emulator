@@ -131,4 +131,3 @@ final class MovControlRegistersLongMode64Test extends InstructionTestCase
         $this->assertSame($value, $this->memoryAccessor->readControlRegister(8));
     }
 }
-

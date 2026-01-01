@@ -70,4 +70,3 @@ final class InterruptDeliveryHandlerTripleFaultTest extends TestCase
         $deliveryHandler->raiseFault($runtime, 0x0E, 0, 0);
     }
 }
-

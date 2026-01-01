@@ -102,4 +102,3 @@ class Group1LongMode64Test extends InstructionTestCase
         $this->assertTrue($this->memoryAccessor->shouldParityFlag());
     }
 }
-

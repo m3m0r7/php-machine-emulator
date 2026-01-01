@@ -67,4 +67,3 @@ final class LeaLongMode64Test extends InstructionTestCase
         $this->assertSame('0x0000000033333333', UInt64::of($this->getRegister(RegisterType::ECX, 64))->toHex());
     }
 }
-

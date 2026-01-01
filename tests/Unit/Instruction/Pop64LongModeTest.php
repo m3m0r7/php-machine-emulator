@@ -64,4 +64,3 @@ final class Pop64LongModeTest extends InstructionTestCase
         $this->assertSame($sp + 8, $this->getRegister(RegisterType::ESP, 64));
     }
 }
-

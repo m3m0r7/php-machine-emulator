@@ -71,4 +71,3 @@ final class BiosE820ProtectedModeTest extends InstructionTestCase
         $this->assertSame(0x00000000, $this->readMemory($wrongLinear + 0x08, 32));
     }
 }
-

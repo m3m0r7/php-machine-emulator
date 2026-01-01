@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Tests\Unit\Instruction;
@@ -109,4 +110,3 @@ final class IntTrapsTest extends InstructionTestCase
         $this->executeBytes([0xCE]);
     }
 }
-

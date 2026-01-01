@@ -57,4 +57,3 @@ final class VbeUnrealModeSegmentBaseTest extends InstructionTestCase
         $this->assertSame('VESA', $sig);
     }
 }
-

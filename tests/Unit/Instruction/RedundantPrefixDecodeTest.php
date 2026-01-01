@@ -19,7 +19,7 @@ final class RedundantPrefixDecodeTest extends TestCase
         $instructionList = new x86_64();
         $executor = new InstructionExecutor();
 
-        $arch = new class($instructionList, $executor) extends TestArchitectureProvider {
+        $arch = new class ($instructionList, $executor) extends TestArchitectureProvider {
             public function __construct(
                 private x86_64 $instructionList,
                 private InstructionExecutor $executor,
@@ -37,7 +37,7 @@ final class RedundantPrefixDecodeTest extends TestCase
             }
         };
 
-        $runtime = new class($arch) extends TestRuntime {
+        $runtime = new class ($arch) extends TestRuntime {
             public function __construct(private ArchitectureProviderInterface $arch)
             {
                 parent::__construct();
@@ -77,4 +77,3 @@ final class RedundantPrefixDecodeTest extends TestCase
         $this->assertSame(8, $runtime->memory()->offset());
     }
 }
-

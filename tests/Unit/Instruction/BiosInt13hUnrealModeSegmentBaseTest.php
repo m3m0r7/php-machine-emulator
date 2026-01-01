@@ -66,4 +66,3 @@ final class BiosInt13hUnrealModeSegmentBaseTest extends InstructionTestCase
         $this->assertFalse($this->getCarryFlag());
     }
 }
-

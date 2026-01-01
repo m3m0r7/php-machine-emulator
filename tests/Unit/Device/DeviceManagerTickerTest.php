@@ -29,4 +29,3 @@ final class DeviceManagerTickerTest extends TestCase
         $this->assertSame(['scancode' => 0x1C, 'ascii' => 0x0D], $keyboard->peekKey());
     }
 }
-

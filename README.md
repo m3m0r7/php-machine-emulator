@@ -332,15 +332,19 @@ Space for tracking the MikeOS boot/run status.
 
 ## TinyCore
 
+*Note: Reaching the boot menu takes about 5 minutes.*
+
 <img src="./doc/demo_tinycore.png">
 
 ## MS-DOS
 
 <img src="./doc/demo_ms_dos.png">
 
-## Ubuntu (GRUB)
+## Ubuntu
 
 Space for tracking the Ubuntu GRUB boot status.
+
+*Note: Reaching GRUB may take 15-20 minutes.*
 
 <img src="./doc/demo_ubuntu_grub.png">
 

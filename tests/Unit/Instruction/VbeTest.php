@@ -75,4 +75,3 @@ final class VbeTest extends InstructionTestCase
         $this->assertSame(768, $this->readMemory($buffer + 0x14, 16));
     }
 }
-

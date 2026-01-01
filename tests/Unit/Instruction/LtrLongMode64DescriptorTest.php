@@ -92,4 +92,3 @@ final class LtrLongMode64DescriptorTest extends InstructionTestCase
         }
     }
 }
-

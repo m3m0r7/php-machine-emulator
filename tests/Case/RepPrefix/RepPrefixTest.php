@@ -43,7 +43,7 @@ class RepPrefixTest extends TestCase
     {
         try {
             self::bootBios($machine);
-        } catch (ExitException|HaltException) {
+        } catch (ExitException | HaltException) {
             // Expected - test halts after completion
         }
 
@@ -111,7 +111,7 @@ class RepPrefixTest extends TestCase
     {
         try {
             self::bootBios($machine);
-        } catch (ExitException|HaltException) {
+        } catch (ExitException | HaltException) {
         }
 
         $memoryAccessor = $machine->runtime()->memoryAccessor();
@@ -131,7 +131,7 @@ class RepPrefixTest extends TestCase
     {
         try {
             self::bootBios($machine);
-        } catch (ExitException|HaltException) {
+        } catch (ExitException | HaltException) {
         }
 
         $memoryAccessor = $machine->runtime()->memoryAccessor();
@@ -152,7 +152,7 @@ class RepPrefixTest extends TestCase
     {
         try {
             self::bootBios($machine);
-        } catch (ExitException|HaltException) {
+        } catch (ExitException | HaltException) {
         }
 
         $memoryAccessor = $machine->runtime()->memoryAccessor();

@@ -99,4 +99,3 @@ class PshufdPshiftDqTest extends TwoByteOpTestCase
         $this->pshiftDq->process($this->runtime, [0x66, $opcodeKey]);
     }
 }
-

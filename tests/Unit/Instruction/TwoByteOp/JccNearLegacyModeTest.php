@@ -48,4 +48,3 @@ final class JccNearLegacyModeTest extends TestCase
         $this->assertSame(0x201F5, $runtime->memory()->offset());
     }
 }
-

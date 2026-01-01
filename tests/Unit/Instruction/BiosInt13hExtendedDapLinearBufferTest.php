@@ -61,4 +61,3 @@ final class BiosInt13hExtendedDapLinearBufferTest extends InstructionTestCase
         $this->assertSame(0x00, $this->readMemory($buffer + 0x10, 8));
     }
 }
-

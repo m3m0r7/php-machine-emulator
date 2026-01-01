@@ -45,4 +45,3 @@ final class RexPrefixLongModeTest extends TestCase
         $this->assertFalse($runtime->executeCalled);
     }
 }
-

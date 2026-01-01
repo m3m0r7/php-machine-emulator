@@ -66,4 +66,3 @@ class SubRegRmTest extends InstructionTestCase
         $this->assertTrue($this->memoryAccessor->shouldAuxiliaryCarryFlag());
     }
 }
-

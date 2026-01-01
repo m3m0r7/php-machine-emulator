@@ -60,4 +60,3 @@ class CmpJccPatternTest extends TestCase
         $this->assertSame(0x1010D, $runtime->memory()->offset());
     }
 }
-

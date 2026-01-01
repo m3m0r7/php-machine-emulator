@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Tests\Unit\Instruction;
@@ -211,4 +212,3 @@ final class Group3LongMode64Test extends InstructionTestCase
         $this->executeGroup3(0xF7, [0xF9]);
     }
 }
-

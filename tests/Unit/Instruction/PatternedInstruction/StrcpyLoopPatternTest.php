@@ -96,4 +96,3 @@ class StrcpyLoopPatternTest extends InstructionTestCase
         $this->assertSame($ip, $this->memoryStream->offset());
     }
 }
-

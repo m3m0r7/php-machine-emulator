@@ -24,7 +24,7 @@ class LBATest extends InstructionTestCase
     // CHS to LBA Conversion
     // ========================================
 
-    public function testChsToLbaConversion_FirstSector(): void
+    public function testChsToLbaConversionFirstSector(): void
     {
         // Standard floppy geometry: 18 sectors/track, 2 heads
         $sectorsPerTrack = 18;
@@ -40,7 +40,7 @@ class LBATest extends InstructionTestCase
         $this->assertSame(0, $lba, 'First sector should be LBA 0');
     }
 
-    public function testChsToLbaConversion_SecondSector(): void
+    public function testChsToLbaConversionSecondSector(): void
     {
         $sectorsPerTrack = 18;
         $headsPerCylinder = 2;
@@ -51,7 +51,7 @@ class LBATest extends InstructionTestCase
         $this->assertSame(1, $lba);
     }
 
-    public function testChsToLbaConversion_SecondHead(): void
+    public function testChsToLbaConversionSecondHead(): void
     {
         $sectorsPerTrack = 18;
         $headsPerCylinder = 2;
@@ -62,7 +62,7 @@ class LBATest extends InstructionTestCase
         $this->assertSame(18, $lba);
     }
 
-    public function testChsToLbaConversion_SecondCylinder(): void
+    public function testChsToLbaConversionSecondCylinder(): void
     {
         $sectorsPerTrack = 18;
         $headsPerCylinder = 2;
@@ -77,7 +77,7 @@ class LBATest extends InstructionTestCase
     // LBA to CHS Conversion
     // ========================================
 
-    public function testLbaToChsConversion_LBA0(): void
+    public function testLbaToChsConversionLBA0(): void
     {
         $sectorsPerTrack = 18;
         $headsPerCylinder = 2;
@@ -93,7 +93,7 @@ class LBATest extends InstructionTestCase
         $this->assertSame(0, (int)$cylinder);
     }
 
-    public function testLbaToChsConversion_LBA36(): void
+    public function testLbaToChsConversionLBA36(): void
     {
         $sectorsPerTrack = 18;
         $headsPerCylinder = 2;
