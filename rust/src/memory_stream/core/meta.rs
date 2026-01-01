@@ -64,7 +64,7 @@ impl MemoryStream {
         // Calculate new size in chunk increments
         let new_size = std::cmp::min(
             logical_max,
-            ((required_offset + 1 + EXPANSION_CHUNK_SIZE - 1) / EXPANSION_CHUNK_SIZE) * EXPANSION_CHUNK_SIZE,
+            (required_offset + 1).div_ceil(EXPANSION_CHUNK_SIZE) * EXPANSION_CHUNK_SIZE,
         );
         self.size = new_size;
 
@@ -84,10 +84,8 @@ impl MemoryStream {
             return false;
         }
 
-        if new_offset >= self.size {
-            if !self.ensure_capacity(new_offset) {
-                return false;
-            }
+        if new_offset >= self.size && !self.ensure_capacity(new_offset) {
+            return false;
         }
         self.offset = new_offset;
         true

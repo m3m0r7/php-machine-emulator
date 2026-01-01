@@ -22,7 +22,8 @@ class PitTicker implements TickerInterface
 
     public function __construct(
         private readonly Pit $pit,
-    ) {}
+    ) {
+    }
 
     /**
      * BIOS timer tick rate (~18.2065 Hz).

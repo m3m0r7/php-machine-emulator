@@ -4,7 +4,7 @@ use super::super::{MemoryAccessor, MAX_REGISTER_ADDRESS};
 impl MemoryAccessor {
     /// Create a new MemoryAccessor.
     pub fn new(memory: *mut MemoryStream) -> Self {
-        let accessor = MemoryAccessor {
+        MemoryAccessor {
             registers: [0; MAX_REGISTER_ADDRESS],
             registers_allocated: [false; MAX_REGISTER_ADDRESS],
             zero_flag: false,
@@ -19,20 +19,19 @@ impl MemoryAccessor {
             efer: 0,
             control_registers: [0x22, 0, 0, 0, 0, 0, 0, 0, 0], // CR0: MP + NE set
             memory,
-        };
-        accessor
+        }
     }
 
     /// Check if address is a register address.
     #[inline(always)]
     fn is_register_address(address: usize) -> bool {
-        (address <= 13) || (address >= 16 && address <= 25)
+        (0..=13).contains(&address) || (16..=25).contains(&address)
     }
 
     /// Check if address is a GPR address.
     #[inline(always)]
     fn is_gpr_address(address: usize) -> bool {
-        (address <= 7) || (address >= 16 && address <= 24)
+        (0..=7).contains(&address) || (16..=24).contains(&address)
     }
 
     /// Allocate a register or memory range.

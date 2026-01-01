@@ -38,4 +38,3 @@ class Nopl implements InstructionInterface
         return ExecutionStatus::SUCCESS;
     }
 }
-

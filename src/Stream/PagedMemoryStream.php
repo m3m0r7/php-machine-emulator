@@ -278,7 +278,8 @@ final class PagedMemoryStream implements MemoryStreamInterface
 
     private function syncTranslationContext(int $mask, bool $pagingEnabled, bool $isUser): void
     {
-        if ($this->cachedMask === $mask
+        if (
+            $this->cachedMask === $mask
             && $this->cachedPagingEnabled === $pagingEnabled
             && $this->cachedIsUser === $isUser
         ) {

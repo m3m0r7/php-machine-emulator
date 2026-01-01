@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
@@ -177,7 +177,11 @@ class Group3 implements InstructionInterface
             if ($operand === 3) {
                 $runtime->option()->logger()->debug(sprintf(
                     'MUL: AX=%d × %d = %d (AX=%d, DX=%d)',
-                    $acc, $operand, $product, $product & 0xFFFF, ($product >> 16) & 0xFFFF
+                    $acc,
+                    $operand,
+                    $product,
+                    $product & 0xFFFF,
+                    ($product >> 16) & 0xFFFF
                 ));
             }
 
@@ -200,7 +204,11 @@ class Group3 implements InstructionInterface
 
             $runtime->option()->logger()->debug(sprintf(
                 'MUL32: EAX=0x%08X × operand=0x%08X = %s (EAX=0x%08X, EDX=0x%08X)',
-                $acc, $operand, $product->toHex(), $low, $high
+                $acc,
+                $operand,
+                $product->toHex(),
+                $low,
+                $high
             ));
 
             $ma

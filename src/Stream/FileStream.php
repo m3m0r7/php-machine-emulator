@@ -53,4 +53,3 @@ class FileStream implements FileStreamInterface
         return $this->path;
     }
 }
-

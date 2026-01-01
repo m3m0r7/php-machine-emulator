@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Exception\ExecutionException;
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\StreamReaderException;
@@ -143,7 +143,8 @@ class Int_ implements InstructionInterface
         // If a BIOS interrupt vector has been hooked by software (IVT no longer points
         // into the BIOS ROM segment), respect the hook and delegate via IVT.
         // This is critical once DOS/drivers install their own handlers (e.g. INT 13h).
-        if ($operand !== null
+        if (
+            $operand !== null
             && $operand !== BIOSInterrupt::DOS_TERMINATE_INTERRUPT
             && $operand !== BIOSInterrupt::DOS_INTERRUPT
         ) {

@@ -88,10 +88,10 @@ impl MemoryAccessor {
     #[inline(always)]
     pub fn is_mmio_address(address: usize) -> bool {
         // PCI VGA BAR (linear framebuffer): 0xE0000000 - 0xE0FFFFFF
-        (address >= 0xE0000000 && address < 0xE1000000) ||
+        (0xE0000000..0xE1000000).contains(&address) ||
         // LAPIC: 0xFEE00000 - 0xFEE00FFF
         // IOAPIC: 0xFEC00000 - 0xFEC0001F
-        (address >= 0xFEE00000 && address < 0xFEE01000) ||
-        (address >= 0xFEC00000 && address < 0xFEC00020)
+        (0xFEE00000..0xFEE01000).contains(&address) ||
+        (0xFEC00000..0xFEC00020).contains(&address)
     }
 }

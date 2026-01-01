@@ -96,4 +96,3 @@ class PshiftDq implements InstructionInterface
         return substr($bytes, $count) . str_repeat("\0", $count);
     }
 }
-

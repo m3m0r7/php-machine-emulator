@@ -143,16 +143,16 @@ use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movaps;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovdMovq;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movdqa;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movdqu;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movsx;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovToCr;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movups;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movzx;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\NopModrm;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Nopl;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Orps;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pand;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pandn;
-	use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pcmpeqb;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movsx;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\MovToCr;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movups;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Movzx;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\NopModrm;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Nopl;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Orps;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pand;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pandn;
+    use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pcmpeqb;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pcmpeqd;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Pmovmskb;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Por;
@@ -471,15 +471,15 @@ class x86 implements InstructionListInterface
             Wrmsr::class,
             Sysenter::class,
             Sysexit::class,
-	            Cmpxchg8b::class,
-	            Group0::class,
-	            Group6::class,
-	            Nopl::class,
-	            NopModrm::class,
-	            Ud2::class,
-	            CacheOp::class,
-	            Emms::class,
-	            Andps::class,
+                Cmpxchg8b::class,
+                Group0::class,
+                Group6::class,
+                Nopl::class,
+                NopModrm::class,
+                Ud2::class,
+                CacheOp::class,
+                Emms::class,
+                Andps::class,
             Andnps::class,
             Orps::class,
             Xorps::class,

@@ -70,4 +70,3 @@ class Andps implements InstructionInterface
         ];
     }
 }
-

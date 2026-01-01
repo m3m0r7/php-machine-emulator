@@ -42,5 +42,4 @@ class ResourceWriterStream implements StreamWriterInterface
     {
         fwrite($this->resource, pack('V', $value & 0xFFFFFFFF));
     }
-
 }

@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -73,8 +73,13 @@ class Loop implements InstructionInterface
         $runtime->memoryAccessor()
             ->writeBySize(RegisterType::ECX, $counter, $size);
 
-        $runtime->option()->logger()->debug(sprintf('LOOP: counter=%d, operand=%d, pos=0x%X, target=0x%X',
-            $counter, $operand, $pos, $pos + $operand));
+        $runtime->option()->logger()->debug(sprintf(
+            'LOOP: counter=%d, operand=%d, pos=0x%X, target=0x%X',
+            $counter,
+            $operand,
+            $pos,
+            $pos + $operand
+        ));
 
         // Jump if counter is non-zero
         if ($counter === 0) {
@@ -234,11 +239,13 @@ class Loop implements InstructionInterface
 
             $runtime->option()->logger()->debug(sprintf(
                 'LOOP: Detected bulk byte-copy pattern at 0x%X, source=%s, callTarget=0x%X, counter=%d',
-                $loopTarget, $sourceReg->name, $callTarget, $counter
+                $loopTarget,
+                $sourceReg->name,
+                $callTarget,
+                $counter
             ));
 
             return $this->executeBulkByteCopy($runtime, $pattern, $counter, $loopPos, $size);
-
         } finally {
             // Restore original position if we didn't bulk execute
             $memory->setOffset($originalOffset);
@@ -287,7 +294,6 @@ class Loop implements InstructionInterface
                     $indexValue = $indexValue - 0x100000000;
                 }
             }
-
         }
 
         // Calculate initial source address
@@ -331,7 +337,11 @@ class Loop implements InstructionInterface
 
         $runtime->option()->logger()->debug(sprintf(
             'LOOP: Bulk copying %d bytes from 0x%08X to 0x%08X (step=%d, sib=%d)',
-            $counter, $sourceAddr, $destAddr, $step, $useSib ? 1 : 0
+            $counter,
+            $sourceAddr,
+            $destAddr,
+            $step,
+            $useSib ? 1 : 0
         ));
 
         // Fast path: contiguous forward copy with no overlap.
@@ -344,7 +354,8 @@ class Loop implements InstructionInterface
                 $dstEnd = ($dstStart + $len - 1) & 0xFFFFFFFF;
                 $overlap = !($dstEnd < $srcStart || $dstStart > $srcEnd);
                 $memory = $runtime->memory();
-                if (!$overlap
+                if (
+                    !$overlap
                     && $memory->ensureCapacity($srcEnd + 1)
                     && $memory->ensureCapacity($dstEnd + 1)
                 ) {

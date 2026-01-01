@@ -586,12 +586,14 @@ class InstructionExecutor implements InstructionExecutorInterface
                 $bytes,
             ));
             $this->debug($runtime)->maybeDumpPageFaultContext($runtime, $e, $ip);
-            if ($runtime->interruptDeliveryHandler()->raiseFault(
-                $runtime,
-                $e->vector(),
-                $faultIp,
-                $e->errorCode()
-            )) {
+            if (
+                $runtime->interruptDeliveryHandler()->raiseFault(
+                    $runtime,
+                    $e->vector(),
+                    $faultIp,
+                    $e->errorCode()
+                )
+            ) {
                 return ExecutionStatus::SUCCESS;
             }
             throw $e;

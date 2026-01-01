@@ -31,7 +31,8 @@ class InterruptDeliveryHandler implements InterruptDeliveryHandlerInterface
 
     public function __construct(
         private readonly ArchitectureProviderInterface $architectureProvider,
-    ) {}
+    ) {
+    }
 
     /**
      * Register an interrupt source.

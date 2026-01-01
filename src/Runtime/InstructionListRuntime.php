@@ -162,12 +162,13 @@ class InstructionListRuntime extends Runtime implements RuntimeInterface
 
     private function createInstructionListOnlyMachine(): MachineInterface
     {
-        return new class($this, $this->machine) implements MachineInterface
+        return new class ($this, $this->machine) implements MachineInterface
         {
             protected OptionInterface|null $option = null;
 
             public function __construct(private readonly InstructionListRuntime $instructionListRuntime, private readonly MachineInterface $machine)
-            {}
+            {
+            }
 
             public function option(): OptionInterface
             {

@@ -15,7 +15,8 @@ class VideoTypeInfo
         public readonly int $colors,
         public readonly VideoColorType $videoColorType,
         public readonly bool $isTextMode = false,
-    ) {}
+    ) {
+    }
 
     public function pixelWidth(): int
     {

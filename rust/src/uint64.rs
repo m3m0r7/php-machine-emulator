@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::ptr;
@@ -18,7 +20,7 @@ fn write_u64_parts(value: u64, out_low: *mut u32, out_high: *mut u32) {
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_from_decimal(
+pub unsafe extern "C" fn uint64_from_decimal(
     value: *const c_char,
     out_low: *mut u32,
     out_high: *mut u32,
@@ -57,7 +59,7 @@ pub extern "C" fn uint64_to_i64(low: u32, high: u32) -> i64 {
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_to_decimal(
+pub unsafe extern "C" fn uint64_to_decimal(
     low: u32,
     high: u32,
     buffer: *mut c_char,
@@ -83,7 +85,7 @@ pub extern "C" fn uint64_to_decimal(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_add(
+pub unsafe extern "C" fn uint64_add(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -98,7 +100,7 @@ pub extern "C" fn uint64_add(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_sub(
+pub unsafe extern "C" fn uint64_sub(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -113,7 +115,7 @@ pub extern "C" fn uint64_sub(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_mul(
+pub unsafe extern "C" fn uint64_mul(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -128,7 +130,7 @@ pub extern "C" fn uint64_mul(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_div(
+pub unsafe extern "C" fn uint64_div(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -147,7 +149,7 @@ pub extern "C" fn uint64_div(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_mod(
+pub unsafe extern "C" fn uint64_mod(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -166,7 +168,7 @@ pub extern "C" fn uint64_mod(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_and(
+pub unsafe extern "C" fn uint64_and(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -180,7 +182,7 @@ pub extern "C" fn uint64_and(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_or(
+pub unsafe extern "C" fn uint64_or(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -194,7 +196,7 @@ pub extern "C" fn uint64_or(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_xor(
+pub unsafe extern "C" fn uint64_xor(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -208,7 +210,7 @@ pub extern "C" fn uint64_xor(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_not(
+pub unsafe extern "C" fn uint64_not(
     low: u32,
     high: u32,
     out_low: *mut u32,
@@ -219,7 +221,7 @@ pub extern "C" fn uint64_not(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_shl(
+pub unsafe extern "C" fn uint64_shl(
     low: u32,
     high: u32,
     bits: u32,
@@ -232,7 +234,7 @@ pub extern "C" fn uint64_shl(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_shr(
+pub unsafe extern "C" fn uint64_shr(
     low: u32,
     high: u32,
     bits: u32,
@@ -305,7 +307,7 @@ pub extern "C" fn uint64_is_negative_signed(low: u32, high: u32) -> bool {
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_mul_full(
+pub unsafe extern "C" fn uint64_mul_full(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -325,7 +327,7 @@ pub extern "C" fn uint64_mul_full(
 }
 
 #[no_mangle]
-pub extern "C" fn uint64_mul_full_signed(
+pub unsafe extern "C" fn uint64_mul_full_signed(
     left_low: u32,
     left_high: u32,
     right_low: u32,
@@ -346,7 +348,7 @@ pub extern "C" fn uint64_mul_full_signed(
 }
 
 #[no_mangle]
-pub extern "C" fn uint128_divmod_u64(
+pub unsafe extern "C" fn uint128_divmod_u64(
     low_low: u32,
     low_high: u32,
     high_low: u32,
@@ -376,7 +378,7 @@ pub extern "C" fn uint128_divmod_u64(
 }
 
 #[no_mangle]
-pub extern "C" fn int128_divmod_i64(
+pub unsafe extern "C" fn int128_divmod_i64(
     low_low: u32,
     low_high: u32,
     high_low: u32,

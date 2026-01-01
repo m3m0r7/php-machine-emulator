@@ -510,7 +510,8 @@ class WindowScreenWriter implements ScreenWriterInterface
             return;
         }
 
-        if ($this->graphicsTexture !== null
+        if (
+            $this->graphicsTexture !== null
             && $this->graphicsTextureWidth === $this->graphicsWidth
             && $this->graphicsTextureHeight === $this->graphicsHeight
         ) {

@@ -85,4 +85,3 @@ class Pcmpeqb implements InstructionInterface
         ];
     }
 }
-

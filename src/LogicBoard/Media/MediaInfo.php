@@ -53,11 +53,13 @@ class MediaInfo implements MediaInfoInterface
             $bootImage = $this->stream->bootImage();
             if ($bootImage !== null) {
                 $mediaType = $bootImage->mediaType();
-                if (in_array($mediaType, [
+                if (
+                    in_array($mediaType, [
                     ElTorito::MEDIA_FLOPPY_1_2M,
                     ElTorito::MEDIA_FLOPPY_1_44M,
                     ElTorito::MEDIA_FLOPPY_2_88M,
-                ], true)) {
+                    ], true)
+                ) {
                     return DriveType::FLOPPY;
                 }
                 if ($mediaType === ElTorito::MEDIA_HARD_DISK) {

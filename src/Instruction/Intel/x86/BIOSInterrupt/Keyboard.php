@@ -145,8 +145,7 @@ class Keyboard implements InterruptInterface
 
                 $runtime->option()->logger()->debug(sprintf(
                     'INT 16h: polled key, ascii=0x%02X scancode=0x%02X',
-                    $byte
-                    ,
+                    $byte,
                     $scanCode & 0xFF,
                 ));
                 return;

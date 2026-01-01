@@ -92,4 +92,3 @@ class Movups implements InstructionInterface
         $this->writeMemory32($runtime, $address + 12, $value[3] & 0xFFFFFFFF);
     }
 }
-

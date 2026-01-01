@@ -1,17 +1,19 @@
+#![allow(clippy::missing_safety_doc)]
+
 use crate::memory_stream::MemoryStream;
 use super::MemoryAccessor;
 
 
 /// Create a new MemoryAccessor instance.
 #[no_mangle]
-pub extern "C" fn memory_accessor_new(memory: *mut MemoryStream) -> *mut MemoryAccessor {
+pub unsafe extern "C" fn memory_accessor_new(memory: *mut MemoryStream) -> *mut MemoryAccessor {
     let accessor = Box::new(MemoryAccessor::new(memory));
     Box::into_raw(accessor)
 }
 
 /// Free a MemoryAccessor instance.
 #[no_mangle]
-pub extern "C" fn memory_accessor_free(accessor: *mut MemoryAccessor) {
+pub unsafe extern "C" fn memory_accessor_free(accessor: *mut MemoryAccessor) {
     if !accessor.is_null() {
         unsafe {
             let _ = Box::from_raw(accessor);
@@ -21,7 +23,7 @@ pub extern "C" fn memory_accessor_free(accessor: *mut MemoryAccessor) {
 
 /// Allocate a register or memory range.
 #[no_mangle]
-pub extern "C" fn memory_accessor_allocate(
+pub unsafe extern "C" fn memory_accessor_allocate(
     accessor: *mut MemoryAccessor,
     address: usize,
     size: usize,
@@ -32,13 +34,13 @@ pub extern "C" fn memory_accessor_allocate(
 
 /// Fetch a register value.
 #[no_mangle]
-pub extern "C" fn memory_accessor_fetch(accessor: *const MemoryAccessor, address: usize) -> i64 {
+pub unsafe extern "C" fn memory_accessor_fetch(accessor: *const MemoryAccessor, address: usize) -> i64 {
     unsafe { (*accessor).fetch(address) }
 }
 
 /// Fetch a register value with size.
 #[no_mangle]
-pub extern "C" fn memory_accessor_fetch_by_size(
+pub unsafe extern "C" fn memory_accessor_fetch_by_size(
     accessor: *const MemoryAccessor,
     address: usize,
     size: u32,
@@ -48,19 +50,19 @@ pub extern "C" fn memory_accessor_fetch_by_size(
 
 /// Try to fetch a register value.
 #[no_mangle]
-pub extern "C" fn memory_accessor_try_to_fetch(accessor: *const MemoryAccessor, address: usize) -> i64 {
+pub unsafe extern "C" fn memory_accessor_try_to_fetch(accessor: *const MemoryAccessor, address: usize) -> i64 {
     unsafe { (*accessor).try_to_fetch(address) }
 }
 
 /// Write a 16-bit value.
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_16bit(accessor: *mut MemoryAccessor, address: usize, value: i64) {
+pub unsafe extern "C" fn memory_accessor_write_16bit(accessor: *mut MemoryAccessor, address: usize, value: i64) {
     unsafe { (*accessor).write_16bit(address, value) }
 }
 
 /// Write a value by size.
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_by_size(
+pub unsafe extern "C" fn memory_accessor_write_by_size(
     accessor: *mut MemoryAccessor,
     address: usize,
     value: i64,
@@ -71,7 +73,7 @@ pub extern "C" fn memory_accessor_write_by_size(
 
 /// Write to high bit.
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_to_high_bit(
+pub unsafe extern "C" fn memory_accessor_write_to_high_bit(
     accessor: *mut MemoryAccessor,
     address: usize,
     value: i64,
@@ -81,7 +83,7 @@ pub extern "C" fn memory_accessor_write_to_high_bit(
 
 /// Write to low bit.
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_to_low_bit(
+pub unsafe extern "C" fn memory_accessor_write_to_low_bit(
     accessor: *mut MemoryAccessor,
     address: usize,
     value: i64,
@@ -91,129 +93,129 @@ pub extern "C" fn memory_accessor_write_to_low_bit(
 
 /// Update flags.
 #[no_mangle]
-pub extern "C" fn memory_accessor_update_flags(accessor: *mut MemoryAccessor, value: i64, size: u32) {
+pub unsafe extern "C" fn memory_accessor_update_flags(accessor: *mut MemoryAccessor, value: i64, size: u32) {
     unsafe { (*accessor).update_flags(value, size) }
 }
 
 /// Increment a register.
 #[no_mangle]
-pub extern "C" fn memory_accessor_increment(accessor: *mut MemoryAccessor, address: usize) {
+pub unsafe extern "C" fn memory_accessor_increment(accessor: *mut MemoryAccessor, address: usize) {
     unsafe { (*accessor).increment(address) }
 }
 
 /// Decrement a register.
 #[no_mangle]
-pub extern "C" fn memory_accessor_decrement(accessor: *mut MemoryAccessor, address: usize) {
+pub unsafe extern "C" fn memory_accessor_decrement(accessor: *mut MemoryAccessor, address: usize) {
     unsafe { (*accessor).decrement(address) }
 }
 
 /// Add to a register.
 #[no_mangle]
-pub extern "C" fn memory_accessor_add(accessor: *mut MemoryAccessor, address: usize, value: i64) {
+pub unsafe extern "C" fn memory_accessor_add(accessor: *mut MemoryAccessor, address: usize, value: i64) {
     unsafe { (*accessor).add(address, value) }
 }
 
 /// Subtract from a register.
 #[no_mangle]
-pub extern "C" fn memory_accessor_sub(accessor: *mut MemoryAccessor, address: usize, value: i64) {
+pub unsafe extern "C" fn memory_accessor_sub(accessor: *mut MemoryAccessor, address: usize, value: i64) {
     unsafe { (*accessor).sub(address, value) }
 }
 
 // Flag getters
 #[no_mangle]
-pub extern "C" fn memory_accessor_zero_flag(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_zero_flag(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).zero_flag() }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_sign_flag(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_sign_flag(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).sign_flag() }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_overflow_flag(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_overflow_flag(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).overflow_flag() }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_carry_flag(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_carry_flag(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).carry_flag() }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_parity_flag(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_parity_flag(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).parity_flag() }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_auxiliary_carry_flag(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_auxiliary_carry_flag(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).auxiliary_carry_flag() }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_direction_flag(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_direction_flag(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).direction_flag() }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_interrupt_flag(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_interrupt_flag(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).interrupt_flag() }
 }
 
 // Flag setters
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_zero_flag(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_zero_flag(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_zero_flag(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_sign_flag(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_sign_flag(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_sign_flag(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_overflow_flag(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_overflow_flag(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_overflow_flag(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_carry_flag(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_carry_flag(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_carry_flag(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_parity_flag(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_parity_flag(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_parity_flag(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_auxiliary_carry_flag(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_auxiliary_carry_flag(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_auxiliary_carry_flag(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_direction_flag(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_direction_flag(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_direction_flag(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_interrupt_flag(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_interrupt_flag(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_interrupt_flag(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_set_instruction_fetch(accessor: *mut MemoryAccessor, value: bool) {
+pub unsafe extern "C" fn memory_accessor_set_instruction_fetch(accessor: *mut MemoryAccessor, value: bool) {
     unsafe { (*accessor).set_instruction_fetch(value) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_instruction_fetch(accessor: *const MemoryAccessor) -> bool {
+pub unsafe extern "C" fn memory_accessor_instruction_fetch(accessor: *const MemoryAccessor) -> bool {
     unsafe { (*accessor).instruction_fetch() }
 }
 
 // Control register operations
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_control_register(
+pub unsafe extern "C" fn memory_accessor_read_control_register(
     accessor: *const MemoryAccessor,
     index: usize,
 ) -> i64 {
@@ -221,7 +223,7 @@ pub extern "C" fn memory_accessor_read_control_register(
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_control_register(
+pub unsafe extern "C" fn memory_accessor_write_control_register(
     accessor: *mut MemoryAccessor,
     index: usize,
     value: i64,
@@ -231,23 +233,23 @@ pub extern "C" fn memory_accessor_write_control_register(
 
 // EFER operations
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_efer(accessor: *const MemoryAccessor) -> u64 {
+pub unsafe extern "C" fn memory_accessor_read_efer(accessor: *const MemoryAccessor) -> u64 {
     unsafe { (*accessor).read_efer() }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_efer(accessor: *mut MemoryAccessor, value: u64) {
+pub unsafe extern "C" fn memory_accessor_write_efer(accessor: *mut MemoryAccessor, value: u64) {
     unsafe { (*accessor).write_efer(value) }
 }
 
 // Memory operations
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_from_memory(accessor: *const MemoryAccessor, address: usize) -> u8 {
+pub unsafe extern "C" fn memory_accessor_read_from_memory(accessor: *const MemoryAccessor, address: usize) -> u8 {
     unsafe { (*accessor).read_from_memory(address) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_to_memory(
+pub unsafe extern "C" fn memory_accessor_write_to_memory(
     accessor: *mut MemoryAccessor,
     address: usize,
     value: u8,
@@ -256,12 +258,12 @@ pub extern "C" fn memory_accessor_write_to_memory(
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_raw_byte(accessor: *const MemoryAccessor, address: usize) -> u8 {
+pub unsafe extern "C" fn memory_accessor_read_raw_byte(accessor: *const MemoryAccessor, address: usize) -> u8 {
     unsafe { (*accessor).read_raw_byte(address) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_raw_byte(
+pub unsafe extern "C" fn memory_accessor_write_raw_byte(
     accessor: *mut MemoryAccessor,
     address: usize,
     value: u8,
@@ -270,12 +272,12 @@ pub extern "C" fn memory_accessor_write_raw_byte(
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_physical_32(accessor: *const MemoryAccessor, address: usize) -> u32 {
+pub unsafe extern "C" fn memory_accessor_read_physical_32(accessor: *const MemoryAccessor, address: usize) -> u32 {
     unsafe { (*accessor).read_physical_32(address) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_physical_32(
+pub unsafe extern "C" fn memory_accessor_write_physical_32(
     accessor: *mut MemoryAccessor,
     address: usize,
     value: u32,
@@ -284,12 +286,12 @@ pub extern "C" fn memory_accessor_write_physical_32(
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_physical_64(accessor: *const MemoryAccessor, address: usize) -> u64 {
+pub unsafe extern "C" fn memory_accessor_read_physical_64(accessor: *const MemoryAccessor, address: usize) -> u64 {
     unsafe { (*accessor).read_physical_64(address) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_physical_64(
+pub unsafe extern "C" fn memory_accessor_write_physical_64(
     accessor: *mut MemoryAccessor,
     address: usize,
     value: u64,
@@ -298,12 +300,12 @@ pub extern "C" fn memory_accessor_write_physical_64(
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_physical_8(accessor: *const MemoryAccessor, address: usize) -> u8 {
+pub unsafe extern "C" fn memory_accessor_read_physical_8(accessor: *const MemoryAccessor, address: usize) -> u8 {
     unsafe { (*accessor).read_physical_8(address) }
 }
 
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_physical_16(accessor: *const MemoryAccessor, address: usize) -> u16 {
+pub unsafe extern "C" fn memory_accessor_read_physical_16(accessor: *const MemoryAccessor, address: usize) -> u16 {
     unsafe { (*accessor).read_physical_16(address) }
 }
 
@@ -313,7 +315,7 @@ pub extern "C" fn memory_accessor_read_physical_16(accessor: *const MemoryAccess
 /// - result_physical: the faulting linear address
 /// - result_error: (vector << 16) | error_code, or 0xFFFFFFFF for MMIO
 #[no_mangle]
-pub extern "C" fn memory_accessor_translate_linear(
+pub unsafe extern "C" fn memory_accessor_translate_linear(
     accessor: *mut MemoryAccessor,
     linear: u64,
     is_write: bool,
@@ -340,7 +342,7 @@ pub extern "C" fn memory_accessor_is_mmio_address(address: usize) -> bool {
 /// Returns value in result_value, error in result_error.
 /// If result_error == 0xFFFFFFFF, MMIO handling is needed.
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_memory_8(
+pub unsafe extern "C" fn memory_accessor_read_memory_8(
     accessor: *mut MemoryAccessor,
     linear: u64,
     is_user: bool,
@@ -358,7 +360,7 @@ pub extern "C" fn memory_accessor_read_memory_8(
 
 /// Read 16-bit memory with linear address translation.
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_memory_16(
+pub unsafe extern "C" fn memory_accessor_read_memory_16(
     accessor: *mut MemoryAccessor,
     linear: u64,
     is_user: bool,
@@ -376,7 +378,7 @@ pub extern "C" fn memory_accessor_read_memory_16(
 
 /// Read 32-bit memory with linear address translation.
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_memory_32(
+pub unsafe extern "C" fn memory_accessor_read_memory_32(
     accessor: *mut MemoryAccessor,
     linear: u64,
     is_user: bool,
@@ -394,7 +396,7 @@ pub extern "C" fn memory_accessor_read_memory_32(
 
 /// Read 64-bit memory with linear address translation.
 #[no_mangle]
-pub extern "C" fn memory_accessor_read_memory_64(
+pub unsafe extern "C" fn memory_accessor_read_memory_64(
     accessor: *mut MemoryAccessor,
     linear: u64,
     is_user: bool,
@@ -413,7 +415,7 @@ pub extern "C" fn memory_accessor_read_memory_64(
 /// Write 8-bit memory with linear address translation.
 /// Returns error code (0 on success, 0xFFFFFFFF for MMIO).
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_memory_8(
+pub unsafe extern "C" fn memory_accessor_write_memory_8(
     accessor: *mut MemoryAccessor,
     linear: u64,
     value: u8,
@@ -427,7 +429,7 @@ pub extern "C" fn memory_accessor_write_memory_8(
 /// Write 16-bit memory with linear address translation.
 /// Returns error code (0 on success, 0xFFFFFFFF for MMIO).
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_memory_16(
+pub unsafe extern "C" fn memory_accessor_write_memory_16(
     accessor: *mut MemoryAccessor,
     linear: u64,
     value: u16,
@@ -441,7 +443,7 @@ pub extern "C" fn memory_accessor_write_memory_16(
 /// Write 32-bit memory with linear address translation.
 /// Returns error code (0 on success, 0xFFFFFFFF for MMIO).
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_memory_32(
+pub unsafe extern "C" fn memory_accessor_write_memory_32(
     accessor: *mut MemoryAccessor,
     linear: u64,
     value: u32,
@@ -455,7 +457,7 @@ pub extern "C" fn memory_accessor_write_memory_32(
 /// Write 64-bit memory with linear address translation.
 /// Returns error code (0 on success, 0xFFFFFFFF for MMIO).
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_memory_64(
+pub unsafe extern "C" fn memory_accessor_write_memory_64(
     accessor: *mut MemoryAccessor,
     linear: u64,
     value: u64,
@@ -468,7 +470,7 @@ pub extern "C" fn memory_accessor_write_memory_64(
 
 /// Write 16-bit value to physical memory.
 #[no_mangle]
-pub extern "C" fn memory_accessor_write_physical_16(
+pub unsafe extern "C" fn memory_accessor_write_physical_16(
     accessor: *mut MemoryAccessor,
     address: usize,
     value: u16,

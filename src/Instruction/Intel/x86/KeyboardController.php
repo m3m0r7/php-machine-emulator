@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
@@ -95,8 +96,10 @@ class KeyboardController
             }
 
             // Check for key repeat
-            if ($sdlScancode->value === $this->lastSDLScancode &&
-                ($currentTimeMs - $this->lastSDLKeyTime) < self::SDL_KEY_REPEAT_DELAY_MS) {
+            if (
+                $sdlScancode->value === $this->lastSDLScancode &&
+                ($currentTimeMs - $this->lastSDLKeyTime) < self::SDL_KEY_REPEAT_DELAY_MS
+            ) {
                 continue;
             }
 

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
@@ -101,7 +102,11 @@ class RepPrefix implements InstructionInterface
             if ($siBefore !== $siAfter || $diBefore !== $diAfter) {
                 $runtime->option()->logger()->debug(sprintf(
                     'REP FIRST: SI 0x%04X->0x%04X DI 0x%04X->0x%04X ECX=%d',
-                    $siBefore, $siAfter, $diBefore, $diAfter, $counter
+                    $siBefore,
+                    $siAfter,
+                    $diBefore,
+                    $diAfter,
+                    $counter
                 ));
             }
 
@@ -131,10 +136,12 @@ class RepPrefix implements InstructionInterface
             // after the first iteration as well. If the condition already failed,
             // stop immediately without executing further iterations.
             $opcode = $opcodes[0];
-            if ($lastInstruction instanceof Cmpsb ||
+            if (
+                $lastInstruction instanceof Cmpsb ||
                 $lastInstruction instanceof Cmpsw ||
                 $lastInstruction instanceof Scasb ||
-                $lastInstruction instanceof Scasw) {
+                $lastInstruction instanceof Scasw
+            ) {
                 $zf = $runtime->memoryAccessor()->shouldZeroFlag();
                 if (($opcode === 0xF2 && $zf) || ($opcode === 0xF3 && !$zf)) {
                     return $lastResult;
@@ -403,7 +410,8 @@ class RepPrefix implements InstructionInterface
                     [$dstMin, $dstMax] = $this->bulkMovsRange($dstSegOff, $count, 1, $step);
 
                     $videoMax = self::VIDEO_MEM_MAX_EXCLUSIVE - 1;
-                    if ($srcMin >= 0 && $dstMin >= 0 && $srcMax < 0xE0000000 && $dstMax < 0xE0000000 &&
+                    if (
+                        $srcMin >= 0 && $dstMin >= 0 && $srcMax < 0xE0000000 && $dstMax < 0xE0000000 &&
                         !self::rangesOverlap($srcMin, $srcMax, self::VIDEO_MEM_MIN, $videoMax) &&
                         !self::rangesOverlap($dstMin, $dstMax, self::VIDEO_MEM_MIN, $videoMax)
                     ) {
@@ -415,8 +423,10 @@ class RepPrefix implements InstructionInterface
                             $addrSize = $cpu->addressSize();
                             if ($addrSize !== 16 || (($si + ($count - 1)) <= 0xFFFF && ($di + ($count - 1)) <= 0xFFFF)) {
                                 // Ensure ranges exist (reads are zero-filled for unallocated memory).
-                                if ($runtime->memory()->ensureCapacity($srcMin + $byteCount) &&
-                                    $runtime->memory()->ensureCapacity($dstMin + $byteCount)) {
+                                if (
+                                    $runtime->memory()->ensureCapacity($srcMin + $byteCount) &&
+                                    $runtime->memory()->ensureCapacity($dstMin + $byteCount)
+                                ) {
                                     // Seed the first "distance" bytes (src..src+distance-1 -> dst..dst+distance-1).
                                     $runtime->memory()->copy($runtime->memory(), $srcMin, $dstMin, $distance);
 
@@ -898,7 +908,8 @@ class RepPrefix implements InstructionInterface
 
         // Avoid MMIO-like ranges that rely on observers (e.g., VGA text/graphics memory).
         $videoMax = self::VIDEO_MEM_MAX_EXCLUSIVE - 1;
-        if (self::rangesOverlap($srcMin, $srcMax, self::VIDEO_MEM_MIN, $videoMax) ||
+        if (
+            self::rangesOverlap($srcMin, $srcMax, self::VIDEO_MEM_MIN, $videoMax) ||
             self::rangesOverlap($dstMin, $dstMax, self::VIDEO_MEM_MIN, $videoMax)
         ) {
             return false;
@@ -989,7 +1000,8 @@ class RepPrefix implements InstructionInterface
 
         // Avoid MMIO-like ranges that rely on observers (e.g., VGA text/graphics memory).
         $videoMax = self::VIDEO_MEM_MAX_EXCLUSIVE - 1;
-        if (self::rangesOverlap($srcMin, $srcMax, self::VIDEO_MEM_MIN, $videoMax) ||
+        if (
+            self::rangesOverlap($srcMin, $srcMax, self::VIDEO_MEM_MIN, $videoMax) ||
             self::rangesOverlap($dstMin, $dstMax, self::VIDEO_MEM_MIN, $videoMax)
         ) {
             return null;

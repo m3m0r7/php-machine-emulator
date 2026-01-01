@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
@@ -54,5 +53,4 @@ class Rdmsr implements InstructionInterface
 
         return ExecutionStatus::SUCCESS;
     }
-
 }

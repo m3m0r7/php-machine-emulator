@@ -82,4 +82,3 @@ final class StringReaderStream implements StreamReaderInterface
         return $chunk;
     }
 }
-

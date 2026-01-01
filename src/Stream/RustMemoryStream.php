@@ -33,9 +33,9 @@ class RustMemoryStream implements MemoryStreamInterface
      * @param int $swapSize Swap size for overflow (default 256MB)
      */
     public function __construct(
-        private int     $size = 0x100000,
-        private int     $physicalMaxMemorySize = 0x1000000,
-        private int     $swapSize = 0x10000000,
+        private int $size = 0x100000,
+        private int $physicalMaxMemorySize = 0x1000000,
+        private int $swapSize = 0x10000000,
         ?RustFFIContext $ffiContext = null,
     ) {
         $this->ffiContext = $ffiContext ?? new RustFFIContext();

@@ -13,7 +13,6 @@ class StdIn implements InputInterface
 {
     public function __construct(protected StreamReaderInterface $streamReader = new KeyboardReaderStream(STDIN))
     {
-
     }
 
     public function key(): string

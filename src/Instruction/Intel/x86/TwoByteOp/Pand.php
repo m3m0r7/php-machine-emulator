@@ -74,4 +74,3 @@ class Pand implements InstructionInterface
         ];
     }
 }
-

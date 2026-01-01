@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -71,8 +71,12 @@ class PopSeg implements InstructionInterface
         if ($espAfter !== $espBefore + 2) {
             $runtime->option()->logger()->debug(sprintf(
                 'POP %s: ESP before=0x%08X after=0x%08X size=%d (unexpected!)',
-                match($seg) { RegisterType::ES => 'ES', RegisterType::DS => 'DS', RegisterType::SS => 'SS', default => '??' },
-                $espBefore, $espAfter, 16
+                match ($seg) {
+                RegisterType::ES => 'ES', RegisterType::DS => 'DS', RegisterType::SS => 'SS', default => '??'
+                },
+                $espBefore,
+                $espAfter,
+                16
             ));
         }
 

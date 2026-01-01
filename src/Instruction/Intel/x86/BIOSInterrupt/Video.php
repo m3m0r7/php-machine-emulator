@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
@@ -228,16 +229,16 @@ class Video implements InterruptInterface
         $runtime
             ->memoryAccessor()
                         ->writeBySize(
-                $runtime->video()->videoTypeFlagAddress(),
-                // NOTE: Store width, height, and video type in a single flag address.
-                // width: 16 bits (bits 48..63)
-                // height: 16 bits (bits 32..47)
-                // video type: 8 bits (bits 0..7)
-                (($video->width & 0xFFFF) << 48) +
-                (($video->height & 0xFFFF) << 32) +
-                ($videoType & 0xFF),
-                64,
-            );
+                            $runtime->video()->videoTypeFlagAddress(),
+                            // NOTE: Store width, height, and video type in a single flag address.
+                            // width: 16 bits (bits 48..63)
+                            // height: 16 bits (bits 32..47)
+                            // video type: 8 bits (bits 0..7)
+                            (($video->width & 0xFFFF) << 48) +
+                            (($video->height & 0xFFFF) << 32) +
+                            ($videoType & 0xFF),
+                            64,
+                        );
 
         // Update screen writer with new video mode
         $runtime->context()->screen()->updateVideoMode($video);
@@ -367,7 +368,12 @@ class Video implements InterruptInterface
 
         $runtime->option()->logger()->debug(sprintf(
             'SCROLL_UP: AL=%d, attr=0x%02X, top=%d, left=%d, bottom=%d, right=%d',
-            $al, $attribute, $topRow, $leftCol, $bottomRow, $rightCol
+            $al,
+            $attribute,
+            $topRow,
+            $leftCol,
+            $bottomRow,
+            $rightCol
         ));
 
         if ($al === 0) {

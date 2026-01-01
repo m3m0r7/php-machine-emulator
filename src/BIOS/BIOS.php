@@ -48,8 +48,7 @@ class BIOS
         RuntimeInterface $runtime,
         MediaContextInterface $mediaContext,
         OptionInterface $option,
-    ): void
-    {
+    ): void {
         try {
             (new static($runtime, $mediaContext, $option))
                 ->runtime()
@@ -472,8 +471,14 @@ class BIOS
         }
 
         $this->option->logger()->debug(
-            sprintf('BIOS: Initialized BDA (0x%03X-0x%03X): cols=%d, rows=%d, memory=%dKB',
-                self::BDA_START, self::BDA_END, $cols, $rows, self::CONVENTIONAL_MEMORY_KB)
+            sprintf(
+                'BIOS: Initialized BDA (0x%03X-0x%03X): cols=%d, rows=%d, memory=%dKB',
+                self::BDA_START,
+                self::BDA_END,
+                $cols,
+                $rows,
+                self::CONVENTIONAL_MEMORY_KB
+            )
         );
     }
 
@@ -857,8 +862,11 @@ class BIOS
         $mem->writeBySize(0xFFFFE, 0xFC, 8);
 
         $this->option->logger()->debug(
-            sprintf('BIOS: Initialized ROM with trampolines at 0x%05X, INT13h at F000:FF03, ID at 0x%05X',
-                $trampolineBase, $biosIdAddress)
+            sprintf(
+                'BIOS: Initialized ROM with trampolines at 0x%05X, INT13h at F000:FF03, ID at 0x%05X',
+                $trampolineBase,
+                $biosIdAddress
+            )
         );
     }
 

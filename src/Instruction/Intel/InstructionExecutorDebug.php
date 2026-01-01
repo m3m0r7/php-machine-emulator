@@ -176,7 +176,8 @@ final class InstructionExecutorDebug
 
     public function recordExecution(RuntimeInterface $runtime, int $ip): void
     {
-        if ($this->ipSampleEvery <= 0
+        if (
+            $this->ipSampleEvery <= 0
             && !$this->countInstructionsEnabled
             && $this->stopAfterInsns <= 0
             && $this->stopAfterSecs <= 0
@@ -971,7 +972,20 @@ final class InstructionExecutorDebug
         $opcodeStr = implode(' ', array_map(fn($b) => sprintf('0x%02X', $b), $opcodes));
         $runtime->option()->logger()->debug(sprintf(
             'EXEC: IP=0x%05X op=%-12s FL[CF=%d ZF=%d SF=%d OF=%d] EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X',
-            $ipBefore, $opcodeStr, $cf, $zf, $sf, $of, $eax, $ebx, $ecx, $edx, $esi, $edi, $ebp, $esp
+            $ipBefore,
+            $opcodeStr,
+            $cf,
+            $zf,
+            $sf,
+            $of,
+            $eax,
+            $ebx,
+            $ecx,
+            $edx,
+            $esi,
+            $edi,
+            $ebp,
+            $esp
         ));
     }
 

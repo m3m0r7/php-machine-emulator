@@ -278,7 +278,8 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             }
         }
 
-        if ($cfg->armAfterInt13Lba !== null
+        if (
+            $cfg->armAfterInt13Lba !== null
             && !$this->runtime->logicBoard()->debug()->watchState()->isWatchArmed()
         ) {
             return;
@@ -702,7 +703,8 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
         if ($registerType instanceof RegisterType) {
             $cpu = $this->runtime->context()->cpu();
-            if (!$cpu->isProtectedMode()
+            if (
+                !$cpu->isProtectedMode()
                 && in_array($registerType, [
                     RegisterType::ES,
                     RegisterType::CS,
@@ -764,7 +766,8 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             }
 
             // Filter out stack-pop updates after an already-corrupted underflow (e.g., RSP=-8 -> 0).
-            if ($this->stopOnRspZero
+            if (
+                $this->stopOnRspZero
                 && $this->runtime->context()->cpu()->isLongMode()
                 && $size >= 32
                 && (($value ?? 0) === 0)
@@ -788,7 +791,8 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             }
 
             $threshold = $this->stopOnRspBelowThreshold;
-            if ($threshold !== null
+            if (
+                $threshold !== null
                 && $threshold > 0
                 && $this->runtime->context()->cpu()->isLongMode()
                 && $size >= 32

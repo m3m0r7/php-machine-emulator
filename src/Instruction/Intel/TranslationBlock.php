@@ -78,8 +78,7 @@ class TranslationBlock implements TranslationBlockInterface
         RuntimeInterface $runtime,
         ?callable $beforeInstruction = null,
         ?callable $instructionRunner = null,
-    ): array
-    {
+    ): array {
         $memory = $runtime->memory();
         $currentIp = $this->startIp;
 

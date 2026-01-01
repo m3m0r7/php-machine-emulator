@@ -1,5 +1,7 @@
 <?php
+
 declare(strict_types=1);
+
 namespace PHPMachineEmulator\Instruction\Intel\ServiceFunction;
 
 enum VideoServiceFunction: int

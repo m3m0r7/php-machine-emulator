@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
@@ -208,7 +209,8 @@ class System implements InterruptInterface
         }
 
         $usedFastCopy = false;
-        if ($byteCount > 0
+        if (
+            $byteCount > 0
             && $srcBase < 0xE0000000
             && $dstBase < 0xE0000000
             && !$runtime->context()->cpu()->isPagingEnabled()

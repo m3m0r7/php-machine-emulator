@@ -397,7 +397,8 @@ class Ata
     private function hasCdromMedia(): bool
     {
         $mediaContext = $this->runtime->logicBoard()->media();
-        if ($mediaContext->hasDriveType(DriveType::CD_ROM)
+        if (
+            $mediaContext->hasDriveType(DriveType::CD_ROM)
             || $mediaContext->hasDriveType(DriveType::CD_RAM)
         ) {
             return true;

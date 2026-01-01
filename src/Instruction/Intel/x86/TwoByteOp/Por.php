@@ -74,4 +74,3 @@ class Por implements InstructionInterface
         ];
     }
 }
-

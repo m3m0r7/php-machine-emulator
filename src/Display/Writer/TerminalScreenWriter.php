@@ -48,8 +48,7 @@ class TerminalScreenWriter implements ScreenWriterInterface
         protected RuntimeInterface $runtime,
         protected VideoTypeInfo $videoTypeInfo,
         ?TerminalScreenWriterOption $option = null,
-    )
-    {
+    ) {
         $this->option = $option ?? new TerminalScreenWriterOption();
         $this->silentOutput = $this->option->silentOutput;
         $this->supportsTrueColor = $this->option->supportsTrueColor;

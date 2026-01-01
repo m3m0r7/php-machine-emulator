@@ -162,7 +162,8 @@ class MemoryAccessor implements MemoryAccessorInterface
 
             if ($registerType instanceof RegisterType) {
                 $cpu = $this->runtime->context()->cpu();
-                if (!$cpu->isProtectedMode()
+                if (
+                    !$cpu->isProtectedMode()
                     && in_array($registerType, [
                         RegisterType::ES,
                         RegisterType::CS,

@@ -20,4 +20,3 @@ interface StreamReaderInterface
     public function signedDword(): int;
     public function read(int $length): string;
 }
-

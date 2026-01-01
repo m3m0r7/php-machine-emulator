@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
@@ -70,11 +71,13 @@ trait DiskCHS
             $bootImage = $bootStream?->bootImage();
             if ($bootStream !== null && $bootImage !== null && !$bootStream->isNoEmulation()) {
                 $mediaType = $bootImage->mediaType();
-                if (in_array($mediaType, [
+                if (
+                    in_array($mediaType, [
                     ElTorito::MEDIA_FLOPPY_1_2M,
                     ElTorito::MEDIA_FLOPPY_1_44M,
                     ElTorito::MEDIA_FLOPPY_2_88M,
-                ], true)) {
+                    ], true)
+                ) {
                     $floppyType = $mediaType * 2;
                 }
             }
@@ -232,7 +235,14 @@ trait DiskCHS
         $bufPtr = $this->readMemory16($runtime, $bootLoadAddress + 0x01FA);
         $runtime->option()->logger()->debug(sprintf(
             'INT 13h READ CHS: C=%d H=%d S=%d => LBA=%d, sectors=%d, ES:BX=%04X:%04X linear=0x%05X CS:IP=%04X:%04X',
-            $cylinder, $head, $sector, $lba, $sectorsToRead, $es, $bx, $bufferAddress,
+            $cylinder,
+            $head,
+            $sector,
+            $lba,
+            $sectorsToRead,
+            $es,
+            $bx,
+            $bufferAddress,
             $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte(),
             $runtime->memory()->offset() & 0xFFFF
         ));

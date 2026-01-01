@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
@@ -540,5 +541,4 @@ class Disk implements InterruptInterface
 
         return [$cs, $ip, $flags, $chainCs, $chainIp];
     }
-
 }

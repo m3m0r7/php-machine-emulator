@@ -82,4 +82,3 @@ class Pmovmskb implements InstructionInterface
         ];
     }
 }
-
