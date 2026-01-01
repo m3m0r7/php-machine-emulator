@@ -304,6 +304,63 @@ class Disk implements InterruptInterface
         }
     }
 
+    private function readBlockFromMemory(RuntimeInterface $runtime, int $address, int $length): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+
+        $videoMin = VideoMemoryService::VIDEO_MEMORY_ADDRESS_STARTED;
+        $videoMax = VideoMemoryService::VIDEO_MEMORY_ADDRESS_ENDED;
+        $overlapsVideo = $address <= $videoMax && ($address + $length - 1) >= $videoMin;
+
+        if (!$overlapsVideo) {
+            $memory = $runtime->memory();
+            $currentOffset = $memory->offset();
+            try {
+                $memory->setOffset($address);
+                $data = $memory->read($length);
+            } catch (\Throwable) {
+                $data = '';
+            } finally {
+                $memory->setOffset($currentOffset);
+            }
+
+            if (strlen($data) < $length) {
+                $data = str_pad($data, $length, "\x00");
+            }
+
+            return $data;
+        }
+
+        $data = '';
+        for ($i = 0; $i < $length; $i++) {
+            $data .= chr($this->readMemory8($runtime, $address + $i));
+        }
+
+        return $data;
+    }
+
+    private function writeToBootStream(RuntimeInterface $runtime, int $offset, string $data): bool
+    {
+        if ($data === '') {
+            return true;
+        }
+
+        $bootStream = $runtime->logicBoard()->media()->primary()?->stream();
+        if ($bootStream === null) {
+            return false;
+        }
+
+        $len = strlen($data);
+        if ($offset < 0 || ($offset + $len) > $bootStream->fileSize()) {
+            return false;
+        }
+
+        $bootStream->replaceRange($offset, $data);
+        return true;
+    }
+
     private function segmentRegisterLinearAddress(RuntimeInterface $runtime, RegisterType $segment, int $offset, int $addressSize): int
     {
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;

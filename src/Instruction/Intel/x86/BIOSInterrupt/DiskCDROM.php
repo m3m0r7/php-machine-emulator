@@ -236,7 +236,31 @@ trait DiskCDROM
             return;
         }
 
-        // Write is a no-op for read-only media, but we accept the data
+        if ($size >= 0x18) {
+            $bufferLow = $this->readMemory32($runtime, $dapLinear + 4) & 0xFFFFFFFF;
+            $bufferHigh = $this->readMemory32($runtime, $dapLinear + 8) & 0xFFFFFFFF;
+            $linearMask = $runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
+            $bufferAddress = (($bufferHigh << 32) | $bufferLow) & $linearMask;
+
+            $lbaLow = $this->readMemory32($runtime, $dapLinear + 0x0C) & 0xFFFFFFFF;
+            $lbaHigh = $this->readMemory32($runtime, $dapLinear + 0x10) & 0xFFFFFFFF;
+        } else {
+            $bufferOffset = $this->readMemory16($runtime, $dapLinear + 4);
+            $bufferSegment = $this->readMemory16($runtime, $dapLinear + 6);
+            $bufferAddress = $this->realModeSegmentOffsetLinearAddress($runtime, $bufferSegment, $bufferOffset);
+
+            $lbaLow = $this->readMemory32($runtime, $dapLinear + 8) & 0xFFFFFFFF;
+            $lbaHigh = $this->readMemory32($runtime, $dapLinear + 12) & 0xFFFFFFFF;
+        }
+
+        $lba = ($lbaHigh << 32) | $lbaLow;
+        $bytes = $sectorCount * MediaContext::SECTOR_SIZE;
+        $data = $this->readBlockFromMemory($runtime, $bufferAddress, $bytes);
+        $written = $this->writeToBootStream($runtime, $lba * MediaContext::SECTOR_SIZE, $data);
+        if (!$written) {
+            $runtime->option()->logger()->debug('INT 13h WRITE LBA: write skipped (read-only or out-of-range)');
+        }
+
         $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorCount);
         $this->setDiskStatus($runtime, 0x00);
     }

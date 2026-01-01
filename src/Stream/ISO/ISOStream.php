@@ -15,7 +15,7 @@ class ISOStream implements ISOStreamInterface
     private ElTorito $elTorito;
     private BootImage $bootImage;
 
-    public function __construct(public readonly string $path)
+    public function __construct(public readonly string $path, private ?int $platformId = null)
     {
         $this->iso = new ISO9660($path);
 
@@ -25,7 +25,10 @@ class ISOStream implements ISOStreamInterface
 
         $bootRecord = $this->iso->bootRecord();
         $this->elTorito = new ElTorito($this->iso, $bootRecord->bootCatalogSector);
-        $this->bootImage = $this->elTorito->getBootImage();
+        $bootImage = $this->platformId !== null
+            ? $this->elTorito->getBootImageForPlatform($this->platformId)
+            : null;
+        $this->bootImage = $bootImage ?? $this->elTorito->getBootImage();
     }
 
     public function iso(): ISO9660

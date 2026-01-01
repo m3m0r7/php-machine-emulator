@@ -23,6 +23,7 @@ use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\UEFI\UEFIRuntimeRegistry;
 
 class Group5 implements InstructionInterface
 {
@@ -89,6 +90,14 @@ class Group5 implements InstructionInterface
                     'CALL to NULL pointer (0x0000000000000000) at IP=0x%05X',
                     $returnRip - 2
                 ));
+            }
+
+            $dispatcher = UEFIRuntimeRegistry::dispatcher($runtime);
+            if ($dispatcher !== null && $dispatcher->handlesTarget($target)) {
+                $runtime->memoryAccessor()->push(RegisterType::ESP, $returnRip, 64);
+                $dispatcher->dispatch($runtime, $target);
+                $runtime->memoryAccessor()->pop(RegisterType::ESP, 64);
+                return ExecutionStatus::SUCCESS;
             }
 
             $runtime->memoryAccessor()->push(RegisterType::ESP, $returnRip, 64);

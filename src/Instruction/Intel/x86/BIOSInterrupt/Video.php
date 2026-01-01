@@ -264,8 +264,12 @@ class Video implements InterruptInterface
         }
         if ($char === 0x0A) {
             // LF - Line Feed: move to next line
-            $videoContext->setCursorPosition($videoContext->getCursorRow() + 1, $videoContext->getCursorCol());
-            $runtime->context()->screen()->setCursorPosition($videoContext->getCursorRow(), $videoContext->getCursorCol());
+            [$rows, $cols] = $this->screenDimensions($runtime);
+            $newRow = $videoContext->getCursorRow() + 1;
+            $newCol = $videoContext->getCursorCol();
+            [$newRow, $newCol] = $this->applyScrollIfNeeded($runtime, $newRow, $newCol, $rows, $cols);
+            $videoContext->setCursorPosition($newRow, $newCol);
+            $runtime->context()->screen()->setCursorPosition($newRow, $newCol);
             return;
         }
         if ($char === 0x08) {
@@ -282,18 +286,23 @@ class Video implements InterruptInterface
         }
 
         // Regular character: write and advance cursor
-        $runtime->context()->screen()->setCursorPosition($videoContext->getCursorRow(), $videoContext->getCursorCol());
+        $row = $videoContext->getCursorRow();
+        $col = $videoContext->getCursorCol();
+        $runtime->context()->screen()->setCursorPosition($row, $col);
         $runtime->context()->screen()->write(chr($char));
-        $newCol = $videoContext->getCursorCol() + 1;
+        $newCol = $col + 1;
 
         // Handle line wrap based on current video mode width
-        $videoMode = $runtime->video()->supportedVideoModes()[$videoContext->getCurrentMode()] ?? null;
-        $cols = $videoMode?->width ?? 80;
+        [$rows, $cols] = $this->screenDimensions($runtime);
+        $newRow = $row;
         if ($newCol >= $cols) {
-            $videoContext->setCursorPosition($videoContext->getCursorRow() + 1, 0);
-        } else {
-            $videoContext->setCursorPosition($videoContext->getCursorRow(), $newCol);
+            $newCol = 0;
+            $newRow++;
         }
+
+        [$newRow, $newCol] = $this->applyScrollIfNeeded($runtime, $newRow, $newCol, $rows, $cols);
+        $videoContext->setCursorPosition($newRow, $newCol);
+        $runtime->context()->screen()->setCursorPosition($newRow, $newCol);
     }
 
     protected function setCursorPosition(RuntimeInterface $runtime): void
@@ -363,9 +372,6 @@ class Video implements InterruptInterface
         $bottomRow = ($dx >> 8) & 0xFF;  // DH
         $rightCol = $dx & 0xFF;          // DL
 
-        $width = $rightCol - $leftCol + 1;
-        $height = $bottomRow - $topRow + 1;
-
         $runtime->option()->logger()->debug(sprintf(
             'SCROLL_UP: AL=%d, attr=0x%02X, top=%d, left=%d, bottom=%d, right=%d',
             $al,
@@ -376,11 +382,77 @@ class Video implements InterruptInterface
             $rightCol
         ));
 
-        if ($al === 0) {
-            // Clear entire window with the specified attribute
-            $runtime->context()->screen()->fillArea($topRow, $leftCol, $width, $height, $attribute);
+        [$rows, $cols] = $this->screenDimensions($runtime);
+        if ($rows <= 0 || $cols <= 0) {
+            return;
         }
-        // Otherwise, stub for now - actual scrolling would require screen buffer manipulation
+
+        $topRow = max(0, min($topRow, $rows - 1));
+        $bottomRow = max(0, min($bottomRow, $rows - 1));
+        $leftCol = max(0, min($leftCol, $cols - 1));
+        $rightCol = max(0, min($rightCol, $cols - 1));
+        if ($bottomRow < $topRow || $rightCol < $leftCol) {
+            return;
+        }
+
+        $runtime->context()->screen()->screenWriter()->scrollUpWindow(
+            $topRow,
+            $leftCol,
+            $bottomRow,
+            $rightCol,
+            $al,
+            $attribute,
+        );
+    }
+
+    /**
+     * @return array{0: int, 1: int}
+     */
+    private function screenDimensions(RuntimeInterface $runtime): array
+    {
+        $currentMode = $this->videoContext()->getCurrentMode();
+        $videoMode = $runtime->video()->supportedVideoModes()[$currentMode] ?? null;
+        $cols = $videoMode?->width ?? 80;
+        $rows = $videoMode?->height ?? 25;
+
+        return [$rows, $cols];
+    }
+
+    /**
+     * @return array{0: int, 1: int}
+     */
+    private function applyScrollIfNeeded(
+        RuntimeInterface $runtime,
+        int $row,
+        int $col,
+        int $rows,
+        int $cols
+    ): array
+    {
+        if ($rows <= 0 || $cols <= 0) {
+            return [$row, $col];
+        }
+
+        if ($row < $rows) {
+            return [$row, $col];
+        }
+
+        $lines = $row - ($rows - 1);
+        if ($lines <= 0) {
+            return [$row, $col];
+        }
+
+        $attribute = $runtime->context()->screen()->getCurrentAttribute();
+        $runtime->context()->screen()->screenWriter()->scrollUpWindow(
+            0,
+            0,
+            $rows - 1,
+            $cols - 1,
+            $lines,
+            $attribute,
+        );
+
+        return [$rows - 1, $col];
     }
 
     protected function writeCharAndAttr(RuntimeInterface $runtime, MemoryAccessorFetchResultInterface $fetchResult): void

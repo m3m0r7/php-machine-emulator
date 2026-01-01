@@ -24,6 +24,8 @@ class ElTorito
     private ?ValidationEntry $validationEntry = null;
     private ?InitialEntry $initialEntry = null;
     private array $sectionEntries = [];
+    /** @var array<int, array{header: SectionHeader, entries: array<SectionEntry>}> */
+    private array $sectionBootEntries = [];
 
     public function __construct(private ISO9660 $iso, private int $catalogSector)
     {
@@ -49,9 +51,10 @@ class ElTorito
         // Initial/Default Entry (next 32 bytes)
         $this->initialEntry = new InitialEntry(substr($data, 32, 32));
 
-        // Parse section entries if present
+        // Parse section headers and their boot entries if present
         $offset = 64;
-        while ($offset + 32 <= strlen($data)) {
+        $dataLen = strlen($data);
+        while ($offset + 32 <= $dataLen) {
             $entryData = substr($data, $offset, 32);
             $headerIndicator = ord($entryData[0]);
 
@@ -61,8 +64,25 @@ class ElTorito
             }
 
             if ($headerIndicator === 0x90 || $headerIndicator === 0x91) {
-                // Section header
-                $this->sectionEntries[] = new SectionHeader($entryData);
+                $header = new SectionHeader($entryData);
+                $this->sectionEntries[] = $header;
+                $offset += 32;
+
+                $entries = [];
+                for ($i = 0; $i < $header->numSectionEntries; $i++) {
+                    if ($offset + 32 > $dataLen) {
+                        break;
+                    }
+                    $entries[] = new SectionEntry(substr($data, $offset, 32));
+                    $offset += 32;
+                }
+
+                $this->sectionBootEntries[] = [
+                    'header' => $header,
+                    'entries' => $entries,
+                ];
+
+                continue;
             }
 
             $offset += 32;
@@ -84,6 +104,14 @@ class ElTorito
         return $this->sectionEntries;
     }
 
+    /**
+     * @return array<int, array{header: SectionHeader, entries: array<SectionEntry>}>
+     */
+    public function sectionBootEntries(): array
+    {
+        return $this->sectionBootEntries;
+    }
+
     public function getBootImage(): ?BootImage
     {
         if ($this->initialEntry === null || !$this->initialEntry->isBootable()) {
@@ -97,5 +125,30 @@ class ElTorito
             $this->initialEntry->mediaType(),
             $this->initialEntry->loadSegment()
         );
+    }
+
+    public function getBootImageForPlatform(int $platformId): ?BootImage
+    {
+        foreach ($this->sectionBootEntries as $section) {
+            if ($section['header']->platformID !== $platformId) {
+                continue;
+            }
+
+            foreach ($section['entries'] as $entry) {
+                if (!$entry->isBootable()) {
+                    continue;
+                }
+
+                return new BootImage(
+                    $this->iso,
+                    $entry->loadRBA(),
+                    $entry->sectorCount(),
+                    $entry->mediaType(),
+                    $entry->loadSegment()
+                );
+            }
+        }
+
+        return null;
     }
 }
