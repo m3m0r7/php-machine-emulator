@@ -10,12 +10,12 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
-use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 class Group4 implements InstructionInterface
 {
     use Instructable;
+    use GroupIncDec;
 
     public function opcodes(): array
     {
@@ -37,84 +37,22 @@ class Group4 implements InstructionInterface
 
     protected function inc(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $cpu = $runtime->context()->cpu();
-        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $ma = $runtime->memoryAccessor();
-
-        // Preserve CF - INC does not affect carry flag
-        $savedCf = $ma->shouldCarryFlag();
-
-        if ($isRegister) {
-            $rm = $modRegRM->registerOrMemoryAddress();
-            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
-                $value = $this->read8BitRegister64($runtime, $rm, true, $cpu->rexB());
-            } else {
-                $value = $this->read8BitRegister($runtime, $rm);
-            }
-            $result = ($value + 1) & 0xFF;
-            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
-                $this->write8BitRegister64($runtime, $rm, $result, true, $cpu->rexB());
-            } else {
-                $this->write8BitRegister($runtime, $rm, $result);
-            }
-        } else {
-            // Calculate address once to avoid consuming displacement bytes twice
-            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
-            $value = $this->readMemory8($runtime, $address);
-            $result = ($value + 1) & 0xFF;
-            $this->writeMemory8($runtime, $address, $result);
+        $old = null;
+        $result = null;
+        $status = $this->incRmBySize($runtime, $memory, $modRegRM, 8, $old, $result);
+        if ($old !== null && $result !== null) {
+            $runtime->option()->logger()->debug(sprintf(
+                'INC r/m8: %d -> %d (rm=%d)',
+                $old,
+                $result,
+                $modRegRM->registerOrMemoryAddress()
+            ));
         }
-
-        $af = (($value & 0x0F) + 1) > 0x0F;
-        $ma->updateFlags($result, 8);
-        $ma->setAuxiliaryCarryFlag($af);
-        $ma->setCarryFlag($savedCf);
-
-        // OF for INC: set when result is 0x80 (incrementing 0x7F to 0x80)
-        $ma->setOverflowFlag($result === 0x80);
-
-        $runtime->option()->logger()->debug(sprintf('INC r/m8: %d -> %d (rm=%d)', $value, $result, $modRegRM->registerOrMemoryAddress()));
-        return ExecutionStatus::SUCCESS;
+        return $status;
     }
 
     protected function dec(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
-        $cpu = $runtime->context()->cpu();
-        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $ma = $runtime->memoryAccessor();
-
-        // Preserve CF - DEC does not affect carry flag
-        $savedCf = $ma->shouldCarryFlag();
-
-        if ($isRegister) {
-            $rm = $modRegRM->registerOrMemoryAddress();
-            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
-                $value = $this->read8BitRegister64($runtime, $rm, true, $cpu->rexB());
-            } else {
-                $value = $this->read8BitRegister($runtime, $rm);
-            }
-            $result = ($value - 1) & 0xFF;
-            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->hasRex()) {
-                $this->write8BitRegister64($runtime, $rm, $result, true, $cpu->rexB());
-            } else {
-                $this->write8BitRegister($runtime, $rm, $result);
-            }
-        } else {
-            // Calculate address once to avoid consuming displacement bytes twice
-            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
-            $value = $this->readMemory8($runtime, $address);
-            $result = ($value - 1) & 0xFF;
-            $this->writeMemory8($runtime, $address, $result);
-        }
-
-        $af = (($value & 0x0F) === 0);
-        $ma->updateFlags($result, 8);
-        $ma->setAuxiliaryCarryFlag($af);
-        $ma->setCarryFlag($savedCf);
-
-        // OF for DEC: set when result is 0x7F (decrementing 0x80 to 0x7F)
-        $ma->setOverflowFlag($result === 0x7F);
-
-        return ExecutionStatus::SUCCESS;
+        return $this->decRmBySize($runtime, $memory, $modRegRM, 8);
     }
 }

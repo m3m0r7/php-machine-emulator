@@ -45,9 +45,7 @@ class TestImmAl implements InstructionInterface
                 $ma = $runtime->memoryAccessor();
                 $rax = $ma->fetch(RegisterType::EAX)->asBytesBySize(64);
                 $imm32 = $runtime->memory()->dword();
-                $imm64 = ($imm32 & 0x80000000) !== 0
-                    ? ($imm32 | 0xFFFFFFFF00000000)
-                    : ($imm32 & 0xFFFFFFFF);
+                $imm64 = $this->signExtend($imm32, 32);
 
                 $resultU = UInt64::of($rax)->and(UInt64::of($imm64));
 

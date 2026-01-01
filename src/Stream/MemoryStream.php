@@ -518,6 +518,41 @@ class MemoryStream implements MemoryStreamInterface
         $this->writeByte(($value >> 24) & 0xFF);
     }
 
+    public function copyFromString(string $data, int $destOffset): void
+    {
+        $len = strlen($data);
+        if ($len === 0) {
+            return;
+        }
+
+        $endOffset = $destOffset + $len;
+        if ($endOffset >= $this->size) {
+            $this->ensureCapacity($endOffset);
+        }
+
+        $remaining = $len;
+        $currentDestOffset = $destOffset;
+        $dataOffset = 0;
+
+        while ($remaining > 0) {
+            $segment = $this->findSegment($currentDestOffset);
+            if ($segment === null) {
+                break;
+            }
+
+            $segmentRemaining = $segment['max'] - $currentDestOffset;
+            $chunkSize = min($remaining, $segmentRemaining);
+            $localOffset = $currentDestOffset - $segment['min'];
+
+            fseek($segment['resource'], $localOffset, SEEK_SET);
+            fwrite($segment['resource'], substr($data, $dataOffset, $chunkSize));
+
+            $currentDestOffset += $chunkSize;
+            $dataOffset += $chunkSize;
+            $remaining -= $chunkSize;
+        }
+    }
+
     public function copy(StreamReaderInterface $source, int $sourceOffset, int $destOffset, int $size): void
     {
         // Save current positions

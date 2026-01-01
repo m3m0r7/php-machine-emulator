@@ -4,78 +4,102 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Util;
 
-use Brick\Math\BigInteger;
-use Brick\Math\RoundingMode;
+use FFI;
+use PHPMachineEmulator\Stream\RustFFIContext;
 
 /**
  * Unsigned 64-bit integer utility for x86-64 emulation.
  *
- * Uses native PHP int for values that fit in signed 63-bit range,
- * falls back to BigInteger for larger values.
+ * Backed by Rust FFI for arithmetic/bitwise operations to avoid BigInteger.
  */
-class UInt64
+class UInt64 implements UnsignedIntegerInterface
 {
-    private const MAX_NATIVE = 0x7FFFFFFFFFFFFFFF; // PHP_INT_MAX on 64-bit
-    private const MASK_64 = '18446744073709551615'; // 0xFFFFFFFFFFFFFFFF as string
+    private const MASK_32 = 0xFFFFFFFF;
+    private const DECIMAL_BUFFER_LEN = 21; // 20 digits + NUL
 
-    private BigInteger $value;
+    private int $low;
+    private int $high;
 
-    private function __construct(BigInteger $value)
+    private static ?RustFFIContext $ffiContext = null;
+
+    private function __construct(int $low, int $high)
     {
-        $this->value = $value->and(BigInteger::of(self::MASK_64));
+        $this->low = $low & self::MASK_32;
+        $this->high = $high & self::MASK_32;
     }
 
-    public static function of(int|string|BigInteger $value): self
+    private static function ffiContext(): RustFFIContext
     {
-        if ($value instanceof BigInteger) {
-            return new self($value);
+        return self::$ffiContext ??= new RustFFIContext();
+    }
+
+    private static function fromInt(int $value): self
+    {
+        $low = $value & self::MASK_32;
+        $high = ($value >> 32) & self::MASK_32;
+        return new self($low, $high);
+    }
+
+    private static function fromDecimal(string $value): self
+    {
+        $ffi = self::ffiContext();
+        $low = $ffi->new('uint32_t');
+        $high = $ffi->new('uint32_t');
+        $ok = $ffi->uint64_from_decimal($value, FFI::addr($low), FFI::addr($high));
+        if (!$ok) {
+            throw new \InvalidArgumentException('Invalid UInt64 decimal string');
         }
-        return new self(BigInteger::of($value));
+        return new self((int) $low->cdata, (int) $high->cdata);
+    }
+
+    private static function normalize(UnsignedIntegerInterface|int|string $value): self
+    {
+        if ($value instanceof self) {
+            return $value;
+        }
+        if (is_int($value)) {
+            return self::fromInt($value);
+        }
+        return self::fromDecimal($value);
+    }
+
+    public static function of(int|string|self $value): self
+    {
+        return self::normalize($value);
     }
 
     public static function zero(): self
     {
-        return new self(BigInteger::zero());
+        return new self(0, 0);
     }
 
     public static function fromBytes(string $bytes, bool $littleEndian = true): self
     {
         if ($littleEndian) {
-            $bytes = strrev($bytes);
+            $bytes = str_pad($bytes, 8, "\x00", STR_PAD_RIGHT);
+            $parts = unpack('V2', $bytes);
+            return new self($parts[1], $parts[2]);
         }
-        $hex = bin2hex($bytes);
-        return new self(BigInteger::fromBase($hex, 16));
+
+        $bytes = str_pad($bytes, 8, "\x00", STR_PAD_LEFT);
+        $parts = unpack('N2', $bytes);
+        return new self($parts[2], $parts[1]);
     }
 
     /**
-     * Returns native int if value fits, otherwise BigInteger.
+     * Returns native int (signed 64-bit two's complement).
      */
-    public function toNative(): int|BigInteger
+    public function toNative(): int
     {
-        if ($this->value->isLessThanOrEqualTo(self::MAX_NATIVE)) {
-            return $this->value->toInt();
-        }
-        return $this->value;
+        return $this->toInt();
     }
 
     /**
-     * Always returns BigInteger.
-     */
-    public function toBigInteger(): BigInteger
-    {
-        return $this->value;
-    }
-
-    /**
-     * Force to int (may overflow/wrap for large values).
+     * Force to int (two's complement signed 64-bit).
      */
     public function toInt(): int
     {
-        // For values > PHP_INT_MAX, this will wrap to negative
-        $hex = $this->value->toBase(16);
-        $hex = str_pad($hex, 16, '0', STR_PAD_LEFT);
-        $packed = hex2bin($hex);
-        return unpack('q', strrev($packed))[1]; // Little-endian signed 64-bit
+        return self::ffiContext()->uint64_to_i64($this->low, $this->high);
     }
 
     /**
@@ -83,132 +107,216 @@ class UInt64
      */
     public function toString(): string
     {
-        return (string) $this->value;
+        $ffi = self::ffiContext();
+        $buffer = $ffi->new('char[' . self::DECIMAL_BUFFER_LEN . ']');
+        $ok = $ffi->uint64_to_decimal($this->low, $this->high, $buffer, self::DECIMAL_BUFFER_LEN);
+        if (!$ok) {
+            return '0';
+        }
+        return FFI::string($buffer);
     }
 
     public function toHex(): string
     {
-        return '0x' . str_pad($this->value->toBase(16), 16, '0', STR_PAD_LEFT);
+        return sprintf('0x%08x%08x', $this->high, $this->low);
     }
 
     public function toBytes(int $length = 8, bool $littleEndian = true): string
     {
-        $hex = str_pad($this->value->toBase(16), $length * 2, '0', STR_PAD_LEFT);
-        $bytes = hex2bin($hex);
-        if ($littleEndian) {
-            $bytes = strrev($bytes);
-        }
+        $bytes = $littleEndian
+            ? pack('V2', $this->low, $this->high)
+            : pack('N2', $this->high, $this->low);
         return substr($bytes, 0, $length);
+    }
+
+    private static function applyBinary(string $fn, self $left, self $right): self
+    {
+        $ffi = self::ffiContext();
+        $low = $ffi->new('uint32_t');
+        $high = $ffi->new('uint32_t');
+        $ffi->$fn(
+            $left->low,
+            $left->high,
+            $right->low,
+            $right->high,
+            FFI::addr($low),
+            FFI::addr($high),
+        );
+        return new self((int) $low->cdata, (int) $high->cdata);
+    }
+
+    private static function applyUnary(string $fn, self $value, int $bits = 0): self
+    {
+        $ffi = self::ffiContext();
+        $low = $ffi->new('uint32_t');
+        $high = $ffi->new('uint32_t');
+
+        if ($fn === 'uint64_shl' || $fn === 'uint64_shr') {
+            $ffi->$fn(
+                $value->low,
+                $value->high,
+                $bits,
+                FFI::addr($low),
+                FFI::addr($high),
+            );
+        } else {
+            $ffi->$fn(
+                $value->low,
+                $value->high,
+                FFI::addr($low),
+                FFI::addr($high),
+            );
+        }
+
+        return new self((int) $low->cdata, (int) $high->cdata);
     }
 
     // Arithmetic operations
 
-    public function add(self|int|string $other): self
+    public function add(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return new self($this->value->plus($otherBig));
+        return self::applyBinary('uint64_add', $this, self::normalize($other));
     }
 
-    public function sub(self|int|string $other): self
+    public function sub(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        $result = $this->value->minus($otherBig);
-        // Handle underflow (wrap around)
-        if ($result->isNegative()) {
-            $result = $result->plus(BigInteger::of(self::MASK_64)->plus(1));
+        return self::applyBinary('uint64_sub', $this, self::normalize($other));
+    }
+
+    public function mul(UnsignedIntegerInterface|int|string $other): self
+    {
+        return self::applyBinary('uint64_mul', $this, self::normalize($other));
+    }
+
+    public function div(UnsignedIntegerInterface|int|string $other): self
+    {
+        $rhs = self::normalize($other);
+        if ($rhs->isZero()) {
+            throw new \DivisionByZeroError('Division by zero');
         }
-        return new self($result);
+
+        $ffi = self::ffiContext();
+        $low = $ffi->new('uint32_t');
+        $high = $ffi->new('uint32_t');
+        $ok = $ffi->uint64_div(
+            $this->low,
+            $this->high,
+            $rhs->low,
+            $rhs->high,
+            FFI::addr($low),
+            FFI::addr($high),
+        );
+        if (!$ok) {
+            throw new \DivisionByZeroError('Division by zero');
+        }
+
+        return new self((int) $low->cdata, (int) $high->cdata);
     }
 
-    public function mul(self|int|string $other): self
+    public function mod(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return new self($this->value->multipliedBy($otherBig));
-    }
+        $rhs = self::normalize($other);
+        if ($rhs->isZero()) {
+            throw new \DivisionByZeroError('Division by zero');
+        }
 
-    public function div(self|int|string $other): self
-    {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return new self($this->value->dividedBy($otherBig, RoundingMode::DOWN));
-    }
+        $ffi = self::ffiContext();
+        $low = $ffi->new('uint32_t');
+        $high = $ffi->new('uint32_t');
+        $ok = $ffi->uint64_mod(
+            $this->low,
+            $this->high,
+            $rhs->low,
+            $rhs->high,
+            FFI::addr($low),
+            FFI::addr($high),
+        );
+        if (!$ok) {
+            throw new \DivisionByZeroError('Division by zero');
+        }
 
-    public function mod(self|int|string $other): self
-    {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return new self($this->value->mod($otherBig));
+        return new self((int) $low->cdata, (int) $high->cdata);
     }
 
     // Bitwise operations
 
-    public function and(self|int|string $other): self
+    public function and(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return new self($this->value->and($otherBig));
+        return self::applyBinary('uint64_and', $this, self::normalize($other));
     }
 
-    public function or(self|int|string $other): self
+    public function or(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return new self($this->value->or($otherBig));
+        return self::applyBinary('uint64_or', $this, self::normalize($other));
     }
 
-    public function xor(self|int|string $other): self
+    public function xor(UnsignedIntegerInterface|int|string $other): self
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return new self($this->value->xor($otherBig));
+        return self::applyBinary('uint64_xor', $this, self::normalize($other));
     }
 
     public function not(): self
     {
-        // XOR with all 1s for 64-bit NOT
-        return $this->xor(self::MASK_64);
+        return self::applyUnary('uint64_not', $this);
     }
 
     public function shl(int $bits): self
     {
-        return new self($this->value->shiftedLeft($bits));
+        if ($bits <= 0) {
+            return $this;
+        }
+        if ($bits >= 64) {
+            return self::zero();
+        }
+        return self::applyUnary('uint64_shl', $this, $bits);
     }
 
     public function shr(int $bits): self
     {
-        return new self($this->value->shiftedRight($bits));
+        if ($bits <= 0) {
+            return $this;
+        }
+        if ($bits >= 64) {
+            return self::zero();
+        }
+        return self::applyUnary('uint64_shr', $this, $bits);
     }
 
     // Comparison
 
-    public function eq(self|int|string $other): bool
+    public function eq(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return $this->value->isEqualTo($otherBig);
+        $rhs = self::normalize($other);
+        return self::ffiContext()->uint64_eq($this->low, $this->high, $rhs->low, $rhs->high);
     }
 
-    public function lt(self|int|string $other): bool
+    public function lt(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return $this->value->isLessThan($otherBig);
+        $rhs = self::normalize($other);
+        return self::ffiContext()->uint64_lt($this->low, $this->high, $rhs->low, $rhs->high);
     }
 
-    public function lte(self|int|string $other): bool
+    public function lte(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return $this->value->isLessThanOrEqualTo($otherBig);
+        $rhs = self::normalize($other);
+        return self::ffiContext()->uint64_lte($this->low, $this->high, $rhs->low, $rhs->high);
     }
 
-    public function gt(self|int|string $other): bool
+    public function gt(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return $this->value->isGreaterThan($otherBig);
+        $rhs = self::normalize($other);
+        return self::ffiContext()->uint64_gt($this->low, $this->high, $rhs->low, $rhs->high);
     }
 
-    public function gte(self|int|string $other): bool
+    public function gte(UnsignedIntegerInterface|int|string $other): bool
     {
-        $otherBig = $other instanceof self ? $other->value : BigInteger::of($other);
-        return $this->value->isGreaterThanOrEqualTo($otherBig);
+        $rhs = self::normalize($other);
+        return self::ffiContext()->uint64_gte($this->low, $this->high, $rhs->low, $rhs->high);
     }
 
     public function isZero(): bool
     {
-        return $this->value->isZero();
+        return self::ffiContext()->uint64_is_zero($this->low, $this->high);
     }
 
     /**
@@ -216,7 +324,7 @@ class UInt64
      */
     public function isNegativeSigned(): bool
     {
-        return $this->value->shiftedRight(63)->isEqualTo(1);
+        return self::ffiContext()->uint64_is_negative_signed($this->low, $this->high);
     }
 
     /**
@@ -224,7 +332,7 @@ class UInt64
      */
     public function low32(): int
     {
-        return $this->and(0xFFFFFFFF)->value->toInt();
+        return $this->low;
     }
 
     /**
@@ -232,7 +340,7 @@ class UInt64
      */
     public function high32(): int
     {
-        return $this->shr(32)->and(0xFFFFFFFF)->value->toInt();
+        return $this->high;
     }
 
     /**
@@ -240,8 +348,139 @@ class UInt64
      */
     public static function fromParts(int $low, int $high): self
     {
-        $highBig = BigInteger::of($high & 0xFFFFFFFF)->shiftedLeft(32);
-        $lowBig = BigInteger::of($low & 0xFFFFFFFF);
-        return new self($highBig->or($lowBig));
+        return new self($low, $high);
+    }
+
+    /**
+     * Multiply and return full 128-bit product (low/high 64-bit parts).
+     *
+     * @return array{0: UInt64, 1: UInt64}
+     */
+    public function mulFull(UnsignedIntegerInterface|int|string $other): array
+    {
+        $rhs = self::normalize($other);
+        $ffi = self::ffiContext();
+        $lowLow = $ffi->new('uint32_t');
+        $lowHigh = $ffi->new('uint32_t');
+        $highLow = $ffi->new('uint32_t');
+        $highHigh = $ffi->new('uint32_t');
+
+        $ffi->uint64_mul_full(
+            $this->low,
+            $this->high,
+            $rhs->low,
+            $rhs->high,
+            FFI::addr($lowLow),
+            FFI::addr($lowHigh),
+            FFI::addr($highLow),
+            FFI::addr($highHigh),
+        );
+
+        return [
+            new self((int) $lowLow->cdata, (int) $lowHigh->cdata),
+            new self((int) $highLow->cdata, (int) $highHigh->cdata),
+        ];
+    }
+
+    /**
+     * Signed multiply and return full 128-bit product (low/high 64-bit parts).
+     *
+     * @return array{0: UInt64, 1: UInt64}
+     */
+    public function mulFullSigned(UnsignedIntegerInterface|int|string $other): array
+    {
+        $rhs = self::normalize($other);
+        $ffi = self::ffiContext();
+        $lowLow = $ffi->new('uint32_t');
+        $lowHigh = $ffi->new('uint32_t');
+        $highLow = $ffi->new('uint32_t');
+        $highHigh = $ffi->new('uint32_t');
+
+        $ffi->uint64_mul_full_signed(
+            $this->low,
+            $this->high,
+            $rhs->low,
+            $rhs->high,
+            FFI::addr($lowLow),
+            FFI::addr($lowHigh),
+            FFI::addr($highLow),
+            FFI::addr($highHigh),
+        );
+
+        return [
+            new self((int) $lowLow->cdata, (int) $lowHigh->cdata),
+            new self((int) $highLow->cdata, (int) $highHigh->cdata),
+        ];
+    }
+
+    /**
+     * Unsigned divide 128-bit (high:low) by 64-bit divisor.
+     *
+     * @return array{0: UInt64, 1: UInt64}
+     */
+    public static function divMod128(self $high, self $low, UnsignedIntegerInterface|int|string $divisor): array
+    {
+        $div = self::normalize($divisor);
+        if ($div->isZero()) {
+            throw new \DivisionByZeroError('Division by zero');
+        }
+
+        $ffi = self::ffiContext();
+        $qLow = $ffi->new('uint32_t');
+        $qHigh = $ffi->new('uint32_t');
+        $rLow = $ffi->new('uint32_t');
+        $rHigh = $ffi->new('uint32_t');
+
+        $ok = $ffi->uint128_divmod_u64(
+            $low->low,
+            $low->high,
+            $high->low,
+            $high->high,
+            $div->low,
+            $div->high,
+            FFI::addr($qLow),
+            FFI::addr($qHigh),
+            FFI::addr($rLow),
+            FFI::addr($rHigh),
+        );
+        if (!$ok) {
+            throw new \OverflowException('Divide overflow');
+        }
+
+        return [
+            new self((int) $qLow->cdata, (int) $qHigh->cdata),
+            new self((int) $rLow->cdata, (int) $rHigh->cdata),
+        ];
+    }
+
+    /**
+     * Signed divide 128-bit (high:low) by signed 64-bit divisor.
+     *
+     * @return array{0: int, 1: int}
+     */
+    public static function divModSigned128(self $high, self $low, int $divisor): array
+    {
+        if ($divisor === 0) {
+            throw new \DivisionByZeroError('Division by zero');
+        }
+
+        $ffi = self::ffiContext();
+        $q = $ffi->new('int64_t');
+        $r = $ffi->new('int64_t');
+
+        $ok = $ffi->int128_divmod_i64(
+            $low->low,
+            $low->high,
+            $high->low,
+            $high->high,
+            $divisor,
+            FFI::addr($q),
+            FFI::addr($r),
+        );
+        if (!$ok) {
+            throw new \OverflowException('Divide overflow');
+        }
+
+        return [(int) $q->cdata, (int) $r->cdata];
     }
 }

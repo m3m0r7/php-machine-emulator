@@ -46,63 +46,27 @@ class Group6 implements InstructionInterface
     private function sgdt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
-        $cpu = $runtime->context()->cpu();
         $gdtr = $runtime->context()->cpu()->gdtr();
-        $this->writeMemory16($runtime, $address, $gdtr['limit'] ?? 0);
         $base = $gdtr['base'] ?? 0;
-        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
-            // 10-byte pseudo-descriptor: 2-byte limit + 8-byte base
-            $this->writeMemory64($runtime, $address + 2, $base);
-        } elseif ($cpu->operandSize() === 16) {
-            // 6-byte pseudo-descriptor (16-bit operand size): 2-byte limit + 3-byte base
-            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
-            $this->writeMemory8($runtime, $address + 4, ($base >> 16) & 0xFF);
-            $this->writeMemory8($runtime, $address + 5, 0);
-        } else {
-            // 6-byte pseudo-descriptor: 2-byte limit + 4-byte base
-            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
-            $this->writeMemory16($runtime, $address + 4, ($base >> 16) & 0xFFFF);
-        }
+        $limit = $gdtr['limit'] ?? 0;
+        $this->writePseudoDescriptor($runtime, $address, $base, $limit);
         return ExecutionStatus::SUCCESS;
     }
 
     private function sidt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
-        $cpu = $runtime->context()->cpu();
         $idtr = $runtime->context()->cpu()->idtr();
-        $this->writeMemory16($runtime, $address, $idtr['limit'] ?? 0);
         $base = $idtr['base'] ?? 0;
-        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
-            // 10-byte pseudo-descriptor: 2-byte limit + 8-byte base
-            $this->writeMemory64($runtime, $address + 2, $base);
-        } elseif ($cpu->operandSize() === 16) {
-            // 6-byte pseudo-descriptor (16-bit operand size): 2-byte limit + 3-byte base
-            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
-            $this->writeMemory8($runtime, $address + 4, ($base >> 16) & 0xFF);
-            $this->writeMemory8($runtime, $address + 5, 0);
-        } else {
-            // 6-byte pseudo-descriptor: 2-byte limit + 4-byte base
-            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
-            $this->writeMemory16($runtime, $address + 4, ($base >> 16) & 0xFFFF);
-        }
+        $limit = $idtr['limit'] ?? 0;
+        $this->writePseudoDescriptor($runtime, $address, $base, $limit);
         return ExecutionStatus::SUCCESS;
     }
 
     private function lgdt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
-        $cpu = $runtime->context()->cpu();
-        $limit = $this->readMemory16($runtime, $address);
-        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
-            $base = $this->readMemory64($runtime, $address + 2)->toInt();
-        } elseif ($cpu->operandSize() === 16) {
-            $base = $this->readMemory16($runtime, $address + 2);
-            $base |= ($this->readMemory8($runtime, $address + 4) << 16) & 0xFF0000;
-        } else {
-            $base = $this->readMemory16($runtime, $address + 2);
-            $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
-        }
+        [$base, $limit] = $this->readPseudoDescriptor($runtime, $address);
         $runtime->context()->cpu()->setGdtr($base, $limit);
 
         $runtime->option()->logger()->debug(sprintf(
@@ -143,17 +107,7 @@ class Group6 implements InstructionInterface
     private function lidt(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modrm): ExecutionStatus
     {
         $address = $this->rmLinearAddress($runtime, $memory, $modrm);
-        $cpu = $runtime->context()->cpu();
-        $limit = $this->readMemory16($runtime, $address);
-        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
-            $base = $this->readMemory64($runtime, $address + 2)->toInt();
-        } elseif ($cpu->operandSize() === 16) {
-            $base = $this->readMemory16($runtime, $address + 2);
-            $base |= ($this->readMemory8($runtime, $address + 4) << 16) & 0xFF0000;
-        } else {
-            $base = $this->readMemory16($runtime, $address + 2);
-            $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
-        }
+        [$base, $limit] = $this->readPseudoDescriptor($runtime, $address);
         $runtime->context()->cpu()->setIdtr($base, $limit);
         return ExecutionStatus::SUCCESS;
     }
@@ -184,5 +138,44 @@ class Group6 implements InstructionInterface
         // Just consume the memory operand; no TLB modeled
         $this->rmLinearAddress($runtime, $memory, $modrm);
         return ExecutionStatus::SUCCESS;
+    }
+
+    /**
+     * @return array{int,int} [base, limit]
+     */
+    private function readPseudoDescriptor(RuntimeInterface $runtime, int $address): array
+    {
+        $cpu = $runtime->context()->cpu();
+        $limit = $this->readMemory16($runtime, $address);
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            $base = $this->readMemory64($runtime, $address + 2)->toInt();
+        } elseif ($cpu->operandSize() === 16) {
+            $base = $this->readMemory16($runtime, $address + 2);
+            $base |= ($this->readMemory8($runtime, $address + 4) << 16) & 0xFF0000;
+        } else {
+            $base = $this->readMemory16($runtime, $address + 2);
+            $base |= ($this->readMemory16($runtime, $address + 4) << 16) & 0xFFFF0000;
+        }
+
+        return [$base, $limit];
+    }
+
+    private function writePseudoDescriptor(RuntimeInterface $runtime, int $address, int $base, int $limit): void
+    {
+        $cpu = $runtime->context()->cpu();
+        $this->writeMemory16($runtime, $address, $limit);
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            // 10-byte pseudo-descriptor: 2-byte limit + 8-byte base
+            $this->writeMemory64($runtime, $address + 2, $base);
+        } elseif ($cpu->operandSize() === 16) {
+            // 6-byte pseudo-descriptor (16-bit operand size): 2-byte limit + 3-byte base
+            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
+            $this->writeMemory8($runtime, $address + 4, ($base >> 16) & 0xFF);
+            $this->writeMemory8($runtime, $address + 5, 0);
+        } else {
+            // 6-byte pseudo-descriptor: 2-byte limit + 4-byte base
+            $this->writeMemory16($runtime, $address + 2, $base & 0xFFFF);
+            $this->writeMemory16($runtime, $address + 4, ($base >> 16) & 0xFFFF);
+        }
     }
 }

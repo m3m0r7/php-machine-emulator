@@ -8,7 +8,8 @@ final class PatternDebugConfig
 {
     public function __construct(
         public readonly bool $traceHotPatterns = false,
-        public readonly bool $enableLzmaPattern = false,
+        public readonly bool $enableLzmaPattern = true,
+        public readonly bool $enableLzmaLoopOptimization = false,
     ) {
     }
 }

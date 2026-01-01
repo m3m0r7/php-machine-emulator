@@ -23,4 +23,9 @@ interface MediaInfoInterface
      * Get the media type (e.g., 'cd', 'floppy', 'usb').
      */
     public function mediaType(): MediaType;
+
+    /**
+     * Get the BIOS-visible drive type.
+     */
+    public function driveType(): DriveType;
 }

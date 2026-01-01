@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Unit\Instruction\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\InstructionInterface;
-use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Rdmsr;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Sysexit;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Sysenter;
 use PHPMachineEmulator\Instruction\RegisterType;
@@ -52,9 +51,9 @@ final class SysenterSysexitTest extends TwoByteOpTestCase
         $this->initFlat32Gdt();
         $this->setCpl(0);
 
-        Rdmsr::writeMsr(0x174, UInt64::of(0x00000008)); // SYSENTER_CS
-        Rdmsr::writeMsr(0x175, UInt64::of(0x00002000)); // SYSENTER_ESP
-        Rdmsr::writeMsr(0x176, UInt64::of(0x00003000)); // SYSENTER_EIP
+        $this->cpuContext->writeMsr(0x174, UInt64::of(0x00000008)); // SYSENTER_CS
+        $this->cpuContext->writeMsr(0x175, UInt64::of(0x00002000)); // SYSENTER_ESP
+        $this->cpuContext->writeMsr(0x176, UInt64::of(0x00003000)); // SYSENTER_EIP
 
         (new Sysenter($this->instructionList))->process($this->runtime, [(0x0F << 8) | 0x34]);
 
@@ -77,7 +76,7 @@ final class SysenterSysexitTest extends TwoByteOpTestCase
         $this->initFlat32Gdt();
         $this->setCpl(0);
 
-        Rdmsr::writeMsr(0x174, UInt64::of(0x00000008)); // SYSENTER_CS base
+        $this->cpuContext->writeMsr(0x174, UInt64::of(0x00000008)); // SYSENTER_CS base
 
         $this->setRegister(RegisterType::ECX, 0x00112233, 32); // EIP
         $this->setRegister(RegisterType::EDX, 0x00445566, 32); // ESP

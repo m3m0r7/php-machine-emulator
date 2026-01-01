@@ -1,4 +1,4 @@
-use super::MemoryAccessor;
+use super::super::MemoryAccessor;
 
 impl MemoryAccessor {
     /// Update CPU flags based on a value.

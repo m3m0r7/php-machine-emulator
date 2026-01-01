@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Stream\ISO;
 
-class BootImage
+use PHPMachineEmulator\Stream\BootImageInterface;
+
+class BootImage implements BootImageInterface
 {
     private string $imageData;
     private int $imageSize;

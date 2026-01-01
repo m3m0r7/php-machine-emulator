@@ -1,6 +1,6 @@
 use std::cmp;
 
-use super::{MemoryStream, EXPANSION_CHUNK_SIZE, PAGE_SHIFT, PAGE_SIZE};
+use super::super::{MemoryStream, EXPANSION_CHUNK_SIZE, PAGE_SHIFT, PAGE_SIZE};
 
 impl MemoryStream {
     /// Create a new memory stream with the specified configuration.

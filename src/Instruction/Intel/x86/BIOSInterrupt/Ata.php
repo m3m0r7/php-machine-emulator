@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
-use PHPMachineEmulator\BIOS;
-use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Ata as AtaPort;
-use PHPMachineEmulator\LogicBoard\Media\MediaType;
+use PHPMachineEmulator\LogicBoard\Media\DriveType;
+use PHPMachineEmulator\LogicBoard\Media\MediaContext;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
-use PHPMachineEmulator\Stream\ISO\ISOBootImageStream;
 use PHPMachineEmulator\Stream\ISO\ISOStreamProxy;
 
 class Ata
@@ -227,7 +225,7 @@ class Ata
         $state['writeBuffer'][$state['writeBufferPos']++] = $lo;
         $state['writeBuffer'][$state['writeBufferPos']++] = $hi;
 
-        $expectedSize = max(1, $state['sectorCount']) * BIOS::READ_SIZE_PER_SECTOR;
+        $expectedSize = max(1, $state['sectorCount']) * MediaContext::SECTOR_SIZE;
         if ($state['writeBufferPos'] >= $expectedSize) {
             $this->flushWriteBuffer($state);
             $state['writeMode'] = false;
@@ -254,7 +252,7 @@ class Ata
 
         $state['writeBuffer'][$state['writeBufferPos']++] = $value & 0xFF;
 
-        $expectedSize = max(1, $state['sectorCount']) * BIOS::READ_SIZE_PER_SECTOR;
+        $expectedSize = max(1, $state['sectorCount']) * MediaContext::SECTOR_SIZE;
         if ($state['writeBufferPos'] >= $expectedSize) {
             $this->flushWriteBuffer($state);
             $state['writeMode'] = false;
@@ -397,17 +395,9 @@ class Ata
 
     private function hasCdromMedia(): bool
     {
-        $media = $this->runtime->logicBoard()->media()->primary();
-        if ($media === null) {
-            return false;
-        }
-        if ($media->mediaType() === MediaType::CD) {
-            return true;
-        }
-        if ($media->bootType() === BootType::EL_TORITO) {
-            return true;
-        }
-        return $media->stream() instanceof ISOBootImageStream;
+        $mediaContext = $this->runtime->logicBoard()->media();
+        return $mediaContext->hasDriveType(DriveType::CD_ROM)
+            || $mediaContext->hasDriveType(DriveType::CD_RAM);
     }
 
     private function applyDeviceSignature(array &$state, string $channel): void
@@ -569,19 +559,25 @@ class Ata
     private function flushWriteBuffer(array &$state): void
     {
         $lba = $state['lba0'] | ($state['lba1'] << 8) | ($state['lba2'] << 16) | (($state['driveHead'] & 0x0F) << 24);
-        $offset = $lba * BIOS::READ_SIZE_PER_SECTOR;
+        $offset = $lba * MediaContext::SECTOR_SIZE;
 
         $proxy = $this->runtime->memory()->proxy();
-        if (method_exists($proxy, 'writeAt')) {
-            $proxy->writeAt($offset, $state['writeBuffer']);
+        if ($state['writeBuffer'] === []) {
+            return;
         }
+
+        $data = pack('C*', ...$state['writeBuffer']);
+        $originalOffset = $proxy->offset();
+        $proxy->setOffset($offset);
+        $proxy->write($data);
+        $proxy->setOffset($originalOffset);
     }
 
     private function loadBuffer(array &$state): void
     {
         $lba = $state['lba0'] | ($state['lba1'] << 8) | ($state['lba2'] << 16) | (($state['driveHead'] & 0x0F) << 24);
         $sectors = max(1, $state['sectorCount']);
-        $bytesToRead = $sectors * BIOS::READ_SIZE_PER_SECTOR;
+        $bytesToRead = $sectors * MediaContext::SECTOR_SIZE;
 
         $state['buffer'] = [];
         $state['bufferPos'] = 0;
@@ -589,7 +585,7 @@ class Ata
 
         $proxy = $this->runtime->memory()->proxy();
         try {
-            $proxy->setOffset($lba * BIOS::READ_SIZE_PER_SECTOR);
+            $proxy->setOffset($lba * MediaContext::SECTOR_SIZE);
             $data = $proxy->read($bytesToRead);
         } catch (StreamReaderException) {
             $state['buffer'] = [];
@@ -1004,8 +1000,11 @@ class Ata
             return '';
         }
         $media = $this->runtime->logicBoard()->media()->primary();
-        if ($media !== null && $media->stream() instanceof ISOBootImageStream) {
-            return $media->stream()->readIsoSectors($lba, $sectors) ?? '';
+        if ($media !== null) {
+            $data = $media->stream()->readIsoSectors($lba, $sectors);
+            if ($data !== null) {
+                return $data;
+            }
         }
         $proxy = $this->runtime->memory()->proxy();
         if ($proxy instanceof ISOStreamProxy) {
@@ -1016,9 +1015,19 @@ class Ata
 
     private function cdSize(): int
     {
-        $media = $this->runtime->logicBoard()->media()->primary();
-        if ($media !== null && $media->stream() instanceof ISOBootImageStream) {
-            return $media->stream()->iso()->fileSize();
+        $mediaContext = $this->runtime->logicBoard()->media();
+        if (!$mediaContext->hasDriveType(DriveType::CD_ROM)
+            && !$mediaContext->hasDriveType(DriveType::CD_RAM)
+        ) {
+            return 0;
+        }
+
+        $media = $mediaContext->primary();
+        if ($media !== null) {
+            $size = $media->stream()->backingFileSize();
+            if ($size > 0) {
+                return $size;
+            }
         }
         $proxy = $this->runtime->memory()->proxy();
         if ($proxy instanceof ISOStreamProxy) {

@@ -9,7 +9,7 @@ use PHPMachineEmulator\Collection\MemoryAccessorObserverCollectionInterface;
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Instruction\RegisterType;
-use PHPMachineEmulator\Stream\RustFfiContext;
+use PHPMachineEmulator\Stream\RustFFIContext;
 use PHPMachineEmulator\Stream\RustMemoryStream;
 
 /**
@@ -26,8 +26,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     private const TEXT_VIDEO_MAX = 0xBFFFF;
     private const VIDEO_TYPE_FLAG_ADDRESS = 0xFF0000;
 
-    private RustFfiContext $ffiContext;
-    private FFI $ffi;
+    private RustFFIContext $ffiContext;
     private ?bool $watchMsDosBoot = null;
     private bool $watchAccessConfigResolved = false;
     private ?\PHPMachineEmulator\LogicBoard\Debug\WatchAccessConfig $watchAccessConfig = null;
@@ -98,10 +97,10 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
         $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
 
-        $resultValue = $this->ffi->new('uint32_t');
-        $resultError = $this->ffi->new('uint32_t');
+        $resultValue = $this->ffiContext->new('uint32_t');
+        $resultError = $this->ffiContext->new('uint32_t');
 
-        $this->ffi->memory_accessor_read_memory_32(
+        $this->ffiContext->memory_accessor_read_memory_32(
             $this->handle,
             $linear & 0xFFFFFFFF,
             $isUser,
@@ -123,12 +122,12 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
         $linearMask = $this->runtime->context()->cpu()->isA20Enabled() ? 0xFFFFFFFF : 0xFFFFF;
 
-        $resultValue = $this->ffi->new('uint8_t');
-        $resultError = $this->ffi->new('uint32_t');
+        $resultValue = $this->ffiContext->new('uint8_t');
+        $resultError = $this->ffiContext->new('uint32_t');
 
         $bytes = '';
         for ($i = 0; $i < $length; $i++) {
-            $this->ffi->memory_accessor_read_memory_8(
+            $this->ffiContext->memory_accessor_read_memory_8(
                 $this->handle,
                 ($linear + $i) & 0xFFFFFFFF,
                 $isUser,
@@ -440,7 +439,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     public function __construct(
         protected RuntimeInterface $runtime,
         protected MemoryAccessorObserverCollectionInterface $memoryAccessorObserverCollection,
-        ?RustFfiContext $ffiContext = null
+        ?RustFFIContext $ffiContext = null
     ) {
         // Get the memory handle from the runtime
         $memory = $runtime->memory();
@@ -455,9 +454,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             );
         }
 
-        $this->ffi = $this->ffiContext->ffi();
-
-        $this->handle = $this->ffi->memory_accessor_new($memoryHandle);
+        $this->handle = $this->ffiContext->memory_accessor_new($memoryHandle);
 
         if ($this->handle === null) {
             throw new \RuntimeException('Failed to create Rust MemoryAccessor');
@@ -504,8 +501,8 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
     public function __destruct()
     {
-        if (isset($this->handle) && $this->ffi !== null) {
-            $this->ffi->memory_accessor_free($this->handle);
+        if (isset($this->handle)) {
+            $this->ffiContext->memory_accessor_free($this->handle);
         }
     }
 
@@ -626,14 +623,14 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
     public function allocate(int $address, int $size = 1, bool $safe = true): self
     {
-        $this->ffi->memory_accessor_allocate($this->handle, $address, $size, $safe);
+        $this->ffiContext->memory_accessor_allocate($this->handle, $address, $size, $safe);
         return $this;
     }
 
     public function fetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface
     {
         $address = $this->asAddress($registerType);
-        $value = $this->ffi->memory_accessor_fetch($this->handle, $address);
+        $value = $this->ffiContext->memory_accessor_fetch($this->handle, $address);
 
         // Determine stored size
         $isGpr = ($address >= 0 && $address <= 7) || ($address >= 16 && $address <= 24);
@@ -645,7 +642,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     public function tryToFetch(int|RegisterType $registerType): MemoryAccessorFetchResultInterface|null
     {
         $address = $this->asAddress($registerType);
-        $value = $this->ffi->memory_accessor_try_to_fetch($this->handle, $address);
+        $value = $this->ffiContext->memory_accessor_try_to_fetch($this->handle, $address);
 
         if ($value === -1) {
             return null;
@@ -660,28 +657,28 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     public function increment(int|RegisterType $registerType): self
     {
         $address = $this->asAddress($registerType);
-        $this->ffi->memory_accessor_increment($this->handle, $address);
+        $this->ffiContext->memory_accessor_increment($this->handle, $address);
         return $this;
     }
 
     public function add(int|RegisterType $registerType, int $value): self
     {
         $address = $this->asAddress($registerType);
-        $this->ffi->memory_accessor_add($this->handle, $address, $value);
+        $this->ffiContext->memory_accessor_add($this->handle, $address, $value);
         return $this;
     }
 
     public function sub(int|RegisterType $registerType, int $value): self
     {
         $address = $this->asAddress($registerType);
-        $this->ffi->memory_accessor_sub($this->handle, $address, $value);
+        $this->ffiContext->memory_accessor_sub($this->handle, $address, $value);
         return $this;
     }
 
     public function decrement(int|RegisterType $registerType): self
     {
         $address = $this->asAddress($registerType);
-        $this->ffi->memory_accessor_decrement($this->handle, $address);
+        $this->ffiContext->memory_accessor_decrement($this->handle, $address);
         return $this;
     }
 
@@ -695,8 +692,8 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $address = $this->asAddress($registerType);
         $this->maybeLogWatchedAccess('WRITE', 'bySize', $address, $size, $value ?? 0);
         $this->maybeLogMsDosBootWrite('bySize', $address, $size, $value ?? 0);
-        $previousValue = $this->ffi->memory_accessor_fetch($this->handle, $address);
-        $this->ffi->memory_accessor_write_by_size($this->handle, $address, $value ?? 0, $size);
+        $previousValue = $this->ffiContext->memory_accessor_fetch($this->handle, $address);
+        $this->ffiContext->memory_accessor_write_by_size($this->handle, $address, $value ?? 0, $size);
         $this->postProcessWhenWrote($address, $previousValue, $value);
         if (!$this->isRegisterAddress($address)) {
             $bytes = intdiv($size, 8);
@@ -716,16 +713,18 @@ class RustMemoryAccessor implements MemoryAccessorInterface
                 ], true)
             ) {
                 $selector = $value ?? 0;
-                $cpu->cacheSegmentDescriptor($registerType, [
-                    'base' => ((($selector & 0xFFFF) << 4) & 0xFFFFF),
-                    'limit' => 0xFFFF,
-                    'present' => true,
-                    'type' => 0,
-                    'system' => false,
-                    'executable' => false,
-                    'dpl' => 0,
-                    'default' => 16,
-                ]);
+                if (!$cpu->hasExtendedSegmentLimit($registerType)) {
+                    $cpu->cacheSegmentDescriptor($registerType, [
+                        'base' => ((($selector & 0xFFFF) << 4) & 0xFFFFF),
+                        'limit' => 0xFFFF,
+                        'present' => true,
+                        'type' => 0,
+                        'system' => false,
+                        'executable' => false,
+                        'dpl' => 0,
+                        'default' => 16,
+                    ]);
+                }
             }
         }
 
@@ -819,34 +818,34 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     public function writeToHighBit(int|RegisterType $registerType, int|null $value): self
     {
         $address = $this->asAddress($registerType);
-        $this->ffi->memory_accessor_write_to_high_bit($this->handle, $address, $value ?? 0);
+        $this->ffiContext->memory_accessor_write_to_high_bit($this->handle, $address, $value ?? 0);
         return $this;
     }
 
     public function writeToLowBit(int|RegisterType $registerType, int|null $value): self
     {
         $address = $this->asAddress($registerType);
-        $this->ffi->memory_accessor_write_to_low_bit($this->handle, $address, $value ?? 0);
+        $this->ffiContext->memory_accessor_write_to_low_bit($this->handle, $address, $value ?? 0);
         return $this;
     }
 
     public function updateFlags(int|null $value, int $size = 16): self
     {
         if ($value === null) {
-            $this->ffi->memory_accessor_set_zero_flag($this->handle, true);
-            $this->ffi->memory_accessor_set_sign_flag($this->handle, false);
-            $this->ffi->memory_accessor_set_overflow_flag($this->handle, false);
-            $this->ffi->memory_accessor_set_parity_flag($this->handle, true);
+            $this->ffiContext->memory_accessor_set_zero_flag($this->handle, true);
+            $this->ffiContext->memory_accessor_set_sign_flag($this->handle, false);
+            $this->ffiContext->memory_accessor_set_overflow_flag($this->handle, false);
+            $this->ffiContext->memory_accessor_set_parity_flag($this->handle, true);
             return $this;
         }
 
-        $this->ffi->memory_accessor_update_flags($this->handle, $value, $size);
+        $this->ffiContext->memory_accessor_update_flags($this->handle, $value, $size);
         return $this;
     }
 
     public function setCarryFlag(bool $which): self
     {
-        $this->ffi->memory_accessor_set_carry_flag($this->handle, $which);
+        $this->ffiContext->memory_accessor_set_carry_flag($this->handle, $which);
         return $this;
     }
 
@@ -865,7 +864,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             // Read value from stack
             $value = 0;
             for ($i = 0; $i < $bytes; $i++) {
-                $value |= $this->ffi->memory_accessor_read_from_memory($this->handle, $address + $i) << ($i * 8);
+                $value |= $this->ffiContext->memory_accessor_read_from_memory($this->handle, $address + $i) << ($i * 8);
             }
 
             // Update SP
@@ -935,13 +934,13 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
     public function readControlRegister(int $index): int
     {
-        return $this->ffi->memory_accessor_read_control_register($this->handle, $index);
+        return $this->ffiContext->memory_accessor_read_control_register($this->handle, $index);
     }
 
     public function writeControlRegister(int $index, int $value): void
     {
-        $previous = $this->ffi->memory_accessor_read_control_register($this->handle, $index);
-        $this->ffi->memory_accessor_write_control_register($this->handle, $index, $value);
+        $previous = $this->ffiContext->memory_accessor_read_control_register($this->handle, $index);
+        $this->ffiContext->memory_accessor_write_control_register($this->handle, $index, $value);
 
         // Mode changes can alter instruction decoding/execution semantics
         if ($index === 0 && $previous !== $value) {
@@ -951,77 +950,77 @@ class RustMemoryAccessor implements MemoryAccessorInterface
 
     public function shouldZeroFlag(): bool
     {
-        return $this->ffi->memory_accessor_zero_flag($this->handle);
+        return $this->ffiContext->memory_accessor_zero_flag($this->handle);
     }
 
     public function shouldSignFlag(): bool
     {
-        return $this->ffi->memory_accessor_sign_flag($this->handle);
+        return $this->ffiContext->memory_accessor_sign_flag($this->handle);
     }
 
     public function shouldOverflowFlag(): bool
     {
-        return $this->ffi->memory_accessor_overflow_flag($this->handle);
+        return $this->ffiContext->memory_accessor_overflow_flag($this->handle);
     }
 
     public function shouldCarryFlag(): bool
     {
-        return $this->ffi->memory_accessor_carry_flag($this->handle);
+        return $this->ffiContext->memory_accessor_carry_flag($this->handle);
     }
 
     public function shouldParityFlag(): bool
     {
-        return $this->ffi->memory_accessor_parity_flag($this->handle);
+        return $this->ffiContext->memory_accessor_parity_flag($this->handle);
     }
 
     public function shouldAuxiliaryCarryFlag(): bool
     {
-        return $this->ffi->memory_accessor_auxiliary_carry_flag($this->handle);
+        return $this->ffiContext->memory_accessor_auxiliary_carry_flag($this->handle);
     }
 
     public function shouldDirectionFlag(): bool
     {
-        return $this->ffi->memory_accessor_direction_flag($this->handle);
+        return $this->ffiContext->memory_accessor_direction_flag($this->handle);
     }
 
     public function shouldInterruptFlag(): bool
     {
-        return $this->ffi->memory_accessor_interrupt_flag($this->handle);
+        return $this->ffiContext->memory_accessor_interrupt_flag($this->handle);
     }
 
     public function setZeroFlag(bool $which): self
     {
-        $this->ffi->memory_accessor_set_zero_flag($this->handle, $which);
+        $this->ffiContext->memory_accessor_set_zero_flag($this->handle, $which);
         return $this;
     }
 
     public function setSignFlag(bool $which): self
     {
-        $this->ffi->memory_accessor_set_sign_flag($this->handle, $which);
+        $this->ffiContext->memory_accessor_set_sign_flag($this->handle, $which);
         return $this;
     }
 
     public function setOverflowFlag(bool $which): self
     {
-        $this->ffi->memory_accessor_set_overflow_flag($this->handle, $which);
+        $this->ffiContext->memory_accessor_set_overflow_flag($this->handle, $which);
         return $this;
     }
 
     public function setParityFlag(bool $which): self
     {
-        $this->ffi->memory_accessor_set_parity_flag($this->handle, $which);
+        $this->ffiContext->memory_accessor_set_parity_flag($this->handle, $which);
         return $this;
     }
 
     public function setAuxiliaryCarryFlag(bool $which): self
     {
-        $this->ffi->memory_accessor_set_auxiliary_carry_flag($this->handle, $which);
+        $this->ffiContext->memory_accessor_set_auxiliary_carry_flag($this->handle, $which);
         return $this;
     }
 
     public function setDirectionFlag(bool $which): self
     {
-        $this->ffi->memory_accessor_set_direction_flag($this->handle, $which);
+        $this->ffiContext->memory_accessor_set_direction_flag($this->handle, $which);
         return $this;
     }
 
@@ -1054,13 +1053,13 @@ class RustMemoryAccessor implements MemoryAccessorInterface
                 ));
             }
         }
-        $this->ffi->memory_accessor_set_interrupt_flag($this->handle, $which);
+        $this->ffiContext->memory_accessor_set_interrupt_flag($this->handle, $which);
         return $this;
     }
 
     public function writeEfer(int $value): void
     {
-        $this->ffi->memory_accessor_write_efer($this->handle, $value);
+        $this->ffiContext->memory_accessor_write_efer($this->handle, $value);
     }
 
     /**
@@ -1068,7 +1067,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readEfer(): int
     {
-        return $this->ffi->memory_accessor_read_efer($this->handle);
+        return $this->ffiContext->memory_accessor_read_efer($this->handle);
     }
 
     /**
@@ -1078,8 +1077,8 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     {
         $this->maybeLogWatchedAccess('WRITE', 'raw', $address, 8, $value);
         $this->maybeLogMsDosBootWrite('raw', $address, 8, $value);
-        $previousValue = $this->ffi->memory_accessor_read_raw_byte($this->handle, $address);
-        $this->ffi->memory_accessor_write_raw_byte($this->handle, $address, $value & 0xFF);
+        $previousValue = $this->ffiContext->memory_accessor_read_raw_byte($this->handle, $address);
+        $this->ffiContext->memory_accessor_write_raw_byte($this->handle, $address, $value & 0xFF);
         $this->postProcessWhenWrote($address, $previousValue, $value);
         return $this;
     }
@@ -1089,7 +1088,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readRawByte(int $address): ?int
     {
-        $value = $this->ffi->memory_accessor_read_raw_byte($this->handle, $address);
+        $value = $this->ffiContext->memory_accessor_read_raw_byte($this->handle, $address);
         $this->maybeLogWatchedAccess('READ', 'raw', $address, 8, $value);
         return $value;
     }
@@ -1099,7 +1098,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function setInstructionFetch(bool $flag): self
     {
-        $this->ffi->memory_accessor_set_instruction_fetch($this->handle, $flag);
+        $this->ffiContext->memory_accessor_set_instruction_fetch($this->handle, $flag);
         return $this;
     }
 
@@ -1108,7 +1107,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function shouldInstructionFetch(): bool
     {
-        return $this->ffi->memory_accessor_instruction_fetch($this->handle);
+        return $this->ffiContext->memory_accessor_instruction_fetch($this->handle);
     }
 
     /**
@@ -1124,7 +1123,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readPhysical8(int $address): int
     {
-        return $this->ffi->memory_accessor_read_physical_8($this->handle, $address);
+        return $this->ffiContext->memory_accessor_read_physical_8($this->handle, $address);
     }
 
     /**
@@ -1132,7 +1131,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readPhysical16(int $address): int
     {
-        return $this->ffi->memory_accessor_read_physical_16($this->handle, $address);
+        return $this->ffiContext->memory_accessor_read_physical_16($this->handle, $address);
     }
 
     /**
@@ -1140,7 +1139,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readPhysical32(int $address): int
     {
-        return $this->ffi->memory_accessor_read_physical_32($this->handle, $address);
+        return $this->ffiContext->memory_accessor_read_physical_32($this->handle, $address);
     }
 
     /**
@@ -1148,7 +1147,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readPhysical64(int $address): int
     {
-        return $this->ffi->memory_accessor_read_physical_64($this->handle, $address);
+        return $this->ffiContext->memory_accessor_read_physical_64($this->handle, $address);
     }
 
     /**
@@ -1157,7 +1156,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     public function writePhysical32(int $address, int $value): void
     {
         $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 32, $value);
-        $this->ffi->memory_accessor_write_physical_32($this->handle, $address, $value);
+        $this->ffiContext->memory_accessor_write_physical_32($this->handle, $address, $value);
         $this->invalidateInstructionCachesOnWrite($address, 4);
     }
 
@@ -1167,7 +1166,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     public function writePhysical64(int $address, int $value): void
     {
         $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 64, $value);
-        $this->ffi->memory_accessor_write_physical_64($this->handle, $address, $value);
+        $this->ffiContext->memory_accessor_write_physical_64($this->handle, $address, $value);
         $this->invalidateInstructionCachesOnWrite($address, 8);
     }
 
@@ -1178,10 +1177,10 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function translateLinear(int $linear, bool $isWrite, bool $isUser, bool $pagingEnabled, int $linearMask): array
     {
-        $resultPhysical = $this->ffi->new('uint64_t');
-        $resultError = $this->ffi->new('uint32_t');
+        $resultPhysical = $this->ffiContext->new('uint64_t');
+        $resultError = $this->ffiContext->new('uint32_t');
 
-        $this->ffi->memory_accessor_translate_linear(
+        $this->ffiContext->memory_accessor_translate_linear(
             $this->handle,
             $linear,
             $isWrite,
@@ -1267,9 +1266,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             return 64;
         }
 
-        $cached = method_exists($cpu, 'getCachedSegmentDescriptor')
-            ? $cpu->getCachedSegmentDescriptor(RegisterType::SS)
-            : null;
+        $cached = $cpu->getCachedSegmentDescriptor(RegisterType::SS);
 
         $default = is_array($cached) ? ($cached['default'] ?? null) : null;
         if ($default === 32 || $default === 16 || $default === 64) {
@@ -1339,9 +1336,9 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $pagingEnabled = $this->runtime->context()->cpu()->isPagingEnabled();
 
         // Fast path: fetch full 64-bit descriptor in one FFI call.
-        $desc64 = $this->ffi->new('uint64_t');
-        $descErr = $this->ffi->new('uint32_t');
-        $this->ffi->memory_accessor_read_memory_64(
+        $desc64 = $this->ffiContext->new('uint64_t');
+        $descErr = $this->ffiContext->new('uint32_t');
+        $this->ffiContext->memory_accessor_read_memory_64(
             $this->handle,
             $offset,
             $isUser,
@@ -1363,14 +1360,14 @@ class RustMemoryAccessor implements MemoryAccessorInterface
             $b7 = ($val >> 56) & 0xFF;
         } else {
             // Fallback: byte-by-byte read (should rarely happen).
-            $b0 = $this->ffi->memory_accessor_read_from_memory($this->handle, $offset);
-            $b1 = $this->ffi->memory_accessor_read_from_memory($this->handle, $offset + 1);
-            $b2 = $this->ffi->memory_accessor_read_from_memory($this->handle, $offset + 2);
-            $b3 = $this->ffi->memory_accessor_read_from_memory($this->handle, $offset + 3);
-            $b4 = $this->ffi->memory_accessor_read_from_memory($this->handle, $offset + 4);
-            $b5 = $this->ffi->memory_accessor_read_from_memory($this->handle, $offset + 5);
-            $b6 = $this->ffi->memory_accessor_read_from_memory($this->handle, $offset + 6);
-            $b7 = $this->ffi->memory_accessor_read_from_memory($this->handle, $offset + 7);
+            $b0 = $this->ffiContext->memory_accessor_read_from_memory($this->handle, $offset);
+            $b1 = $this->ffiContext->memory_accessor_read_from_memory($this->handle, $offset + 1);
+            $b2 = $this->ffiContext->memory_accessor_read_from_memory($this->handle, $offset + 2);
+            $b3 = $this->ffiContext->memory_accessor_read_from_memory($this->handle, $offset + 3);
+            $b4 = $this->ffiContext->memory_accessor_read_from_memory($this->handle, $offset + 4);
+            $b5 = $this->ffiContext->memory_accessor_read_from_memory($this->handle, $offset + 5);
+            $b6 = $this->ffiContext->memory_accessor_read_from_memory($this->handle, $offset + 6);
+            $b7 = $this->ffiContext->memory_accessor_read_from_memory($this->handle, $offset + 7);
         }
 
         $limitLow = $b0 | ($b1 << 8);
@@ -1403,7 +1400,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function isMmioAddress(int $address): bool
     {
-        return $this->ffi->memory_accessor_is_mmio_address($address);
+        return $this->ffiContext->memory_accessor_is_mmio_address($address);
     }
 
     /**
@@ -1412,10 +1409,10 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readMemory8(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array
     {
-        $resultValue = $this->ffi->new('uint8_t');
-        $resultError = $this->ffi->new('uint32_t');
+        $resultValue = $this->ffiContext->new('uint8_t');
+        $resultError = $this->ffiContext->new('uint32_t');
 
-        $this->ffi->memory_accessor_read_memory_8(
+        $this->ffiContext->memory_accessor_read_memory_8(
             $this->handle,
             $linear,
             $isUser,
@@ -1436,10 +1433,10 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readMemory16(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array
     {
-        $resultValue = $this->ffi->new('uint16_t');
-        $resultError = $this->ffi->new('uint32_t');
+        $resultValue = $this->ffiContext->new('uint16_t');
+        $resultError = $this->ffiContext->new('uint32_t');
 
-        $this->ffi->memory_accessor_read_memory_16(
+        $this->ffiContext->memory_accessor_read_memory_16(
             $this->handle,
             $linear,
             $isUser,
@@ -1460,10 +1457,10 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readMemory32(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array
     {
-        $resultValue = $this->ffi->new('uint32_t');
-        $resultError = $this->ffi->new('uint32_t');
+        $resultValue = $this->ffiContext->new('uint32_t');
+        $resultError = $this->ffiContext->new('uint32_t');
 
-        $this->ffi->memory_accessor_read_memory_32(
+        $this->ffiContext->memory_accessor_read_memory_32(
             $this->handle,
             $linear,
             $isUser,
@@ -1484,10 +1481,10 @@ class RustMemoryAccessor implements MemoryAccessorInterface
      */
     public function readMemory64(int $linear, bool $isUser, bool $pagingEnabled, int $linearMask): array
     {
-        $resultValue = $this->ffi->new('uint64_t');
-        $resultError = $this->ffi->new('uint32_t');
+        $resultValue = $this->ffiContext->new('uint64_t');
+        $resultError = $this->ffiContext->new('uint32_t');
 
-        $this->ffi->memory_accessor_read_memory_64(
+        $this->ffiContext->memory_accessor_read_memory_64(
             $this->handle,
             $linear,
             $isUser,
@@ -1510,7 +1507,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     {
         $this->maybeLogWatchedAccess('WRITE', 'linear', $linear, 8, $value);
         $this->maybeLogMsDosBootWrite('linear', $linear, 8, $value);
-        $error = $this->ffi->memory_accessor_write_memory_8(
+        $error = $this->ffiContext->memory_accessor_write_memory_8(
             $this->handle,
             $linear,
             $value & 0xFF,
@@ -1536,7 +1533,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $this->maybeLogWatchedAccess('WRITE', 'linear', $linear, 16, $value);
         $this->maybeLogMsDosBootWrite('linear', $linear, 16, $value);
         $masked = $value & 0xFFFF;
-        $error = $this->ffi->memory_accessor_write_memory_16(
+        $error = $this->ffiContext->memory_accessor_write_memory_16(
             $this->handle,
             $linear,
             $masked,
@@ -1562,7 +1559,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         $this->maybeLogWatchedAccess('WRITE', 'linear', $linear, 32, $value);
         $this->maybeLogMsDosBootWrite('linear', $linear, 32, $value);
         $masked = $value & 0xFFFFFFFF;
-        $error = $this->ffi->memory_accessor_write_memory_32(
+        $error = $this->ffiContext->memory_accessor_write_memory_32(
             $this->handle,
             $linear,
             $masked,
@@ -1587,7 +1584,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     {
         $this->maybeLogWatchedAccess('WRITE', 'linear', $linear, 64, $value);
         $this->maybeLogMsDosBootWrite('linear', $linear, 64, $value);
-        $error = $this->ffi->memory_accessor_write_memory_64(
+        $error = $this->ffiContext->memory_accessor_write_memory_64(
             $this->handle,
             $linear,
             $value,
@@ -1611,7 +1608,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     {
         $this->maybeLogWatchedAccess('WRITE', 'phys', $address, 16, $value);
         $this->maybeLogMsDosBootWrite('phys', $address, 16, $value);
-        $this->ffi->memory_accessor_write_physical_16($this->handle, $address, $value & 0xFFFF);
+        $this->ffiContext->memory_accessor_write_physical_16($this->handle, $address, $value & 0xFFFF);
         $this->invalidateInstructionCachesOnWrite($address, 2);
     }
 }

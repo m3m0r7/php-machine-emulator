@@ -7,20 +7,25 @@ namespace Tests\Utils;
 use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\Display\Writer\ScreenWriterFactoryInterface;
 use PHPMachineEmulator\IO\IOInterface;
+use PHPMachineEmulator\Logging\DebugLogger;
+use PHPMachineEmulator\Logging\DebugLoggerInterface;
 use PHPMachineEmulator\OptionInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 class TestOption implements OptionInterface
 {
-    private LoggerInterface $logger;
+    private DebugLoggerInterface $logger;
 
     public function __construct(?LoggerInterface $logger = null)
     {
-        $this->logger = $logger ?? new NullLogger();
+        $baseLogger = $logger ?? new NullLogger();
+        $this->logger = $baseLogger instanceof DebugLoggerInterface
+            ? $baseLogger
+            : new DebugLogger($baseLogger);
     }
 
-    public function logger(): LoggerInterface
+    public function logger(): DebugLoggerInterface
     {
         return $this->logger;
     }

@@ -242,6 +242,22 @@ class RepPrefixTest extends InstructionTestCase
             public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
             {
             }
+
+            public function instructionCount(): int
+            {
+                return 0;
+            }
+
+            public function getIpSampleReport(int $top = 20): array
+            {
+                return [
+                    'every' => 0,
+                    'instructions' => 0,
+                    'samples' => 0,
+                    'unique' => 0,
+                    'top' => [],
+                ];
+            }
         };
 
         $iterationContext = $this->cpuContext->iteration();
@@ -1793,6 +1809,22 @@ class RepPrefixTest extends InstructionTestCase
             public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
             {
             }
+
+            public function instructionCount(): int
+            {
+                return 0;
+            }
+
+            public function getIpSampleReport(int $top = 20): array
+            {
+                return [
+                    'every' => 0,
+                    'instructions' => 0,
+                    'samples' => 0,
+                    'unique' => 0,
+                    'top' => [],
+                ];
+            }
         };
 
         $iterationContext = $this->cpuContext->iteration();
@@ -1905,5 +1937,21 @@ class TestInstructionExecutor implements InstructionExecutorInterface
     public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void
     {
         // No caching in test executor
+    }
+
+    public function instructionCount(): int
+    {
+        return 0;
+    }
+
+    public function getIpSampleReport(int $top = 20): array
+    {
+        return [
+            'every' => 0,
+            'instructions' => 0,
+            'samples' => 0,
+            'unique' => 0,
+            'top' => [],
+        ];
     }
 }

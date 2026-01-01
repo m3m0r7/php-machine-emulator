@@ -30,7 +30,7 @@ use PHPMachineEmulator\Runtime\Ticker\TickerRegistry;
 use PHPMachineEmulator\Runtime\Ticker\TickerRegistryInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Stream\PagedMemoryStream;
-use PHPMachineEmulator\Stream\RustFfiContext;
+use PHPMachineEmulator\Stream\RustFFIContext;
 use PHPMachineEmulator\Stream\RustMemoryStream;
 use PHPMachineEmulator\Video\VideoInterface;
 
@@ -72,7 +72,7 @@ class Runtime implements RuntimeInterface
         $this->addressMap = new AddressMap($this);
 
         // Convert boot stream to memory stream (must be before RustMemoryAccessor)
-        $ffiContext = new RustFfiContext();
+        $ffiContext = new RustFFIContext();
         $this->memory = $this->createMemoryStream($ffiContext);
 
         $this->memoryAccessor = new RustMemoryAccessor(
@@ -127,7 +127,7 @@ class Runtime implements RuntimeInterface
     /**
      * Create memory stream with boot data copied in.
      */
-    private function createMemoryStream(RustFfiContext $ffiContext): MemoryStreamInterface
+    private function createMemoryStream(RustFFIContext $ffiContext): MemoryStreamInterface
     {
         $memoryContext = $this->logicBoard()->memory();
         $bootStream = $this->logicBoard()->media()->primary()->stream();
@@ -141,14 +141,8 @@ class Runtime implements RuntimeInterface
         );
 
         $loadAddress = $bootStream->loadAddress();
-        // Only load the boot strap portion, not the entire boot image/disk.
-        // For El Torito floppy emulation, BIOS loads just the boot sector (512 bytes).
-        // Use catalogSectorCount (in 512-byte units) when available; otherwise default to 1 sector.
-        $bootSize = 512;
-        if ($bootStream instanceof \PHPMachineEmulator\Stream\ISO\ISOBootImageStream) {
-            $catalogSectors = max(1, $bootStream->bootImage()->catalogSectorCount());
-            $bootSize = min($bootStream->fileSize(), $catalogSectors * 512);
-        }
+        // Only load the bootstrap portion, not the entire boot image/disk.
+        $bootSize = $bootStream->bootLoadSize();
 
         $this->option()->logger()->debug(
             sprintf(

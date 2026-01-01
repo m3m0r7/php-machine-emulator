@@ -58,7 +58,8 @@ class Loop implements InstructionInterface
         // Optimization: Detect and bulk execute simple byte copy loops
         // Pattern: MOV AL, [source] / CALL output_routine / LOOP
         // Only optimize when source and destination do NOT overlap.
-        $patternEnabled = $runtime->logicBoard()->debug()->patterns()->enableLzmaPattern;
+        $patternConfig = $runtime->logicBoard()->debug()->patterns();
+        $patternEnabled = $patternConfig->enableLzmaPattern && $patternConfig->enableLzmaLoopOptimization;
         if ($patternEnabled && $counter > 7 && $operand >= -15 && $operand <= -8) {
             $result = $this->tryBulkByteCopyLoop($runtime, $loopTarget, $pos, $counter, $size);
             if ($result !== null) {

@@ -1,6 +1,6 @@
 use std::cmp;
 
-use super::MemoryStream;
+use super::super::MemoryStream;
 
 impl MemoryStream {
     /// Copy data from source to destination within the same memory.

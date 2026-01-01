@@ -34,16 +34,13 @@ class Iret implements InstructionInterface
         };
 
         // IA-32e 64-bit mode: IRETQ uses 64-bit stack slots.
-        // It always pops RIP, CS, RFLAGS. RSP/SS are popped only when returning
-        // to an outer privilege level (e.g. kernel -> user).
+        // This emulator always restores RIP, CS, RFLAGS, RSP, SS from the frame.
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             $rip = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
             $csQ = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
             $flags = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
 
             $targetCs = $csQ & 0xFFFF;
-            $currentCpl = $cpu->cpl();
-            $newCpl = $targetCs & 0x3;
 
             $descriptor = null;
             $nextCpl = null;
@@ -52,17 +49,14 @@ class Iret implements InstructionInterface
                 $nextCpl = $this->computeCplForTransfer($runtime, $targetCs, $descriptor);
             }
 
-            $returningToOuter = $cpu->isProtectedMode() && ($newCpl > $currentCpl);
-            if ($returningToOuter) {
-                $newRsp = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
-                $newSsQ = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
-                $ma->write16Bit(RegisterType::SS, $newSsQ & 0xFFFF);
-                $ma->writeBySize(RegisterType::ESP, $newRsp, 64);
+            $newRsp = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
+            $newSsQ = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
+            $ma->write16Bit(RegisterType::SS, $newSsQ & 0xFFFF);
+            $ma->writeBySize(RegisterType::ESP, $newRsp, 64);
 
-                $ssDesc = $this->readSegmentDescriptor($runtime, $newSsQ & 0xFFFF);
-                if ($ssDesc !== null && ($ssDesc['present'] ?? false)) {
-                    $runtime->context()->cpu()->cacheSegmentDescriptor(RegisterType::SS, $ssDesc);
-                }
+            $ssDesc = $this->readSegmentDescriptor($runtime, $newSsQ & 0xFFFF);
+            if ($ssDesc !== null && ($ssDesc['present'] ?? false)) {
+                $runtime->context()->cpu()->cacheSegmentDescriptor(RegisterType::SS, $ssDesc);
             }
 
             $this->writeCodeSegment($runtime, $targetCs, $nextCpl, $descriptor);
@@ -108,7 +102,7 @@ class Iret implements InstructionInterface
             $ipCandidate = $this->readMemory16($runtime, $ipLinear);
             $csCandidate = $this->readMemory16($runtime, $csLinear);
             $flagsCandidate = $this->readMemory16($runtime, $flagsLinear);
-            if (($flagsCandidate & 0x2) === 0) {
+            if (($flagsCandidate & 0x0FFF) === 0 && $cpu->peekInterruptFrame() !== null) {
                 // If only IP is present (near-call pattern), treat as RET.
                 if ($csCandidate === 0 && $ipCandidate !== 0) {
                     $newSp = ($sp + $bytesIp) & 0xFFFF;

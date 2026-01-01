@@ -39,6 +39,7 @@ interface RuntimeCPUContextInterface
     public function isLongMode(): bool;
     public function setCompatibilityMode(bool $enabled): void;
     public function isCompatibilityMode(): bool;
+    public function syncCompatibilityModeWithCs(): void;
 
     // ========================================
     // REX prefix support (64-bit mode)
@@ -69,6 +70,12 @@ interface RuntimeCPUContextInterface
     // ========================================
     public function setSegmentOverride(?\PHPMachineEmulator\Instruction\RegisterType $segment): void;
     public function segmentOverride(): ?\PHPMachineEmulator\Instruction\RegisterType;
+
+    // ========================================
+    // Segment descriptor cache (Unreal Mode)
+    // ========================================
+    public function cacheSegmentDescriptor(\PHPMachineEmulator\Instruction\RegisterType $segment, array $descriptor): void;
+    public function getCachedSegmentDescriptor(\PHPMachineEmulator\Instruction\RegisterType $segment): ?array;
 
     // ========================================
     // Address line and paging

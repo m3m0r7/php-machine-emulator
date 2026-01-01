@@ -1,5 +1,5 @@
 use crate::memory_stream::MemoryStream;
-use super::{MemoryAccessor, MAX_REGISTER_ADDRESS};
+use super::super::{MemoryAccessor, MAX_REGISTER_ADDRESS};
 
 impl MemoryAccessor {
     /// Create a new MemoryAccessor.

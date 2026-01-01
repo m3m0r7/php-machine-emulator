@@ -2,27 +2,23 @@
 
 declare(strict_types=1);
 
-namespace PHPMachineEmulator;
+namespace PHPMachineEmulator\BIOS;
 
+use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\Exception\BIOSInvalidException;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Instruction\RegisterType;
+use PHPMachineEmulator\LogicBoard\Media\MediaContext;
+use PHPMachineEmulator\LogicBoard\Media\MediaContextInterface;
+use PHPMachineEmulator\OptionInterface;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
-use PHPMachineEmulator\Stream\ISO\ElTorito;
-use PHPMachineEmulator\Stream\ISO\ISOBootImageStream;
 
 class BIOS
 {
     public const NAME = 'PHPMachineEmulator';
     public const BIOS_ENTRYPOINT = 0x7C00;
-    public const READ_SIZE_PER_SECTOR = 512;
-    private const DISKETTE_PARAM_SEG = 0xF000;
-    private const DISKETTE_PARAM_OFF = 0xFE00;
-    private const FIXED_DISK_PARAM_SEG = 0x9FC0;
-    private const FIXED_DISK_PARAM_OFF = 0x0000;
-    private const FIXED_DISK_PARAM_SIZE = 0x40;
 
     // BDA (BIOS Data Area) address range
     public const BDA_START = 0x400;
@@ -31,32 +27,31 @@ class BIOS
     // Conventional memory size in KB (640KB minus 1KB EBDA at 0x9FC00)
     public const CONVENTIONAL_MEMORY_KB = 639;
 
-    private ?RuntimeInterface $runtime = null;
-
-    public function __construct(protected MachineInterface $machine)
-    {
-        if ($this->machine->logicBoard()->media()->primary()->bootType() === BootType::BOOT_SIGNATURE) {
+    public function __construct(
+        protected RuntimeInterface $runtime,
+        protected MediaContextInterface $mediaContext,
+        protected OptionInterface $option,
+    ) {
+        if ($this->mediaContext->primary()->bootType() === BootType::BOOT_SIGNATURE) {
             $this->verifyBIOSSignature();
         }
-
 
         $this->initialize();
     }
 
-    public function machine(): MachineInterface
-    {
-        return $this->machine;
-    }
-
     public function runtime(): RuntimeInterface
     {
-        return $this->runtime ??= $this->machine->runtime(self::BIOS_ENTRYPOINT);
+        return $this->runtime;
     }
 
-    public static function start(MachineInterface $machine): void
+    public static function start(
+        RuntimeInterface $runtime,
+        MediaContextInterface $mediaContext,
+        OptionInterface $option,
+    ): void
     {
         try {
-            (new static($machine))
+            (new static($runtime, $mediaContext, $option))
                 ->runtime()
                 ->start();
         } catch (HaltException) {
@@ -102,7 +97,7 @@ class BIOS
         // BIOS typically enables interrupts before handing control to the boot loader.
         $this->runtime()->memoryAccessor()->setInterruptFlag(true);
 
-        $this->machine->option()->logger()->info('BIOS initialization completed');
+        $this->option->logger()->info('BIOS initialization completed');
     }
 
     /**
@@ -115,7 +110,7 @@ class BIOS
 
         foreach ([...$runtime->register()::map(), $runtime->video()->videoTypeFlagAddress()] as $address) {
             $mem->allocate($address);
-            $this->machine->option()->logger()->debug(sprintf('BIOS: Register allocated 0x%03s', decbin($address)));
+            $this->option->logger()->debug(sprintf('BIOS: Register allocated 0x%03s', decbin($address)));
         }
     }
 
@@ -127,7 +122,7 @@ class BIOS
         $runtime = $this->runtime();
         foreach ($runtime->services() as $service) {
             $service->initialize($runtime);
-            $this->machine->option()->logger()->debug(sprintf('BIOS: Initialize %s service', get_class($service)));
+            $this->option->logger()->debug(sprintf('BIOS: Initialize %s service', get_class($service)));
         }
     }
 
@@ -136,9 +131,9 @@ class BIOS
      */
     protected function initializeBootSegment(): void
     {
-        $loadSegment = $this->machine->logicBoard()->media()->primary()->stream()->loadSegment();
+        $loadSegment = $this->mediaContext->primary()->stream()->loadSegment();
         $this->runtime()->memoryAccessor()->write16Bit(RegisterType::CS, $loadSegment);
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             sprintf('BIOS: Initialized CS to 0x%04X for bootable stream', $loadSegment)
         );
     }
@@ -186,7 +181,7 @@ class BIOS
         // Report minimal hardware during early boot.
         // DOS uses these counts to probe INT 14h/17h; we currently don't emulate UART/LPT,
         // so advertise none to avoid calling into uninitialized device vectors.
-        [$floppyCount, $hardDriveCount] = $this->bootDriveCounts();
+        [$floppyCount, $hardDriveCount] = $this->mediaContext->bootDriveCounts();
 
         $equipmentFlags = 0x0020; // 80x25 color, no serial/LPT
         if ($floppyCount > 0) {
@@ -476,37 +471,10 @@ class BIOS
             $mem->writeBySize($addr, 0x00, 8);
         }
 
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             sprintf('BIOS: Initialized BDA (0x%03X-0x%03X): cols=%d, rows=%d, memory=%dKB',
                 self::BDA_START, self::BDA_END, $cols, $rows, self::CONVENTIONAL_MEMORY_KB)
         );
-    }
-
-    /**
-     * @return array{int,int} [floppyCount, hardDriveCount]
-     */
-    private function bootDriveCounts(): array
-    {
-        $media = $this->machine->logicBoard()->media()->primary();
-        $stream = $media->stream();
-
-        if ($stream instanceof ISOBootImageStream) {
-            if ($stream->isNoEmulation()) {
-                return [0, 0];
-            }
-
-            $mediaType = $stream->bootImage()->mediaType();
-            return match ($mediaType) {
-                ElTorito::MEDIA_HARD_DISK => [0, 1],
-                ElTorito::MEDIA_FLOPPY_1_2M,
-                ElTorito::MEDIA_FLOPPY_1_44M,
-                ElTorito::MEDIA_FLOPPY_2_88M => [2, 0],
-                default => [0, 0],
-            };
-        }
-
-        // Boot signature media is treated as a hard disk.
-        return [0, 1];
     }
 
     /**
@@ -534,12 +502,12 @@ class BIOS
 
         // Diskette Parameter Table (INT 1Eh) points to BIOS ROM table.
         $dptVector = 0x1E * 4;
-        $mem->writePhysical16($dptVector, self::DISKETTE_PARAM_OFF);
-        $mem->writePhysical16($dptVector + 2, self::DISKETTE_PARAM_SEG);
+        $mem->writePhysical16($dptVector, MediaContext::DISKETTE_PARAM_OFF);
+        $mem->writePhysical16($dptVector + 2, MediaContext::DISKETTE_PARAM_SEG);
 
         $this->initializeFixedDiskParameterTable();
 
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             sprintf('BIOS: Initialized IVT (0x000-0x3FF) with %d vectors pointing to F000:%04X', 256, $defaultOffset)
         );
     }
@@ -550,15 +518,15 @@ class BIOS
      */
     private function initializeFixedDiskParameterTable(): void
     {
-        [, $hardDriveCount] = $this->bootDriveCounts();
+        [, $hardDriveCount] = $this->mediaContext->bootDriveCounts();
         if ($hardDriveCount <= 0) {
             return;
         }
 
         $mem = $this->runtime()->memoryAccessor();
-        $addr = (self::FIXED_DISK_PARAM_SEG << 4) + self::FIXED_DISK_PARAM_OFF;
+        $addr = (MediaContext::FIXED_DISK_PARAM_SEG << 4) + MediaContext::FIXED_DISK_PARAM_OFF;
 
-        for ($i = 0; $i < self::FIXED_DISK_PARAM_SIZE; $i++) {
+        for ($i = 0; $i < MediaContext::FIXED_DISK_PARAM_SIZE; $i++) {
             $mem->writeBySize($addr + $i, 0x00, 8);
         }
 
@@ -567,8 +535,8 @@ class BIOS
         $mem->writeBySize($addr + 0x15, 16, 16); // heads (word)
         $mem->writeBySize($addr + 0x22, 0x00, 8); // drive type marker (force template path)
 
-        $offset = self::FIXED_DISK_PARAM_OFF;
-        $segment = self::FIXED_DISK_PARAM_SEG;
+        $offset = MediaContext::FIXED_DISK_PARAM_OFF;
+        $segment = MediaContext::FIXED_DISK_PARAM_SEG;
 
         $vec41 = 0x41 * 4;
         $mem->writePhysical16($vec41, $offset);
@@ -600,7 +568,7 @@ class BIOS
         // Mask all IRQs on slave PIC
         $picState->maskSlave(0xFF);
 
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             'BIOS: Initialized PIC - IRQ0 (timer) enabled, others masked'
         );
     }
@@ -687,7 +655,7 @@ class BIOS
         // ========================================
         $mem->writeEfer(0);
 
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             sprintf('BIOS: Initialized CPU state - Real Mode 16-bit, CR0=0x%08X, A20=enabled, IF=0', $cr0)
         );
     }
@@ -732,29 +700,9 @@ class BIOS
         $mem->writeBySize(RegisterType::EBP, 0x00000000, 32);
 
         // Boot drive number (DL).
-        // For El Torito no-emulation CD boots, BIOS typically passes DL=0xE0 (first CD-ROM).
-        $bootStream = $this->machine->logicBoard()->media()->primary()->stream();
-        if ($bootStream instanceof ISOBootImageStream) {
-            if ($bootStream->isNoEmulation()) {
-                $mem->writeToLowBit(RegisterType::EDX, 0xE0);
-            } else {
-                $mediaType = $bootStream->bootImage()->mediaType();
-                if (in_array($mediaType, [
-                    ElTorito::MEDIA_FLOPPY_1_2M,
-                    ElTorito::MEDIA_FLOPPY_1_44M,
-                    ElTorito::MEDIA_FLOPPY_2_88M,
-                ], true)) {
-                    $mem->writeToLowBit(RegisterType::EDX, 0x00);
-                } elseif ($mediaType === ElTorito::MEDIA_HARD_DISK) {
-                    $mem->writeToLowBit(RegisterType::EDX, 0x80);
-                }
-            }
-        } else {
-            // Boot signature media is treated as a hard disk.
-            $mem->writeToLowBit(RegisterType::EDX, 0x80);
-        }
+        $mem->writeToLowBit(RegisterType::EDX, $this->mediaContext->bootDriveNumber());
 
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             'BIOS: Initialized segment registers DS=ES=SS=FS=GS=0, SP=0xFFFE'
         );
     }
@@ -879,7 +827,7 @@ class BIOS
         }
 
         // Diskette Parameter Table (INT 1Eh) for 1.44MB floppies at F000:FE00.
-        $dptAddress = (self::DISKETTE_PARAM_SEG << 4) + self::DISKETTE_PARAM_OFF;  // 0xFFE00
+        $dptAddress = (MediaContext::DISKETTE_PARAM_SEG << 4) + MediaContext::DISKETTE_PARAM_OFF;  // 0xFFE00
         $disketteParams = [
             0xAF, // Step rate, head unload
             0x02, // Head load time
@@ -908,7 +856,7 @@ class BIOS
         // 0xFC = AT compatible
         $mem->writeBySize(0xFFFFE, 0xFC, 8);
 
-        $this->machine->option()->logger()->debug(
+        $this->option->logger()->debug(
             sprintf('BIOS: Initialized ROM with trampolines at 0x%05X, INT13h at F000:FF03, ID at 0x%05X',
                 $trampolineBase, $biosIdAddress)
         );
@@ -916,7 +864,7 @@ class BIOS
 
     protected function verifyBIOSSignature(): void
     {
-        $bootStream = $this->machine->logicBoard()->media()->primary()->stream();
+        $bootStream = $this->mediaContext->primary()->stream();
         $proxy = $bootStream->proxy();
         try {
             $proxy->setOffset(510);

@@ -18,8 +18,7 @@ use PHPMachineEmulator\Instruction\Stream\SIBInterface;
  */
 class RustMemoryStream implements MemoryStreamInterface
 {
-    private RustFfiContext $ffiContext;
-    private FFI $ffi;
+    private RustFFIContext $ffiContext;
     /** @var array<int, SIBInterface> */
     private array $sibCache = [];
     /** @var array<int, ModRegRMInterface> */
@@ -34,15 +33,14 @@ class RustMemoryStream implements MemoryStreamInterface
      * @param int $swapSize Swap size for overflow (default 256MB)
      */
     public function __construct(
-        private int $size = 0x100000,
-        private int $physicalMaxMemorySize = 0x1000000,
-        private int $swapSize = 0x10000000,
-        ?RustFfiContext $ffiContext = null,
+        private int     $size = 0x100000,
+        private int     $physicalMaxMemorySize = 0x1000000,
+        private int     $swapSize = 0x10000000,
+        ?RustFFIContext $ffiContext = null,
     ) {
-        $this->ffiContext = $ffiContext ?? new RustFfiContext();
-        $this->ffi = $this->ffiContext->ffi();
+        $this->ffiContext = $ffiContext ?? new RustFFIContext();
 
-        $this->handle = $this->ffi->memory_stream_new(
+        $this->handle = $this->ffiContext->memory_stream_new(
             $size,
             $physicalMaxMemorySize,
             $swapSize
@@ -56,11 +54,11 @@ class RustMemoryStream implements MemoryStreamInterface
     public function __destruct()
     {
         if (isset($this->handle)) {
-            $this->ffi->memory_stream_free($this->handle);
+            $this->ffiContext->memory_stream_free($this->handle);
         }
     }
 
-    public function ffiContext(): RustFfiContext
+    public function ffiContext(): RustFFIContext
     {
         return $this->ffiContext;
     }
@@ -79,27 +77,27 @@ class RustMemoryStream implements MemoryStreamInterface
 
     public function ensureCapacity(int $requiredOffset): bool
     {
-        return $this->ffi->memory_stream_ensure_capacity($this->handle, $requiredOffset);
+        return $this->ffiContext->memory_stream_ensure_capacity($this->handle, $requiredOffset);
     }
 
     public function size(): int
     {
-        return $this->ffi->memory_stream_size($this->handle);
+        return $this->ffiContext->memory_stream_size($this->handle);
     }
 
     public function logicalMaxMemorySize(): int
     {
-        return $this->ffi->memory_stream_logical_max_memory_size($this->handle);
+        return $this->ffiContext->memory_stream_logical_max_memory_size($this->handle);
     }
 
     public function physicalMaxMemorySize(): int
     {
-        return $this->ffi->memory_stream_physical_max_memory_size($this->handle);
+        return $this->ffiContext->memory_stream_physical_max_memory_size($this->handle);
     }
 
     public function swapSize(): int
     {
-        return $this->ffi->memory_stream_swap_size($this->handle);
+        return $this->ffiContext->memory_stream_swap_size($this->handle);
     }
 
     public function byteAsSIB(): SIBInterface
@@ -133,12 +131,12 @@ class RustMemoryStream implements MemoryStreamInterface
 
     public function offset(): int
     {
-        return $this->ffi->memory_stream_offset($this->handle);
+        return $this->ffiContext->memory_stream_offset($this->handle);
     }
 
     public function setOffset(int $newOffset): self
     {
-        if (!$this->ffi->memory_stream_set_offset($this->handle, $newOffset)) {
+        if (!$this->ffiContext->memory_stream_set_offset($this->handle, $newOffset)) {
             throw new \RuntimeException(sprintf(
                 'Cannot set offset beyond bounds: offset=0x%X',
                 $newOffset
@@ -149,27 +147,27 @@ class RustMemoryStream implements MemoryStreamInterface
 
     public function isEOF(): bool
     {
-        return $this->ffi->memory_stream_is_eof($this->handle);
+        return $this->ffiContext->memory_stream_is_eof($this->handle);
     }
 
     public function char(): string
     {
-        return chr($this->ffi->memory_stream_byte($this->handle));
+        return chr($this->ffiContext->memory_stream_byte($this->handle));
     }
 
     public function byte(): int
     {
-        return $this->ffi->memory_stream_byte($this->handle);
+        return $this->ffiContext->memory_stream_byte($this->handle);
     }
 
     public function signedByte(): int
     {
-        return $this->ffi->memory_stream_signed_byte($this->handle);
+        return $this->ffiContext->memory_stream_signed_byte($this->handle);
     }
 
     public function short(): int
     {
-        return $this->ffi->memory_stream_short($this->handle);
+        return $this->ffiContext->memory_stream_short($this->handle);
     }
 
     public function signedShort(): int
@@ -180,7 +178,7 @@ class RustMemoryStream implements MemoryStreamInterface
 
     public function dword(): int
     {
-        return $this->ffi->memory_stream_dword($this->handle);
+        return $this->ffiContext->memory_stream_dword($this->handle);
     }
 
     public function signedDword(): int
@@ -191,7 +189,7 @@ class RustMemoryStream implements MemoryStreamInterface
 
     public function qword(): int
     {
-        return $this->ffi->memory_stream_qword($this->handle);
+        return $this->ffiContext->memory_stream_qword($this->handle);
     }
 
     public function read(int $length): string
@@ -200,8 +198,8 @@ class RustMemoryStream implements MemoryStreamInterface
             return '';
         }
 
-        $buffer = $this->ffi->new("uint8_t[$length]");
-        $this->ffi->memory_stream_read($this->handle, $buffer, $length);
+        $buffer = $this->ffiContext->new("uint8_t[$length]");
+        $this->ffiContext->memory_stream_read($this->handle, $buffer, $length);
 
         $result = '';
         for ($i = 0; $i < $length; $i++) {
@@ -222,34 +220,34 @@ class RustMemoryStream implements MemoryStreamInterface
             return $this;
         }
 
-        $buffer = $this->ffi->new("uint8_t[$len]");
+        $buffer = $this->ffiContext->new("uint8_t[$len]");
         for ($i = 0; $i < $len; $i++) {
             $buffer[$i] = ord($value[$i]);
         }
 
-        $this->ffi->memory_stream_write($this->handle, $buffer, $len);
+        $this->ffiContext->memory_stream_write($this->handle, $buffer, $len);
 
         return $this;
     }
 
     public function writeByte(int $value): void
     {
-        $this->ffi->memory_stream_write_byte($this->handle, $value & 0xFF);
+        $this->ffiContext->memory_stream_write_byte($this->handle, $value & 0xFF);
     }
 
     public function writeShort(int $value): void
     {
-        $this->ffi->memory_stream_write_short($this->handle, $value & 0xFFFF);
+        $this->ffiContext->memory_stream_write_short($this->handle, $value & 0xFFFF);
     }
 
     public function writeDword(int $value): void
     {
-        $this->ffi->memory_stream_write_dword($this->handle, $value & 0xFFFFFFFF);
+        $this->ffiContext->memory_stream_write_dword($this->handle, $value & 0xFFFFFFFF);
     }
 
     public function writeQword(int $value): void
     {
-        $this->ffi->memory_stream_write_qword($this->handle, $value);
+        $this->ffiContext->memory_stream_write_qword($this->handle, $value);
     }
 
     // ========================================
@@ -261,7 +259,7 @@ class RustMemoryStream implements MemoryStreamInterface
      */
     public function readByteAt(int $address): int
     {
-        return $this->ffi->memory_stream_read_byte_at($this->handle, $address);
+        return $this->ffiContext->memory_stream_read_byte_at($this->handle, $address);
     }
 
     /**
@@ -269,7 +267,7 @@ class RustMemoryStream implements MemoryStreamInterface
      */
     public function writeByteAt(int $address, int $value): void
     {
-        $this->ffi->memory_stream_write_byte_at($this->handle, $address, $value & 0xFF);
+        $this->ffiContext->memory_stream_write_byte_at($this->handle, $address, $value & 0xFF);
     }
 
     /**
@@ -277,7 +275,7 @@ class RustMemoryStream implements MemoryStreamInterface
      */
     public function readShortAt(int $address): int
     {
-        return $this->ffi->memory_stream_read_short_at($this->handle, $address);
+        return $this->ffiContext->memory_stream_read_short_at($this->handle, $address);
     }
 
     /**
@@ -285,7 +283,7 @@ class RustMemoryStream implements MemoryStreamInterface
      */
     public function writeShortAt(int $address, int $value): void
     {
-        $this->ffi->memory_stream_write_short_at($this->handle, $address, $value & 0xFFFF);
+        $this->ffiContext->memory_stream_write_short_at($this->handle, $address, $value & 0xFFFF);
     }
 
     /**
@@ -293,7 +291,7 @@ class RustMemoryStream implements MemoryStreamInterface
      */
     public function readDwordAt(int $address): int
     {
-        return $this->ffi->memory_stream_read_dword_at($this->handle, $address);
+        return $this->ffiContext->memory_stream_read_dword_at($this->handle, $address);
     }
 
     /**
@@ -301,7 +299,7 @@ class RustMemoryStream implements MemoryStreamInterface
      */
     public function writeDwordAt(int $address, int $value): void
     {
-        $this->ffi->memory_stream_write_dword_at($this->handle, $address, $value & 0xFFFFFFFF);
+        $this->ffiContext->memory_stream_write_dword_at($this->handle, $address, $value & 0xFFFFFFFF);
     }
 
     /**
@@ -309,7 +307,7 @@ class RustMemoryStream implements MemoryStreamInterface
      */
     public function readQwordAt(int $address): int
     {
-        return $this->ffi->memory_stream_read_qword_at($this->handle, $address);
+        return $this->ffiContext->memory_stream_read_qword_at($this->handle, $address);
     }
 
     /**
@@ -317,7 +315,7 @@ class RustMemoryStream implements MemoryStreamInterface
      */
     public function writeQwordAt(int $address, int $value): void
     {
-        $this->ffi->memory_stream_write_qword_at($this->handle, $address, $value);
+        $this->ffiContext->memory_stream_write_qword_at($this->handle, $address, $value);
     }
 
     // ========================================
@@ -328,7 +326,7 @@ class RustMemoryStream implements MemoryStreamInterface
     {
         // If source is also a RustMemoryStream, use internal copy
         if ($source === $this) {
-            $this->ffi->memory_stream_copy_internal($this->handle, $sourceOffset, $destOffset, $size);
+            $this->ffiContext->memory_stream_copy_internal($this->handle, $sourceOffset, $destOffset, $size);
             return;
         }
 
@@ -340,11 +338,11 @@ class RustMemoryStream implements MemoryStreamInterface
 
         $len = strlen($data);
         if ($len > 0) {
-            $buffer = $this->ffi->new("uint8_t[$len]");
+            $buffer = $this->ffiContext->new("uint8_t[$len]");
             for ($i = 0; $i < $len; $i++) {
                 $buffer[$i] = ord($data[$i]);
             }
-            $this->ffi->memory_stream_copy_from_external($this->handle, $buffer, $len, $destOffset);
+            $this->ffiContext->memory_stream_copy_from_external($this->handle, $buffer, $len, $destOffset);
         }
     }
 
@@ -360,9 +358,9 @@ class RustMemoryStream implements MemoryStreamInterface
             return;
         }
 
-        $buffer = $this->ffi->new("uint8_t[$len]");
+        $buffer = $this->ffiContext->new("uint8_t[$len]");
         FFI::memcpy($buffer, $data, $len);
-        $this->ffi->memory_stream_copy_from_external($this->handle, $buffer, $len, $destOffset);
+        $this->ffiContext->memory_stream_copy_from_external($this->handle, $buffer, $len, $destOffset);
     }
 
     // ========================================

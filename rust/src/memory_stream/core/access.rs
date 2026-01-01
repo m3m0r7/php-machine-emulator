@@ -1,6 +1,6 @@
 use std::cmp;
 
-use super::{MemoryStream, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
+use super::super::{MemoryStream, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 impl MemoryStream {
     /// Read a single character at current offset.
@@ -258,7 +258,7 @@ impl MemoryStream {
         self.write_dword_at(address + 4, ((value >> 32) & 0xFFFFFFFF) as u32);
     }
 
-    fn read_slice_at(&self, address: usize, out: &mut [u8]) {
+    pub(super) fn read_slice_at(&self, address: usize, out: &mut [u8]) {
         if out.is_empty() {
             return;
         }
@@ -286,7 +286,7 @@ impl MemoryStream {
         }
     }
 
-    fn write_slice_at(&mut self, address: usize, data: &[u8]) {
+    pub(super) fn write_slice_at(&mut self, address: usize, data: &[u8]) {
         if data.is_empty() {
             return;
         }

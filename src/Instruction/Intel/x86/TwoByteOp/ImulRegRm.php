@@ -6,7 +6,6 @@ namespace PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
 
-use Brick\Math\BigInteger;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\Register;
@@ -60,16 +59,16 @@ class ImulRegRm implements InstructionInterface
         $dst = $this->readRegisterBySize($runtime, $destReg, $opSize);
 
         if ($opSize === 64) {
-            $sSrc = $src instanceof UInt64 ? BigInteger::of($src->toInt()) : BigInteger::of($src);
-            $sDst = BigInteger::of($dst);
-            $product = $sSrc->multipliedBy($sDst);
+            $srcU = $src instanceof UInt64 ? $src : UInt64::of($src);
+            $dstU = UInt64::of($dst);
+            [$lowU, $highU] = $dstU->mulFullSigned($srcU);
 
-            $resultU = UInt64::of($product);
-            $this->writeRegisterBySize($runtime, $destReg, $resultU->toInt(), 64);
+            $this->writeRegisterBySize($runtime, $destReg, $lowU->toInt(), 64);
 
-            $min = BigInteger::of('-9223372036854775808');
-            $max = BigInteger::of('9223372036854775807');
-            $overflow = $product->isLessThan($min) || $product->isGreaterThan($max);
+            $expectedHigh = $lowU->isNegativeSigned()
+                ? UInt64::of('18446744073709551615')
+                : UInt64::zero();
+            $overflow = !$highU->eq($expectedHigh);
             $runtime->memoryAccessor()->setCarryFlag($overflow)->setOverflowFlag($overflow);
             return ExecutionStatus::SUCCESS;
         }

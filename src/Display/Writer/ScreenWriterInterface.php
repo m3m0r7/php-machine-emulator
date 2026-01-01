@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Display\Writer;
 
 use PHPMachineEmulator\Display\Pixel\ColorInterface;
+use PHPMachineEmulator\Video\VideoTypeInfo;
 
 interface ScreenWriterInterface
 {
+    public function start(): void;
+    public function stop(): void;
+    public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void;
     public function write(string $value): void;
     public function newline(): void;
     public function dot(int $x, int $y, ColorInterface $color): void;

@@ -201,7 +201,8 @@ final class DebugConfigLoader
     {
         return new PatternDebugConfig(
             traceHotPatterns: $this->parser->parseBool($data['trace_hot_patterns'] ?? false),
-            enableLzmaPattern: $this->parser->parseBool($data['enable_lzma_pattern'] ?? false),
+            enableLzmaPattern: $this->parser->parseBool($data['enable_lzma_pattern'] ?? true),
+            enableLzmaLoopOptimization: $this->parser->parseBool($data['enable_lzma_loop_optimization'] ?? false),
         );
     }
 

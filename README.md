@@ -128,7 +128,7 @@ $ nasm -f bin HelloWorld.asm -o HelloWorld.bin
 require __DIR__ . '/vendor/autoload.php';
 
 use PHPMachineEmulator\ArchitectureType;
-use PHPMachineEmulator\BIOS;
+use PHPMachineEmulator\BIOS\BIOS;
 use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\Display\Writer\WindowScreenWriterFactory;
 use PHPMachineEmulator\LogicBoard\CPU\CPUContext;
@@ -160,7 +160,11 @@ $logicBoard = new LogicBoard(
 $machine = new Machine($logicBoard);
 
 try {
-    BIOS::start($machine);
+    BIOS::start(
+        $machine->runtime(BIOS::BIOS_ENTRYPOINT),
+        $machine->logicBoard()->media(),
+        $machine->option(),
+    );
 } catch (\PHPMachineEmulator\Exception\ExitException $e) {
     exit($e->getCode());
 }
@@ -259,7 +263,7 @@ $ nasm -f bin Triangle.asm -o Triangle.bin
 require __DIR__ . '/vendor/autoload.php';
 
 use PHPMachineEmulator\ArchitectureType;
-use PHPMachineEmulator\BIOS;
+use PHPMachineEmulator\BIOS\BIOS;
 use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\Display\Writer\WindowScreenWriterFactory;
 use PHPMachineEmulator\LogicBoard\CPU\CPUContext;
@@ -291,7 +295,11 @@ $logicBoard = new LogicBoard(
 $machine = new Machine($logicBoard);
 
 try {
-    BIOS::start($machine);
+    BIOS::start(
+        $machine->runtime(BIOS::BIOS_ENTRYPOINT),
+        $machine->logicBoard()->media(),
+        $machine->option(),
+    );
 } catch (\PHPMachineEmulator\Exception\ExitException $e) {
     exit($e->getCode());
 }

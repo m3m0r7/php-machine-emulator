@@ -680,9 +680,7 @@ class Int_ implements InstructionInterface
             $ma->write16Bit(RegisterType::SS, $newCpl & 0x3);
         }
 
-        // Push interrupt frame.
-        // In IA-32e mode, SS/RSP are pushed only when a stack switch occurs
-        // (privilege change or IST). Otherwise the frame is RIP/CS/RFLAGS only.
+        // Push interrupt frame (always includes SS/RSP for consistent IRETQ handling).
         $flags =
             ($ma->shouldCarryFlag() ? 1 : 0) |
             0x2 | // reserved bit always set
@@ -694,10 +692,8 @@ class Int_ implements InstructionInterface
             ($ma->shouldDirectionFlag() ? (1 << 10) : 0) |
             ($ma->shouldOverflowFlag() ? (1 << 11) : 0);
 
-        if ($newStack) {
-            $ma->push(RegisterType::ESP, $oldSs, 64);
-            $ma->push(RegisterType::ESP, $oldRsp, 64);
-        }
+        $ma->push(RegisterType::ESP, $oldSs, 64);
+        $ma->push(RegisterType::ESP, $oldRsp, 64);
         $ma->push(RegisterType::ESP, $flags, 64);
         $ma->push(RegisterType::ESP, $oldCs, 64);
         $ma->push(RegisterType::ESP, $returnRip, 64);

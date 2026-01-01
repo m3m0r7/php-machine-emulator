@@ -23,11 +23,11 @@ use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
-use PHPMachineEmulator\Util\UInt64;
 
 class Group5 implements InstructionInterface
 {
     use Instructable;
+    use GroupIncDec;
 
     public function opcodes(): array
     {
@@ -57,147 +57,13 @@ class Group5 implements InstructionInterface
     protected function inc(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $cpu = $runtime->context()->cpu();
-        $size = $cpu->operandSize();
-        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $ma = $runtime->memoryAccessor();
-
-        // Preserve CF - INC does not affect carry flag
-        $savedCf = $ma->shouldCarryFlag();
-
-        if ($size === 64) {
-            if ($isRegister) {
-                $regType = Register::findGprByCode(
-                    $modRegRM->registerOrMemoryAddress(),
-                    $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexB(),
-                );
-                $old = $ma->fetch($regType)->asBytesBySize(64);
-                $resultU = UInt64::of($old)->add(1);
-                $result = $resultU->toInt();
-                $ma->writeBySize($regType, $result, 64);
-            } else {
-                $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
-                $oldU = $this->readMemory64($runtime, $address);
-                $resultU = $oldU->add(1);
-                $result = $resultU->toInt();
-                $this->writeMemory64($runtime, $address, $resultU);
-                $old = $oldU->toInt();
-            }
-
-            $ma->updateFlags($result, 64);
-            $ma->setAuxiliaryCarryFlag((($old & 0x0F) + 1) > 0x0F);
-            $ma->setOverflowFlag($result === PHP_INT_MIN);
-            $ma->setCarryFlag($savedCf);
-            return ExecutionStatus::SUCCESS;
-        }
-
-        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-
-        if ($isRegister) {
-            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
-                $regType = Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
-                $value = $ma->fetch($regType)->asBytesBySize($size);
-                $result = ($value + 1) & $mask;
-                $ma->writeBySize($regType, $result, $size);
-            } else {
-                $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
-                $result = ($value + 1) & $mask;
-                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
-            }
-        } else {
-            // Calculate address once to avoid consuming displacement bytes twice
-            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
-            $value = $size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address);
-            $result = ($value + 1) & $mask;
-            if ($size === 32) {
-                $this->writeMemory32($runtime, $address, $result);
-            } else {
-                $this->writeMemory16($runtime, $address, $result);
-            }
-        }
-
-        $af = (($value & 0x0F) + 1) > 0x0F;
-        $ma->updateFlags($result, $size);
-        $ma->setAuxiliaryCarryFlag($af);
-        $ma->setCarryFlag($savedCf);
-
-        // OF for INC: set when result is SIGN_MASK (0x8000, 0x80000000)
-        $signMask = 1 << ($size - 1);
-        $ma->setOverflowFlag($result === $signMask);
-
-        return ExecutionStatus::SUCCESS;
+        return $this->incRmBySize($runtime, $memory, $modRegRM, $cpu->operandSize());
     }
 
     protected function dec(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus
     {
         $cpu = $runtime->context()->cpu();
-        $size = $cpu->operandSize();
-        $isRegister = ModType::from($modRegRM->mode()) === ModType::REGISTER_TO_REGISTER;
-        $ma = $runtime->memoryAccessor();
-
-        // Preserve CF - DEC does not affect carry flag
-        $savedCf = $ma->shouldCarryFlag();
-
-        if ($size === 64) {
-            if ($isRegister) {
-                $regType = Register::findGprByCode(
-                    $modRegRM->registerOrMemoryAddress(),
-                    $cpu->isLongMode() && !$cpu->isCompatibilityMode() && $cpu->rexB(),
-                );
-                $old = $ma->fetch($regType)->asBytesBySize(64);
-                $resultU = UInt64::of($old)->sub(1);
-                $result = $resultU->toInt();
-                $ma->writeBySize($regType, $result, 64);
-            } else {
-                $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
-                $oldU = $this->readMemory64($runtime, $address);
-                $resultU = $oldU->sub(1);
-                $result = $resultU->toInt();
-                $this->writeMemory64($runtime, $address, $resultU);
-                $old = $oldU->toInt();
-            }
-
-            $ma->updateFlags($result, 64);
-            $ma->setAuxiliaryCarryFlag(($old & 0x0F) === 0);
-            $ma->setOverflowFlag($result === PHP_INT_MAX);
-            $ma->setCarryFlag($savedCf);
-            return ExecutionStatus::SUCCESS;
-        }
-
-        $mask = $size === 32 ? 0xFFFFFFFF : 0xFFFF;
-
-        if ($isRegister) {
-            if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
-                $regType = Register::findGprByCode($modRegRM->registerOrMemoryAddress(), $cpu->rexB());
-                $value = $ma->fetch($regType)->asBytesBySize($size);
-                $result = ($value - 1) & $mask;
-                $ma->writeBySize($regType, $result, $size);
-            } else {
-                $value = $this->readRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $size);
-                $result = ($value - 1) & $mask;
-                $this->writeRegisterBySize($runtime, $modRegRM->registerOrMemoryAddress(), $result, $size);
-            }
-        } else {
-            // Calculate address once to avoid consuming displacement bytes twice
-            $address = $this->rmLinearAddress($runtime, $memory, $modRegRM);
-            $value = $size === 32 ? $this->readMemory32($runtime, $address) : $this->readMemory16($runtime, $address);
-            $result = ($value - 1) & $mask;
-            if ($size === 32) {
-                $this->writeMemory32($runtime, $address, $result);
-            } else {
-                $this->writeMemory16($runtime, $address, $result);
-            }
-        }
-
-        $af = (($value & 0x0F) === 0);
-        $ma->updateFlags($result, $size);
-        $ma->setAuxiliaryCarryFlag($af);
-        $ma->setCarryFlag($savedCf);
-
-        // OF for DEC: set when result is SIGN_MASK - 1 (0x7FFF, 0x7FFFFFFF)
-        $signMask = 1 << ($size - 1);
-        $ma->setOverflowFlag($result === ($signMask - 1));
-
-        return ExecutionStatus::SUCCESS;
+        return $this->decRmBySize($runtime, $memory, $modRegRM, $cpu->operandSize());
     }
 
     protected function callNearRm(RuntimeInterface $runtime, MemoryStreamInterface $memory, ModRegRMInterface $modRegRM): ExecutionStatus

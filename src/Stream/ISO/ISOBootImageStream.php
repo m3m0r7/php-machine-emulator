@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Stream\ISO;
 
 use PHPMachineEmulator\Exception\StreamReaderException;
+use PHPMachineEmulator\Stream\BootImageInterface;
 use PHPMachineEmulator\Stream\BootableStreamInterface;
 use PHPMachineEmulator\Stream\StreamReaderProxyInterface;
 
@@ -40,7 +41,7 @@ class ISOBootImageStream implements BootableStreamInterface
         $this->fileSize = strlen($this->bootData);
     }
 
-    public function bootImage(): BootImage
+    public function bootImage(): BootImageInterface
     {
         return $this->bootImage;
     }
@@ -171,6 +172,16 @@ class ISOBootImageStream implements BootableStreamInterface
         return $this->fileSize;
     }
 
+    public function bootLoadSize(): int
+    {
+        if ($this->isNoEmulation()) {
+            $catalogSectors = max(1, $this->bootImage->catalogSectorCount());
+            return min($this->fileSize, $catalogSectors * 512);
+        }
+
+        return min($this->fileSize, 512);
+    }
+
     /**
      * Check if this is a No Emulation boot image (CD-ROM boot).
      */
@@ -201,5 +212,10 @@ class ISOBootImageStream implements BootableStreamInterface
     public function iso(): ISO9660
     {
         return $this->isoStream->iso();
+    }
+
+    public function backingFileSize(): int
+    {
+        return $this->isoStream->iso()->fileSize();
     }
 }

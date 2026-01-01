@@ -37,23 +37,17 @@ class RuntimeScreenContext implements RuntimeScreenContextInterface
 
     public function start(): void
     {
-        if (method_exists($this->screenWriter, 'start')) {
-            $this->screenWriter->start();
-        }
+        $this->screenWriter->start();
     }
 
     public function stop(): void
     {
-        if (method_exists($this->screenWriter, 'stop')) {
-            $this->screenWriter->stop();
-        }
+        $this->screenWriter->stop();
     }
 
     public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void
     {
-        if (method_exists($this->screenWriter, 'updateVideoMode')) {
-            $this->screenWriter->updateVideoMode($videoTypeInfo);
-        }
+        $this->screenWriter->updateVideoMode($videoTypeInfo);
     }
 
     public function setCursorPosition(int $row, int $col): void
@@ -78,9 +72,7 @@ class RuntimeScreenContext implements RuntimeScreenContextInterface
 
     public function clear(): void
     {
-        if (method_exists($this->screenWriter, 'clear')) {
-            $this->screenWriter->clear();
-        }
+        $this->screenWriter->clear();
     }
 
     public function fillArea(int $row, int $col, int $width, int $height, int $attribute): void

@@ -6,6 +6,7 @@ namespace Tests\Utils;
 
 use PHPMachineEmulator\Display\Pixel\ColorInterface;
 use PHPMachineEmulator\Display\Writer\ScreenWriterInterface;
+use PHPMachineEmulator\Video\VideoTypeInfo;
 
 class TestScreenWriter implements ScreenWriterInterface
 {
@@ -13,6 +14,18 @@ class TestScreenWriter implements ScreenWriterInterface
     private int $cursorRow = 0;
     private int $cursorCol = 0;
     private int $currentAttribute = 0x07;
+
+    public function start(): void
+    {
+    }
+
+    public function stop(): void
+    {
+    }
+
+    public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void
+    {
+    }
 
     public function write(string $value): void
     {

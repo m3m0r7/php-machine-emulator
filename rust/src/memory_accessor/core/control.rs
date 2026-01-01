@@ -1,4 +1,4 @@
-use super::MemoryAccessor;
+use super::super::MemoryAccessor;
 
 impl MemoryAccessor {
     // Control register operations

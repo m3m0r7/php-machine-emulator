@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Case\BIOS;
 
-use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\IO\Buffer;
 use PHPMachineEmulator\MachineInterface;
@@ -30,7 +29,7 @@ class BIOSTest extends TestCase
     public function testBIOS(MachineInterface $machine, OptionInterface $option)
     {
         try {
-            BIOS::start($machine);
+            self::bootBios($machine);
         } catch (ExitException) {
         }
 

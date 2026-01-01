@@ -197,9 +197,6 @@ class Mov64 implements InstructionInterface
      */
     private function signExtendImm32to64(int $value): int
     {
-        if (($value & 0x80000000) !== 0) {
-            return $value | 0xFFFFFFFF00000000;
-        }
-        return $value & 0xFFFFFFFF;
+        return $this->signExtend($value, 32);
     }
 }

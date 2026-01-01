@@ -13,6 +13,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\IterationContext;
 use PHPMachineEmulator\Runtime\IterationContextInterface;
 use PHPMachineEmulator\Runtime\RuntimeCPUContextInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 class TestCPUContext implements RuntimeCPUContextInterface
 {
@@ -38,6 +39,8 @@ class TestCPUContext implements RuntimeCPUContextInterface
     private int $rex = 0; // lower 4 bits (WRXB)
     private bool $hasRex = false;
     private ?RegisterType $segmentOverride = null;
+    /** @var array<int, array{linear:int,size:int,bytes:array<int,int>}> */
+    private array $interruptFrames = [];
     private PicState $picState;
     private ApicState $apicState;
     private KeyboardController $keyboardController;
@@ -55,6 +58,8 @@ class TestCPUContext implements RuntimeCPUContextInterface
      * MXCSR (SSE control/status).
      */
     private int $mxcsr = 0x1F80;
+    /** @var array<int, UInt64> */
+    private array $msr = [];
 
     public function __construct()
     {
@@ -359,6 +364,28 @@ class TestCPUContext implements RuntimeCPUContextInterface
         return false;
     }
 
+    public function pushInterruptFrame(array $frame): void
+    {
+        $this->interruptFrames[] = $frame;
+    }
+
+    public function popInterruptFrame(): ?array
+    {
+        if ($this->interruptFrames === []) {
+            return null;
+        }
+        return array_pop($this->interruptFrames);
+    }
+
+    public function peekInterruptFrame(): ?array
+    {
+        $count = count($this->interruptFrames);
+        if ($count === 0) {
+            return null;
+        }
+        return $this->interruptFrames[$count - 1];
+    }
+
     public function picState(): PicState
     {
         return $this->picState;
@@ -438,6 +465,32 @@ class TestCPUContext implements RuntimeCPUContextInterface
     public function isCompatibilityMode(): bool
     {
         return $this->compatibilityMode;
+    }
+
+    public function syncCompatibilityModeWithCs(): void
+    {
+        if (!$this->longMode) {
+            return;
+        }
+
+        $cached = $this->getCachedSegmentDescriptor(RegisterType::CS);
+        if (!is_array($cached) || !array_key_exists('long', $cached)) {
+            return;
+        }
+
+        $shouldCompat = !($cached['long'] ?? false);
+        if ($shouldCompat === $this->compatibilityMode) {
+            return;
+        }
+
+        $this->compatibilityMode = $shouldCompat;
+        if ($shouldCompat) {
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 32;
+        } else {
+            $this->defaultOperandSize = 32;
+            $this->defaultAddressSize = 64;
+        }
     }
 
     public function setRex(int $rex): void
@@ -551,6 +604,16 @@ class TestCPUContext implements RuntimeCPUContextInterface
     public function setMxcsr(int $mxcsr): void
     {
         $this->mxcsr = $mxcsr & 0xFFFFFFFF;
+    }
+
+    public function readMsr(int $index): UInt64
+    {
+        return $this->msr[$index] ?? UInt64::zero();
+    }
+
+    public function writeMsr(int $index, UInt64|int $value): void
+    {
+        $this->msr[$index] = $value instanceof UInt64 ? $value : UInt64::of($value);
     }
 
     private function initXmm(): void

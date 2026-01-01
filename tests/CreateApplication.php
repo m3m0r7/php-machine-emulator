@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests;
 
 use PHPMachineEmulator\ArchitectureType;
+use PHPMachineEmulator\BIOS\BIOS;
 use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\Display\Writer\BufferScreenWriterFactory;
 use PHPMachineEmulator\IO\Buffer;
@@ -31,6 +32,15 @@ use Tests\Utils\EmulatedKeyboardStream;
 
 trait CreateApplication
 {
+    protected static function bootBios(MachineInterface $machine): void
+    {
+        BIOS::start(
+            $machine->runtime(BIOS::BIOS_ENTRYPOINT),
+            $machine->logicBoard()->media(),
+            $machine->option(),
+        );
+    }
+
     public static function machineInitialization(): array
     {
         return [

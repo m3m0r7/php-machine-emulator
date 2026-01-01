@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Case\Disk;
 
-use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\IO\Buffer;
@@ -31,7 +30,7 @@ class DiskTest extends TestCase
     public function testPrintHelloWorld(MachineInterface $machine, OptionInterface $option)
     {
         try {
-            BIOS::start($machine);
+            self::bootBios($machine);
         } catch (ExitException | HaltException) {
         }
 

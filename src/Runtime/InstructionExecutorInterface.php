@@ -42,4 +42,16 @@ interface InstructionExecutorInterface
      * Implementations may treat this as a no-op if they don't cache instruction decode/translation.
      */
     public function invalidateCachesIfExecutedPageOverlaps(int $start, int $length): void;
+
+    /**
+     * Get total executed instruction count (0 when not tracked).
+     */
+    public function instructionCount(): int;
+
+    /**
+     * Get IP sampling report (empty report when not tracked).
+     *
+     * @return array{every:int,instructions:int,samples:int,unique:int,top:array<int,array{int,int}>}
+     */
+    public function getIpSampleReport(int $top = 20): array;
 }

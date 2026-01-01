@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Case\RepPrefix;
 
-use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\MachineInterface;
@@ -43,7 +42,7 @@ class RepPrefixTest extends TestCase
     public function testRepPrefixOperations(MachineInterface $machine, OptionInterface $option): void
     {
         try {
-            BIOS::start($machine);
+            self::bootBios($machine);
         } catch (ExitException|HaltException) {
             // Expected - test halts after completion
         }
@@ -111,7 +110,7 @@ class RepPrefixTest extends TestCase
     public function testRepMovsbBasic(MachineInterface $machine, OptionInterface $option): void
     {
         try {
-            BIOS::start($machine);
+            self::bootBios($machine);
         } catch (ExitException|HaltException) {
         }
 
@@ -131,7 +130,7 @@ class RepPrefixTest extends TestCase
     public function testRepStosdWithOperandSizePrefix(MachineInterface $machine, OptionInterface $option): void
     {
         try {
-            BIOS::start($machine);
+            self::bootBios($machine);
         } catch (ExitException|HaltException) {
         }
 
@@ -152,7 +151,7 @@ class RepPrefixTest extends TestCase
     public function testRepStosdWithBothPrefixes(MachineInterface $machine, OptionInterface $option): void
     {
         try {
-            BIOS::start($machine);
+            self::bootBios($machine);
         } catch (ExitException|HaltException) {
         }
 

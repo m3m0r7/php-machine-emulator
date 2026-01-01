@@ -173,16 +173,18 @@ class MemoryAccessor implements MemoryAccessorInterface
                     ], true)
                 ) {
                     $selector = $value ?? 0;
-                    $cpu->cacheSegmentDescriptor($registerType, [
-                        'base' => ((($selector & 0xFFFF) << 4) & 0xFFFFF),
-                        'limit' => 0xFFFF,
-                        'present' => true,
-                        'type' => 0,
-                        'system' => false,
-                        'executable' => false,
-                        'dpl' => 0,
-                        'default' => 16,
-                    ]);
+                    if (!$cpu->hasExtendedSegmentLimit($registerType)) {
+                        $cpu->cacheSegmentDescriptor($registerType, [
+                            'base' => ((($selector & 0xFFFF) << 4) & 0xFFFFF),
+                            'limit' => 0xFFFF,
+                            'present' => true,
+                            'type' => 0,
+                            'system' => false,
+                            'executable' => false,
+                            'dpl' => 0,
+                            'default' => 16,
+                        ]);
+                    }
                 }
             }
             return $this;
@@ -767,9 +769,7 @@ class MemoryAccessor implements MemoryAccessorInterface
             return 64;
         }
 
-        $cached = method_exists($cpu, 'getCachedSegmentDescriptor')
-            ? $cpu->getCachedSegmentDescriptor(RegisterType::SS)
-            : null;
+        $cached = $cpu->getCachedSegmentDescriptor(RegisterType::SS);
 
         $default = is_array($cached) ? ($cached['default'] ?? null) : null;
         if ($default === 32 || $default === 16 || $default === 64) {

@@ -88,4 +88,33 @@ class FileBootStream implements BootableStreamInterface
     {
         return $this->fileStream->fileSize();
     }
+
+    public function bootImage(): ?BootImageInterface
+    {
+        return null;
+    }
+
+    public function bootLoadSize(): int
+    {
+        return min($this->fileSize(), 512);
+    }
+
+    public function isNoEmulation(): bool
+    {
+        return false;
+    }
+
+    public function readIsoSectors(int $lba, int $sectorCount): ?string
+    {
+        return null;
+    }
+
+    public function backingFileSize(): int
+    {
+        return $this->fileSize();
+    }
+
+    public function replaceRange(int $offset, string $data): void
+    {
+    }
 }

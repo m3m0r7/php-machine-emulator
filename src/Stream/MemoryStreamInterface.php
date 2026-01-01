@@ -53,4 +53,9 @@ interface MemoryStreamInterface extends StreamIsProxyableInterface, StreamReader
      * Parse an already-read byte as ModR/M.
      */
     public function modRegRM(int $byte): ModRegRMInterface;
+
+    /**
+     * Copy raw bytes from a string into memory at the given offset.
+     */
+    public function copyFromString(string $data, int $destOffset): void;
 }

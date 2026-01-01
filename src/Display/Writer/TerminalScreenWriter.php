@@ -684,6 +684,14 @@ class TerminalScreenWriter implements ScreenWriterInterface
         return $this->currentAttribute;
     }
 
+    public function start(): void
+    {
+    }
+
+    public function stop(): void
+    {
+    }
+
     public function updateVideoMode(VideoTypeInfo $videoTypeInfo): void
     {
         $this->videoTypeInfo = $videoTypeInfo;

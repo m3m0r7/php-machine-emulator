@@ -5,13 +5,18 @@ declare(strict_types=1);
 namespace PHPMachineEmulator;
 
 use Monolog\Logger;
+use PHPMachineEmulator\BIOS\BIOS;
 use PHPMachineEmulator\IO\IO;
 use PHPMachineEmulator\IO\IOInterface;
+use PHPMachineEmulator\Logging\DebugLogger;
+use PHPMachineEmulator\Logging\DebugLoggerInterface;
 use PHPMachineEmulator\Runtime\Runtime;
 use Psr\Log\LoggerInterface;
 
 class Option implements OptionInterface
 {
+    protected DebugLoggerInterface $logger;
+
     /**
      * @param LoggerInterface $logger Logger instance
      * @param IOInterface $IO I/O interface
@@ -20,15 +25,18 @@ class Option implements OptionInterface
      * @param bool $showHeader Whether to show header
      */
     public function __construct(
-        protected LoggerInterface $logger = new Logger(BIOS::NAME),
+        LoggerInterface $logger = new Logger(BIOS::NAME),
         protected IOInterface $IO = new IO(),
         protected string $runtimeClass = Runtime::class,
         protected bool $shouldChangeOffset = true,
         protected bool $showHeader = false,
     ) {
+        $this->logger = $logger instanceof DebugLoggerInterface
+            ? $logger
+            : new DebugLogger($logger);
     }
 
-    public function logger(): LoggerInterface
+    public function logger(): DebugLoggerInterface
     {
         return $this->logger;
     }

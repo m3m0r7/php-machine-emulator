@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Case\Printf;
 
-use PHPMachineEmulator\BIOS;
 use PHPMachineEmulator\Exception\ExitException;
 use PHPMachineEmulator\Exception\HaltException;
 use PHPMachineEmulator\MachineInterface;
@@ -47,7 +46,7 @@ class EscSeqFormatTest extends TestCase
     public function escapeSequenceFormatWorksCorrectly(MachineInterface $machine, OptionInterface $option): void
     {
         try {
-            BIOS::start($machine);
+            self::bootBios($machine);
         } catch (ExitException|HaltException) {
             // Expected - test halts after completion
         }

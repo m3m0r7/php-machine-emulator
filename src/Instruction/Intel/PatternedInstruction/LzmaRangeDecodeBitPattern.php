@@ -56,12 +56,13 @@ class LzmaRangeDecodeBitPattern extends AbstractPatternedInstruction
             0xD8,
         ];
 
-        // Needs the full routine body so we don't mis-detect other sequences.
-        if (count($bytes) < count($expected)) {
+        $minPrefix = 64;
+        if (count($bytes) < $minPrefix) {
             return null;
         }
 
-        for ($i = 0; $i < count($expected); $i++) {
+        $compareLen = min(count($bytes), count($expected));
+        for ($i = 0; $i < $compareLen; $i++) {
             if (($bytes[$i] ?? null) !== $expected[$i]) {
                 return null;
             }
