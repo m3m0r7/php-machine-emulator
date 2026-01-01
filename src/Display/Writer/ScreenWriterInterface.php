@@ -21,6 +21,14 @@ interface ScreenWriterInterface
     public function writeCharAt(int $row, int $col, string $char, ?int $attribute = null): void;
     public function clear(): void;
     public function fillArea(int $row, int $col, int $width, int $height, int $attribute): void;
+    public function scrollUpWindow(
+        int $topRow,
+        int $leftCol,
+        int $bottomRow,
+        int $rightCol,
+        int $lines,
+        int $attribute
+    ): void;
     public function flushIfNeeded(): void;
     public function setCurrentAttribute(int $attribute): void;
     public function getCurrentAttribute(): int;

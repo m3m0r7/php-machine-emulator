@@ -632,6 +632,58 @@ class TerminalScreenWriter implements ScreenWriterInterface
         }
     }
 
+    public function scrollUpWindow(
+        int $topRow,
+        int $leftCol,
+        int $bottomRow,
+        int $rightCol,
+        int $lines,
+        int $attribute
+    ): void
+    {
+        $width = $rightCol - $leftCol + 1;
+        $height = $bottomRow - $topRow + 1;
+        if ($width <= 0 || $height <= 0) {
+            return;
+        }
+
+        $origRow = $this->cursorRow;
+        $origCol = $this->cursorCol;
+
+        if ($lines <= 0 || $lines >= $height) {
+            $this->fillArea($topRow, $leftCol, $width, $height, $attribute);
+            $this->setCursorPosition($origRow, $origCol);
+            return;
+        }
+
+        if ($this->stopOnScreenSubstr !== null) {
+            for ($row = $topRow; $row <= $bottomRow - $lines; $row++) {
+                $this->screenLines[$row] = $this->screenLines[$row + $lines] ?? '';
+            }
+            $blank = str_repeat(' ', $width);
+            for ($row = $bottomRow - $lines + 1; $row <= $bottomRow; $row++) {
+                $this->screenLines[$row] = $blank;
+            }
+        }
+
+        $fullWidth = $leftCol === 0 && $rightCol >= ($this->terminalCols - 1);
+        if ($fullWidth) {
+            $this->writeOutput(sprintf("\033[%d;%dr", $topRow + 1, $bottomRow + 1));
+            $this->writeOutput(sprintf("\033[%dS", $lines));
+            $this->writeOutput("\033[r");
+
+            if ($attribute !== 0x07) {
+                $this->fillArea($bottomRow - $lines + 1, $leftCol, $width, $lines, $attribute);
+            }
+
+            $this->setCursorPosition($origRow, $origCol);
+            return;
+        }
+
+        $this->fillArea($bottomRow - $lines + 1, $leftCol, $width, $lines, $attribute);
+        $this->setCursorPosition($origRow, $origCol);
+    }
+
     protected function vgaToAnsi(int $fg, int $bg): string
     {
         $ansiFg = $this->vgaToAnsi256[$fg] ?? 7;

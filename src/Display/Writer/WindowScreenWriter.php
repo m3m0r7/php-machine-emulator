@@ -428,6 +428,57 @@ class WindowScreenWriter implements ScreenWriterInterface
         $this->markDirty();
     }
 
+    public function scrollUpWindow(
+        int $topRow,
+        int $leftCol,
+        int $bottomRow,
+        int $rightCol,
+        int $lines,
+        int $attribute
+    ): void
+    {
+        $width = $rightCol - $leftCol + 1;
+        $height = $bottomRow - $topRow + 1;
+        if ($width <= 0 || $height <= 0) {
+            return;
+        }
+
+        if ($lines <= 0 || $lines >= $height) {
+            $this->fillArea($topRow, $leftCol, $width, $height, $attribute);
+            return;
+        }
+
+        for ($row = $topRow; $row <= $bottomRow - $lines; $row++) {
+            $srcRow = $row + $lines;
+            $srcCols = $this->textBuffer[$srcRow] ?? [];
+            $destCols = $this->textBuffer[$row] ?? [];
+            for ($col = $leftCol; $col <= $rightCol; $col++) {
+                if (isset($srcCols[$col])) {
+                    $destCols[$col] = $srcCols[$col];
+                } elseif (isset($destCols[$col])) {
+                    unset($destCols[$col]);
+                }
+            }
+
+            if ($destCols === []) {
+                unset($this->textBuffer[$row]);
+            } else {
+                $this->textBuffer[$row] = $destCols;
+            }
+        }
+
+        for ($row = $bottomRow - $lines + 1; $row <= $bottomRow; $row++) {
+            if (!isset($this->textBuffer[$row])) {
+                $this->textBuffer[$row] = [];
+            }
+            for ($col = $leftCol; $col <= $rightCol; $col++) {
+                $this->textBuffer[$row][$col] = ['char' => ' ', 'attr' => $attribute];
+            }
+        }
+
+        $this->markDirty();
+    }
+
     public function setCurrentAttribute(int $attribute): void
     {
         $this->currentAttribute = $attribute;
