@@ -6,15 +6,6 @@ HelloWorld.bin
 /HelloWorld.asm
 /Test*.asm
 /Test*.bin
-Test.bin
-Triangle.asm
-Triangle.bin
-ubuntu-ja-22.04-desktop-amd64.iso
-ubuntu-22.04.5-live-server-amd64.iso
-MS-DOS_6.22.iso
-TinyCore*.iso
-mikeos.iso
-debug_iso.php
 debug/
 qemu
 trace*
@@ -26,3 +17,5 @@ scripts/
 .phpunit.cache
 target/
 seabios
+logs/
+images/

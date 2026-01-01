@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
 use PHPMachineEmulator\Exception\StreamReaderException;
 use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Ata as AtaPort;
+use PHPMachineEmulator\BootType;
 use PHPMachineEmulator\LogicBoard\Media\DriveType;
 use PHPMachineEmulator\LogicBoard\Media\MediaContext;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
@@ -396,8 +397,19 @@ class Ata
     private function hasCdromMedia(): bool
     {
         $mediaContext = $this->runtime->logicBoard()->media();
-        return $mediaContext->hasDriveType(DriveType::CD_ROM)
-            || $mediaContext->hasDriveType(DriveType::CD_RAM);
+        if ($mediaContext->hasDriveType(DriveType::CD_ROM)
+            || $mediaContext->hasDriveType(DriveType::CD_RAM)
+        ) {
+            return true;
+        }
+
+        foreach ($mediaContext->all() as $media) {
+            if ($media->bootType() === BootType::EL_TORITO) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function applyDeviceSignature(array &$state, string $channel): void
@@ -1015,13 +1027,11 @@ class Ata
 
     private function cdSize(): int
     {
-        $mediaContext = $this->runtime->logicBoard()->media();
-        if (!$mediaContext->hasDriveType(DriveType::CD_ROM)
-            && !$mediaContext->hasDriveType(DriveType::CD_RAM)
-        ) {
+        if (!$this->hasCdromMedia()) {
             return 0;
         }
 
+        $mediaContext = $this->runtime->logicBoard()->media();
         $media = $mediaContext->primary();
         if ($media !== null) {
             $size = $media->stream()->backingFileSize();
