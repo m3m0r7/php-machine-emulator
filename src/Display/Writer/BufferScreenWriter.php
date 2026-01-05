@@ -90,8 +90,7 @@ class BufferScreenWriter implements ScreenWriterInterface
         int $rightCol,
         int $lines,
         int $attribute
-    ): void
-    {
+    ): void {
         // Buffer mode: no visual output for scroll
     }
 

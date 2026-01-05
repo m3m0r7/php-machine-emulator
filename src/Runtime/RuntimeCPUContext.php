@@ -61,6 +61,7 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     private int $cpl = 0;
     private int $iopl = 0;
     private bool $nt = false;
+    private bool $idFlag = true;
 
     // Interrupt handling
     private int $interruptDeliveryBlock = 0;
@@ -585,6 +586,16 @@ class RuntimeCPUContext implements RuntimeCPUContextInterface
     public function nt(): bool
     {
         return $this->nt;
+    }
+
+    public function setIdFlag(bool $flag): void
+    {
+        $this->idFlag = $flag;
+    }
+
+    public function idFlag(): bool
+    {
+        return $this->idFlag;
     }
 
     public function blockInterruptDelivery(int $count = 1): void

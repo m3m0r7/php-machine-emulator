@@ -24,7 +24,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Util\UInt64;
 
-class Int_ implements InstructionInterface
+class IntInstruction implements InstructionInterface
 {
     use Instructable;
 

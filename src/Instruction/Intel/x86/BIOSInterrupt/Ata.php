@@ -262,10 +262,11 @@ class Ata
         }
     }
 
-    public function readBusMaster(int $port): int
+    public function readBusMaster(int $port, bool $secondary = false): int
     {
         $this->ensureInitialized();
-        $state = &$this->channels['primary'];
+        $channel = $secondary ? 'secondary' : 'primary';
+        $state = &$this->channels[$channel];
         $offset = $port & 0x7;
         return match ($offset) {
             0x0 => $state['bmCommand'],
@@ -278,17 +279,18 @@ class Ata
         };
     }
 
-    public function writeBusMaster(int $port, int $value): void
+    public function writeBusMaster(int $port, int $value, bool $secondary = false): void
     {
         $this->ensureInitialized();
-        $state = &$this->channels['primary'];
+        $channel = $secondary ? 'secondary' : 'primary';
+        $state = &$this->channels[$channel];
         $offset = $port & 0x7;
         $v = $value & 0xFF;
         switch ($offset) {
             case 0x0:
                 $state['bmCommand'] = $v;
                 if (($v & 0x1) !== 0 && !$state['bmActive']) {
-                    $this->beginDma('primary', $state);
+                    $this->beginDma($secondary ? 'secondary' : 'primary', $state);
                 } else {
                     $state['bmActive'] = false;
                     $state['bmStatus'] &= ~0x01;

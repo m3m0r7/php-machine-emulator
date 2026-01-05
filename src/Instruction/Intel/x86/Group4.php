@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86;
 
 use PHPMachineEmulator\Instruction\PrefixClass;
-use PHPMachineEmulator\Exception\ExecutionException;
+use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
@@ -31,7 +31,7 @@ class Group4 implements InstructionInterface
         return match ($modRegRM->digit()) {
             0x0 => $this->inc($runtime, $memory, $modRegRM),
             0x1 => $this->dec($runtime, $memory, $modRegRM),
-            default => throw new ExecutionException(sprintf('Group4 digit 0x%X not implemented', $modRegRM->digit())),
+            default => throw new FaultException(0x06, null, sprintf('UD: Group4 digit 0x%X', $modRegRM->digit())),
         };
     }
 

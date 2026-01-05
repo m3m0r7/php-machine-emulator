@@ -41,12 +41,12 @@ use PHPMachineEmulator\Instruction\Intel\x86\Group5;
 use PHPMachineEmulator\Instruction\Intel\x86\Hlt;
 use PHPMachineEmulator\Instruction\Intel\x86\HltPorts;
 use PHPMachineEmulator\Instruction\Intel\x86\ImulImmediate;
-use PHPMachineEmulator\Instruction\Intel\x86\In_;
+use PHPMachineEmulator\Instruction\Intel\x86\InInstruction;
 use PHPMachineEmulator\Instruction\Intel\x86\Inc;
 use PHPMachineEmulator\Instruction\Intel\x86\Ins;
 use PHPMachineEmulator\Instruction\Intel\x86\Int1;
 use PHPMachineEmulator\Instruction\Intel\x86\Int3;
-use PHPMachineEmulator\Instruction\Intel\x86\Int_;
+use PHPMachineEmulator\Instruction\Intel\x86\IntInstruction;
 use PHPMachineEmulator\Instruction\Intel\x86\Into;
 use PHPMachineEmulator\Instruction\Intel\x86\Iret;
 use PHPMachineEmulator\Instruction\Intel\x86\Ja;
@@ -92,7 +92,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Movsg;
 use PHPMachineEmulator\Instruction\Intel\x86\Movsw;
 use PHPMachineEmulator\Instruction\Intel\x86\Nop;
 use PHPMachineEmulator\Instruction\Intel\x86\OrRegRm;
-use PHPMachineEmulator\Instruction\Intel\x86\Out_;
+use PHPMachineEmulator\Instruction\Intel\x86\OutInstruction;
 use PHPMachineEmulator\Instruction\Intel\x86\Outs;
 use PHPMachineEmulator\Instruction\Intel\x86\Popa;
 use PHPMachineEmulator\Instruction\Intel\x86\Popf;
@@ -174,7 +174,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Xadd;
 use PHPMachineEmulator\Instruction\Intel\x86\TwoByteOp\Xorps;
 use PHPMachineEmulator\Instruction\Intel\x86\Xchg;
 use PHPMachineEmulator\Instruction\Intel\x86\Xlat;
-use PHPMachineEmulator\Instruction\Intel\x86\Xor_;
+use PHPMachineEmulator\Instruction\Intel\x86\XorInstruction;
 use PHPMachineEmulator\Instruction\Intel\x86\XorRegRm;
 use PHPMachineEmulator\Instruction\RegisterInterface;
 use PHPMachineEmulator\Instruction\Traits\RuntimeAwareTrait;
@@ -183,9 +183,9 @@ use PHPMachineEmulator\Instruction\Traits\RuntimeAwareTrait;
  * Standard x86 instruction list.
  *
  * This class provides the base x86 instruction set. For extended instruction
- * sets with custom PHP emulator instructions, use x86Extended instead.
+ * sets with custom PHP emulator instructions, use X86Extended instead.
  */
-class x86 implements InstructionListInterface
+class X86 implements InstructionListInterface
 {
     use RuntimeAwareTrait;
     use InstructionSupport;
@@ -339,7 +339,7 @@ class x86 implements InstructionListInterface
             Arpl::class,
             Hlt::class,
             Inc::class,
-            Int_::class,
+            IntInstruction::class,
             Int1::class,
             Int3::class,
             Into::class,
@@ -367,7 +367,7 @@ class x86 implements InstructionListInterface
             Loop::class,
             Loopne::class,
             Loopz::class,
-            In_::class,
+            InInstruction::class,
             Mov::class,
             MovImm8::class,
             MovMem::class,
@@ -380,7 +380,7 @@ class x86 implements InstructionListInterface
             Xchg::class,
             Movsg::class,
             Nop::class,
-            Out_::class,
+            OutInstruction::class,
             PopReg::class,
             PopRm::class,
             MovSegToRm::class,
@@ -441,7 +441,7 @@ class x86 implements InstructionListInterface
             Stosw::class,
             TestImmAl::class,
             Xlat::class,
-            Xor_::class,
+            XorInstruction::class,
             ImulImmediate::class,
             FpuStub::class,
             // Two-byte instructions (0x0F prefix)

@@ -9,7 +9,7 @@ use PHPMachineEmulator\Instruction\ExecutionStatus;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Instruction\InstructionInterface;
 
-class Xor_ implements InstructionInterface
+class XorInstruction implements InstructionInterface
 {
     use Instructable;
 
@@ -21,6 +21,6 @@ class Xor_ implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
-        throw new ExecutionException('Xor_ handler should not be invoked (delegated to XorRegRm)');
+        throw new ExecutionException('XorInstruction handler should not be invoked (delegated to XorRegRm)');
     }
 }

@@ -51,7 +51,7 @@ class Into implements InstructionInterface
                 return ExecutionStatus::SUCCESS;
             }
 
-            if ($handler instanceof Int_) {
+            if ($handler instanceof IntInstruction) {
                 $handler->raiseSoftware($runtime, 4, $returnIp, null);
             }
         }

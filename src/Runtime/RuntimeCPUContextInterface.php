@@ -99,6 +99,8 @@ interface RuntimeCPUContextInterface
     public function iopl(): int;
     public function setNt(bool $nt): void;
     public function nt(): bool;
+    public function setIdFlag(bool $flag): void;
+    public function idFlag(): bool;
 
     // ========================================
     // Interrupt handling

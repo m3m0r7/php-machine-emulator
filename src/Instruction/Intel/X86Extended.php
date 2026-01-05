@@ -16,7 +16,7 @@ use PHPMachineEmulator\BIOS\PHPBIOSCall;
  * Custom instructions:
  * - PHPBIOSCall (0F FF xx): Direct PHP BIOS service invocation
  */
-class x86Extended extends x86
+class X86Extended extends X86
 {
     protected function instructionListClasses(): array
     {

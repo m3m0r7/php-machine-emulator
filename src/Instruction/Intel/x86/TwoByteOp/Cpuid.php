@@ -28,6 +28,7 @@ class Cpuid implements InstructionInterface
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $ma = $runtime->memoryAccessor();
+        static $logCount = 0;
         $leaf = $ma->fetch(RegisterType::EAX)->asBytesBySize(32);
 
         switch ($leaf) {
@@ -50,22 +51,26 @@ class Cpuid implements InstructionInterface
                     | (1 << 3) // PSE
                     | (1 << 4) // TSC
                     | (1 << 5) // MSR
-                    | (1 << 11) // SEP (SYSENTER/SYSEXIT)
-                    | (1 << 9) // APIC
                     | (1 << 6) // PAE
                     | (1 << 7) // MCE
                     | (1 << 8) // CMPXCHG8B
+                    | (1 << 9) // APIC
+                    | (1 << 11) // SEP (SYSENTER/SYSEXIT)
                     | (1 << 12) // MTRR
-                    | (1 << 16) // PAT
-                    | (1 << 19) // CLFSH
                     | (1 << 13) // PGE
                     | (1 << 15) // CMOV
-                    | (1 << 17) // PSE-36
-                    | (1 << 24) // FXSR
-                    | (1 << 25) // SSE
-                    | (1 << 26); // SSE2
+                    | (1 << 16) // PAT
+                    | (1 << 17); // PSE-36
                 $this->writeRegisterBySize($runtime, RegisterType::EDX, $features, 32);
+                if ($logCount < 5) {
+                    $runtime->option()->logger()->warning(sprintf(
+                        'CPUID: leaf=0x00000001 edx=0x%08X',
+                        $features & 0xFFFFFFFF,
+                    ));
+                    $logCount++;
+                }
                 break;
+
 
             case 0x2:
                 // Basic cache/TLB descriptor leaf (minimal stub)

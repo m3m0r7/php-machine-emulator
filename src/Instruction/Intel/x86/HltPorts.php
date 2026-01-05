@@ -23,6 +23,6 @@ class HltPorts implements InstructionInterface
 
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
-        return ExecutionStatus::HALT;
+        return ExecutionStatus::SUCCESS;
     }
 }

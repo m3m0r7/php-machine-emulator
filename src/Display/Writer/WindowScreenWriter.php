@@ -435,8 +435,7 @@ class WindowScreenWriter implements ScreenWriterInterface
         int $rightCol,
         int $lines,
         int $attribute
-    ): void
-    {
+    ): void {
         $width = $rightCol - $leftCol + 1;
         $height = $bottomRow - $topRow + 1;
         if ($width <= 0 || $height <= 0) {

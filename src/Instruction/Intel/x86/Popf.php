@@ -63,6 +63,10 @@ class Popf implements InstructionInterface
             $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);
         }
 
+        if ($size >= 32) {
+            $cpu->setIdFlag(($flags & (1 << 21)) !== 0);
+        }
+
         return ExecutionStatus::SUCCESS;
     }
 }

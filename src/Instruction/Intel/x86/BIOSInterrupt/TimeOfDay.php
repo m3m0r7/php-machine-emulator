@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt;
 
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\TimeOfDay\BdaAddress;
-use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\TimeOfDay\Function_;
+use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\TimeOfDay\TimeOfDayFunction;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -29,15 +29,15 @@ class TimeOfDay implements InterruptInterface
             $eax
         ));
 
-        $function = Function_::tryFrom($ah);
+        $function = TimeOfDayFunction::tryFrom($ah);
 
         match ($function) {
-            Function_::READ_SYSTEM_TIMER => $this->readSystemTimerCounter($runtime),
-            Function_::SET_SYSTEM_TIMER => $this->setSystemTimerCounter($runtime),
-            Function_::READ_RTC_TIME => $this->readRtcTime($runtime),
-            Function_::SET_RTC_TIME => $this->setRtcTime($runtime),
-            Function_::READ_RTC_DATE => $this->readRtcDate($runtime),
-            Function_::SET_RTC_DATE => $this->setRtcDate($runtime),
+            TimeOfDayFunction::READ_SYSTEM_TIMER => $this->readSystemTimerCounter($runtime),
+            TimeOfDayFunction::SET_SYSTEM_TIMER => $this->setSystemTimerCounter($runtime),
+            TimeOfDayFunction::READ_RTC_TIME => $this->readRtcTime($runtime),
+            TimeOfDayFunction::SET_RTC_TIME => $this->setRtcTime($runtime),
+            TimeOfDayFunction::READ_RTC_DATE => $this->readRtcDate($runtime),
+            TimeOfDayFunction::SET_RTC_DATE => $this->setRtcDate($runtime),
             default => $ma->setCarryFlag(true),
         };
     }

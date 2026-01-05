@@ -14,14 +14,14 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
  * custom instructions that are not part of the original Intel specification
  * but are needed for the PHP machine emulator implementation.
  *
- * Uses x86Extended as the underlying 32-bit instruction set to include
+ * Uses X86Extended as the underlying 32-bit instruction set to include
  * PHP BIOS custom instructions.
  */
-class x86_64Extended extends x86_64
+class X8664Extended extends X8664
 {
     public function __construct()
     {
-        // Use x86Extended instead of x86 to include PHPBIOSCall
-        $this->x86 = new x86Extended();
+        // Use X86Extended instead of x86 to include PHPBIOSCall
+        $this->x86 = new X86Extended();
     }
 }

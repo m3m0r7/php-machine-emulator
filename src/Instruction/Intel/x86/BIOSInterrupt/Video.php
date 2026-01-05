@@ -427,8 +427,7 @@ class Video implements InterruptInterface
         int $col,
         int $rows,
         int $cols
-    ): array
-    {
+    ): array {
         if ($rows <= 0 || $cols <= 0) {
             return [$row, $col];
         }

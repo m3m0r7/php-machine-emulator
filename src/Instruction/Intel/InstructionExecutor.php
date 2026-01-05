@@ -16,6 +16,7 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Instruction\Intel\TranslationBlock;
 use PHPMachineEmulator\Instruction\Intel\PatternedInstruction\PatternedInstructionsList;
 use PHPMachineEmulator\Instruction\Intel\PatternedInstruction\PatternedInstructionsListStats;
+use PHPMachineEmulator\UEFI\UEFIRuntimeRegistry;
 
 class InstructionExecutor implements InstructionExecutorInterface
 {
@@ -43,6 +44,9 @@ class InstructionExecutor implements InstructionExecutorInterface
      */
     private array $hitCount = [];
 
+    private int $kernelProbeCountdown = 0;
+    private int $kernelProbeLogCount = 0;
+
     /**
      * Debug/helper state (trace/stop logic, counters).
      */
@@ -60,9 +64,35 @@ class InstructionExecutor implements InstructionExecutorInterface
     private ?PatternedInstructionsList $patternedInstructionsList = null;
 
     private const HOTSPOT_THRESHOLD = 1;
+    private const KERNEL_DECOMPRESS_HIT_THRESHOLD = 2000;
+    private const KERNEL_DECOMPRESS_PROBE_EVERY = 100;
 
     public function __construct()
     {
+        $this->kernelProbeCountdown = self::KERNEL_DECOMPRESS_PROBE_EVERY;
+    }
+
+    private function maybeProbeKernelDecompress(RuntimeInterface $runtime, int $ip): ?ExecutionStatus
+    {
+        if ($this->kernelProbeCountdown > 0) {
+            $this->kernelProbeCountdown--;
+            return null;
+        }
+
+        $this->kernelProbeCountdown = self::KERNEL_DECOMPRESS_PROBE_EVERY;
+        if ($this->kernelProbeLogCount < 50) {
+            $runtime->option()->logger()->warning(sprintf(
+                'KERNEL_PROBE: ip=0x%08X',
+                $ip & 0xFFFFFFFF,
+            ));
+            $this->kernelProbeLogCount++;
+        }
+        $env = UEFIRuntimeRegistry::environment($runtime);
+        if ($env !== null && $env->maybeFastDecompressKernel($runtime, $ip, self::KERNEL_DECOMPRESS_HIT_THRESHOLD)) {
+            return ExecutionStatus::SUCCESS;
+        }
+
+        return null;
     }
 
     public function execute(RuntimeInterface $runtime): ExecutionStatus
@@ -75,6 +105,11 @@ class InstructionExecutor implements InstructionExecutorInterface
         $debug = $this->debug($runtime);
         $debug->maybeStopAtIp($runtime, $ip, $this->prevInstructionPointer, $this->lastInstruction, $this->lastOpcodes);
         $debug->maybeStopOnRspBelow($runtime, $ip, $this->prevInstructionPointer);
+
+        $probeStatus = $this->maybeProbeKernelDecompress($runtime, $ip);
+        if ($probeStatus !== null) {
+            return $probeStatus;
+        }
 
         // REP/iteration handler active? Fall back to single-step to keep lastInstruction accurate.
         if ($runtime->context()->cpu()->iteration()->isActive()) {
@@ -98,6 +133,13 @@ class InstructionExecutor implements InstructionExecutorInterface
         // Hotspot detection: count hits per IP
         $hits = ($this->hitCount[$ip] ?? 0) + 1;
         $this->hitCount[$ip] = $hits;
+
+        if ($hits === self::KERNEL_DECOMPRESS_HIT_THRESHOLD) {
+            $env = UEFIRuntimeRegistry::environment($runtime);
+            if ($env !== null && $env->maybeFastDecompressKernel($runtime, $ip, $hits)) {
+                return ExecutionStatus::SUCCESS;
+            }
+        }
 
         if ($hits >= self::HOTSPOT_THRESHOLD) {
             $block = $this->buildTranslationBlock($runtime, $ip);
@@ -161,55 +203,60 @@ class InstructionExecutor implements InstructionExecutorInterface
             // can be shorter than a prefix run, so we may need to peek beyond maxOpcodeLength to reach the
             // actual opcode. Cap at 15 bytes (architectural maximum instruction length).
             $peekBytes = [];
-            for ($i = 0; $i < $maxOpcodeLength && !$memory->isEOF(); $i++) {
-                $peekBytes[] = $memory->byte();
-            }
-
-            $instruction = null;
-            $lastException = null;
-            $length = 0;
-
-            $canExtend = isset($peekBytes[0]) && $this->isLegacyPrefixByte($peekBytes[0]);
-            while (true) {
-                [$instruction, $length, $lastException] = $this->tryFindInstructionFromPeekBytes(
-                    $instructionList,
-                    $peekBytes
-                );
-
-                if ($instruction !== null) {
-                    break;
+            try {
+                for ($i = 0; $i < $maxOpcodeLength && !$memory->isEOF(); $i++) {
+                    $peekBytes[] = $memory->byte();
                 }
 
-                if (!$canExtend || count($peekBytes) >= 15 || $memory->isEOF()) {
-                    if ($lastException !== null) {
-                        $cs = $memoryAccessor->fetch(RegisterType::CS)->asByte() & 0xFFFF;
-                        $bytesStr = implode(' ', array_map(
-                            static fn (int $b): string => sprintf('%02X', $b & 0xFF),
-                            $peekBytes
-                        ));
-                        $runtime->option()->logger()->error(sprintf(
-                            'Decode failed at CS:IP=%04X:%08X bytes=%s len=%d last=%s',
-                            $cs,
-                            $startPos & 0xFFFFFFFF,
-                            $bytesStr,
-                            count($peekBytes),
-                            $lastException->getMessage()
-                        ));
-                        throw $lastException;
+                $instruction = null;
+                $lastException = null;
+                $length = 0;
+
+                $canExtend = isset($peekBytes[0]) && $this->isLegacyPrefixByte($peekBytes[0]);
+                while (true) {
+                    [$instruction, $length, $lastException] = $this->tryFindInstructionFromPeekBytes(
+                        $instructionList,
+                        $peekBytes
+                    );
+
+                    if ($instruction !== null) {
+                        break;
                     }
-                    throw new NotFoundInstructionException('No found instruction (decode failed)');
+
+                    if (!$canExtend || count($peekBytes) >= 15 || $memory->isEOF()) {
+                        if ($lastException !== null) {
+                            $cs = $memoryAccessor->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                            $bytesStr = implode(' ', array_map(
+                                static fn (int $b): string => sprintf('%02X', $b & 0xFF),
+                                $peekBytes
+                            ));
+                            $runtime->option()->logger()->error(sprintf(
+                                'Decode failed at CS:IP=%04X:%08X bytes=%s len=%d last=%s',
+                                $cs,
+                                $startPos & 0xFFFFFFFF,
+                                $bytesStr,
+                                count($peekBytes),
+                                $lastException->getMessage()
+                            ));
+                            throw new FaultException(0x06, 0, $lastException->getMessage());
+                        }
+                        throw new FaultException(0x06, 0, 'UD: decode failed');
+                    }
+
+                    // Extend peek window to include opcode after an unusually long legacy-prefix run.
+                    $peekBytes[] = $memory->byte();
                 }
 
-                // Extend peek window to include opcode after an unusually long legacy-prefix run.
-                $peekBytes[] = $memory->byte();
+                $opcodes = array_slice($peekBytes, 0, $length);
+                $memory->setOffset($startPos + $length);
+
+                // Cache the decode result
+                $this->decodeCache[$ip] = [$instruction, $opcodes, $length];
+            } catch (FaultException $e) {
+                return $this->handleFault($runtime, $e, $memory->offset(), $startPos, $peekBytes);
+            } finally {
+                $memoryAccessor->setInstructionFetch(false);
             }
-
-            $opcodes = array_slice($peekBytes, 0, $length);
-            $memoryAccessor->setInstructionFetch(false);
-            $memory->setOffset($startPos + $length);
-
-            // Cache the decode result
-            $this->decodeCache[$ip] = [$instruction, $opcodes, $length];
         }
 
         $this->lastOpcodes = $opcodes;
@@ -277,6 +324,22 @@ class InstructionExecutor implements InstructionExecutorInterface
         };
 
         while ($block !== null && $chainDepth < $maxChainDepth) {
+            $startIp = $block->startIp();
+            $hits = ($this->hitCount[$startIp] ?? 0) + 1;
+            $this->hitCount[$startIp] = $hits;
+
+            if ($hits === self::KERNEL_DECOMPRESS_HIT_THRESHOLD) {
+                $env = UEFIRuntimeRegistry::environment($runtime);
+                if ($env !== null && $env->maybeFastDecompressKernel($runtime, $startIp, $hits)) {
+                    return ExecutionStatus::SUCCESS;
+                }
+            }
+
+            $probeStatus = $this->maybeProbeKernelDecompress($runtime, $startIp);
+            if ($probeStatus !== null) {
+                return $probeStatus;
+            }
+
             [$status, $exitIp] = $block->execute($runtime, $beforeInstruction, $instructionRunner);
 
             if ($status !== ExecutionStatus::SUCCESS) {
@@ -399,59 +462,64 @@ class InstructionExecutor implements InstructionExecutorInterface
 
         $memoryAccessor->setInstructionFetch(true);
 
-        for ($i = 0; $i < $maxBlockSize; $i++) {
-            $instrIp = $memory->offset();
+        try {
+            for ($i = 0; $i < $maxBlockSize; $i++) {
+                $instrIp = $memory->offset();
 
-            // Check decode cache first
-            if (isset($this->decodeCache[$instrIp])) {
-                [$instruction, $opcodes, $length] = $this->decodeCache[$instrIp];
-                $memory->setOffset($instrIp + $length);
-            } else {
-                // Decode instruction
-                $peekBytes = [];
-                $peekStart = $memory->offset();
-                for ($j = 0; $j < $maxOpcodeLength && !$memory->isEOF(); $j++) {
-                    $peekBytes[] = $memory->byte();
-                }
-
-                $instruction = null;
-                $length = 0;
-
-                $canExtend = isset($peekBytes[0]) && $this->isLegacyPrefixByte($peekBytes[0]);
-                while (true) {
-                    [$instruction, $length] = $this->tryFindInstructionFromPeekBytes($instructionList, $peekBytes);
-                    if ($instruction !== null) {
-                        break;
+                // Check decode cache first
+                if (isset($this->decodeCache[$instrIp])) {
+                    [$instruction, $opcodes, $length] = $this->decodeCache[$instrIp];
+                    $memory->setOffset($instrIp + $length);
+                } else {
+                    // Decode instruction
+                    $peekBytes = [];
+                    $peekStart = $memory->offset();
+                    for ($j = 0; $j < $maxOpcodeLength && !$memory->isEOF(); $j++) {
+                        $peekBytes[] = $memory->byte();
                     }
 
-                    if (!$canExtend || count($peekBytes) >= 15 || $memory->isEOF()) {
-                        break;
+                    $instruction = null;
+                    $length = 0;
+
+                    $canExtend = isset($peekBytes[0]) && $this->isLegacyPrefixByte($peekBytes[0]);
+                    while (true) {
+                        [$instruction, $length] = $this->tryFindInstructionFromPeekBytes($instructionList, $peekBytes);
+                        if ($instruction !== null) {
+                            break;
+                        }
+
+                        if (!$canExtend || count($peekBytes) >= 15 || $memory->isEOF()) {
+                            break;
+                        }
+
+                        $peekBytes[] = $memory->byte();
                     }
 
-                    $peekBytes[] = $memory->byte();
+                    if ($instruction === null) {
+                        break; // Can't decode, stop block building
+                    }
+
+                    $opcodes = array_slice($peekBytes, 0, $length);
+                    $memory->setOffset($peekStart + $length);
+
+                    // Cache it
+                    $this->decodeCache[$instrIp] = [$instruction, $opcodes, $length];
                 }
 
-                if ($instruction === null) {
-                    break; // Can't decode, stop block building
+                $instructions[] = [$instruction, $opcodes, $length];
+                $totalLength += $length;
+
+                // Stop at control-flow instructions
+                if ($this->isControlFlowInstruction($opcodes)) {
+                    break;
                 }
-
-                $opcodes = array_slice($peekBytes, 0, $length);
-                $memory->setOffset($peekStart + $length);
-
-                // Cache it
-                $this->decodeCache[$instrIp] = [$instruction, $opcodes, $length];
             }
-
-            $instructions[] = [$instruction, $opcodes, $length];
-            $totalLength += $length;
-
-            // Stop at control-flow instructions
-            if ($this->isControlFlowInstruction($opcodes)) {
-                break;
-            }
+        } catch (FaultException $e) {
+            $memory->setOffset($savedPos);
+            return null;
+        } finally {
+            $memoryAccessor->setInstructionFetch(false);
         }
-
-        $memoryAccessor->setInstructionFetch(false);
 
         // Restore memory position
         $memory->setOffset($savedPos);
@@ -559,48 +627,57 @@ class InstructionExecutor implements InstructionExecutorInterface
         try {
             return $instruction->process($runtime, $opcodes);
         } catch (FaultException $e) {
-            $cpu = $runtime->context()->cpu();
-            $ma = $runtime->memoryAccessor();
             $ip = $runtime->memory()->offset();
             $faultIp = $ip;
             $opcodeLen = count($opcodes);
             if ($opcodeLen > 0) {
                 $faultIp = ($ip - $opcodeLen) & 0xFFFFFFFF;
             }
-            $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
-            $cr2 = $ma->readControlRegister(2);
-
-            $bytes = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $opcodes));
-            $runtime->option()->logger()->error(sprintf(
-                'CPU fault: %s vec=0x%02X err=%s ip=0x%08X rip=0x%016X cs=0x%04X cr2=0x%016X PM=%d PG=%d LM=%d bytes=%s',
-                $e->getMessage(),
-                $e->vector() & 0xFF,
-                $e->errorCode() === null ? 'n/a' : sprintf('0x%04X', $e->errorCode() & 0xFFFF),
-                $ip & 0xFFFFFFFF,
-                $ip,
-                $cs,
-                $cr2,
-                $cpu->isProtectedMode() ? 1 : 0,
-                $cpu->isPagingEnabled() ? 1 : 0,
-                $cpu->isLongMode() ? 1 : 0,
-                $bytes,
-            ));
-            $this->debug($runtime)->maybeDumpPageFaultContext($runtime, $e, $ip);
-            if (
-                $runtime->interruptDeliveryHandler()->raiseFault(
-                    $runtime,
-                    $e->vector(),
-                    $faultIp,
-                    $e->errorCode()
-                )
-            ) {
-                return ExecutionStatus::SUCCESS;
-            }
-            throw $e;
+            return $this->handleFault($runtime, $e, $ip, $faultIp, $opcodes);
         } catch (ExecutionException $e) {
             $runtime->option()->logger()->error(sprintf('Execution error: %s', $e->getMessage()));
             throw $e;
         }
+    }
+
+    private function handleFault(RuntimeInterface $runtime, FaultException $e, int $currentIp, int $faultIp, array $opcodes): ExecutionStatus
+    {
+        $cpu = $runtime->context()->cpu();
+        $ma = $runtime->memoryAccessor();
+        $env = UEFIRuntimeRegistry::environment($runtime);
+        if ($env !== null && $env->maybeRecoverKernelJump($runtime, $currentIp, $e->vector())) {
+            return ExecutionStatus::SUCCESS;
+        }
+        $cs = $ma->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+        $cr2 = $ma->readControlRegister(2);
+
+        $bytes = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $opcodes));
+        $runtime->option()->logger()->error(sprintf(
+            'CPU fault: %s vec=0x%02X err=%s ip=0x%08X rip=0x%016X cs=0x%04X cr2=0x%016X PM=%d PG=%d LM=%d bytes=%s',
+            $e->getMessage(),
+            $e->vector() & 0xFF,
+            $e->errorCode() === null ? 'n/a' : sprintf('0x%04X', $e->errorCode() & 0xFFFF),
+            $currentIp & 0xFFFFFFFF,
+            $currentIp,
+            $cs,
+            $cr2,
+            $cpu->isProtectedMode() ? 1 : 0,
+            $cpu->isPagingEnabled() ? 1 : 0,
+            $cpu->isLongMode() ? 1 : 0,
+            $bytes,
+        ));
+        $this->debug($runtime)->maybeDumpPageFaultContext($runtime, $e, $currentIp);
+        if (
+            $runtime->interruptDeliveryHandler()->raiseFault(
+                $runtime,
+                $e->vector(),
+                $faultIp,
+                $e->errorCode()
+            )
+        ) {
+            return ExecutionStatus::SUCCESS;
+        }
+        throw $e;
     }
 
     public function lastInstruction(): ?InstructionInterface

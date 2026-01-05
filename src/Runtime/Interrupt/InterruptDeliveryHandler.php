@@ -7,7 +7,7 @@ namespace PHPMachineEmulator\Runtime\Interrupt;
 use PHPMachineEmulator\Architecture\ArchitectureProviderInterface;
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Exception\HaltException;
-use PHPMachineEmulator\Instruction\Intel\x86\Int_;
+use PHPMachineEmulator\Instruction\Intel\x86\IntInstruction;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
 /**
@@ -92,7 +92,7 @@ class InterruptDeliveryHandler implements InterruptDeliveryHandlerInterface
             return false;
         }
 
-        if (!$handler instanceof Int_) {
+        if (!$handler instanceof IntInstruction) {
             $this->deliveryDepth--;
             return false;
         }
