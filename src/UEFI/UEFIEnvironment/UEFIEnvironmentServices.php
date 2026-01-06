@@ -428,6 +428,7 @@ trait UEFIEnvironmentServices
             return;
         }
         $this->writePtr($outPtr, $addr);
+        $this->touchMemoryMap();
         $this->returnStatus($runtime, 0);
     }
 
@@ -443,18 +444,15 @@ trait UEFIEnvironmentServices
             $this->linuxKernelCandidateLoaded = true;
         }
 
-        $path = null;
+        $path = $this->devicePathToPath($devicePathPtr);
         $imageData = null;
 
         if ($sourceBuffer !== 0 && $sourceSize > 0) {
             $imageData = $this->mem->readBytes($sourceBuffer, (int) $sourceSize);
         }
 
-        if ($imageData === null) {
-            $path = $this->devicePathToPath($devicePathPtr);
-            if ($path !== null) {
-                $imageData = $this->readFileFromMedia($path);
-            }
+        if ($imageData === null && $path !== null) {
+            $imageData = $this->readFileFromMedia($path);
         }
 
         if ($imageData === null) {
@@ -495,6 +493,7 @@ trait UEFIEnvironmentServices
             'bits' => $loaded['bits'],
             'path' => $path ?? $this->imagePath,
         ];
+        $this->touchMemoryMap();
 
         $this->maybeRegisterLinuxKernel($runtime, $handle, $loaded, $path ?? $this->imagePath, $imageData);
 
@@ -533,6 +532,34 @@ trait UEFIEnvironmentServices
                 $info['entry'] & 0xFFFFFFFF,
             ));
             $this->loadLogCount++;
+        }
+
+        if (isset($this->linuxKernelImages[$handle])) {
+            $ma = $runtime->memoryAccessor();
+            $bootParams = $this->pointerSize === 8
+                ? $ma->fetch(RegisterType::RSI)->asBytesBySize(64)
+                : $ma->fetch(RegisterType::ESI)->asBytesBySize(32);
+            if ($bootParams > 0 && empty($this->linuxKernelImages[$handle]['boot_params'])) {
+                $kernel = $this->linuxKernelImages[$handle];
+                if ($this->isValidBootParams($runtime, $bootParams) && !$this->isAddressInKernel($bootParams, $kernel)) {
+                    $this->linuxKernelImages[$handle]['boot_params'] = $bootParams;
+                    if ($this->linuxKernelFastBootLogCount < 20) {
+                        $runtime->option()->logger()->warning(sprintf(
+                            'FAST_KERNEL_BOOT_PARAMS: handle=0x%08X params=0x%08X source=start',
+                            $handle & 0xFFFFFFFF,
+                            $bootParams & 0xFFFFFFFF,
+                        ));
+                        $this->linuxKernelFastBootLogCount++;
+                    }
+                } elseif ($this->linuxKernelFastBootLogCount < 20) {
+                    $runtime->option()->logger()->warning(sprintf(
+                        'FAST_KERNEL_BOOT_PARAMS_INVALID: handle=0x%08X params=0x%08X',
+                        $handle & 0xFFFFFFFF,
+                        $bootParams & 0xFFFFFFFF,
+                    ));
+                    $this->linuxKernelFastBootLogCount++;
+                }
+            }
         }
 
         $this->dispatcher->requestSkipReturnPop();
@@ -798,7 +825,6 @@ trait UEFIEnvironmentServices
             $offset += $descSize;
         }
 
-        $this->mapKey++;
         $this->writeUintN($sizePtr, $required);
         $this->writeUintN($mapKeyPtr, $this->mapKey);
         $this->writeUintN($descSizePtr, $descSize);
@@ -809,14 +835,22 @@ trait UEFIEnvironmentServices
 
     private function bsExitBootServices(RuntimeInterface $runtime): void
     {
+        $mapKey = $this->arg($runtime, 1);
         if ($this->exitBootServicesLogCount < 5) {
-            $mapKey = $this->arg($runtime, 1);
             $runtime->option()->logger()->warning(sprintf(
-                'BS.ExitBootServices: mapKey=0x%X',
+                'BS.ExitBootServices: mapKey=0x%X current=0x%X',
                 $mapKey & 0xFFFFFFFF,
+                $this->mapKey & 0xFFFFFFFF,
             ));
             $this->exitBootServicesLogCount++;
         }
+
+        if ($mapKey !== $this->mapKey) {
+            $this->returnStatus($runtime, $this->efiError(2));
+            return;
+        }
+
+        $this->bootServicesExited = true;
         $this->returnStatus($runtime, 0);
     }
 

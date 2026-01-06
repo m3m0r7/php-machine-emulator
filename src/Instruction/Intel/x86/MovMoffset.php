@@ -24,9 +24,14 @@ class MovMoffset implements InstructionInterface
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
         $opcode = $opcodes[0];
         $memory = $runtime->memory();
-        $offset = $runtime->context()->cpu()->addressSize() === 32
-            ? $memory->dword()
-            : $memory->short();
+        $addrSize = $runtime->context()->cpu()->addressSize();
+        if ($addrSize === 64) {
+            $offset = $memory->qword();
+        } elseif ($addrSize === 32) {
+            $offset = $memory->dword();
+        } else {
+            $offset = $memory->short();
+        }
         $opSize = $runtime->context()->cpu()->operandSize();
         $segment = $runtime->context()->cpu()->segmentOverride() ?? RegisterType::DS;
         $linearOffset = $this->segmentOffsetAddress($runtime, $segment, $offset);

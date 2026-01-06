@@ -104,7 +104,7 @@ class Pit
         return $ret;
     }
 
-    private function advanceFromHostTime(): void
+    public function advanceFromHostTime(?callable $irq0 = null): void
     {
         $now = microtime(true);
         if ($this->lastUpdateTimeSec <= 0.0) {
@@ -125,8 +125,8 @@ class Pit
         }
         $this->fractionalBaseTicks -= $ticks;
 
-        // Advance channel 0 only (no IRQ0 delivery here; BDA ticks are handled elsewhere).
-        $this->advanceCounter0ByBaseTicks($ticks, null);
+        // Advance channel 0 and optionally raise IRQ0 on rollover.
+        $this->advanceCounter0ByBaseTicks($ticks, $irq0);
     }
 
     private function advanceCounter0ByBaseTicks(int $ticks, ?callable $irq0): void

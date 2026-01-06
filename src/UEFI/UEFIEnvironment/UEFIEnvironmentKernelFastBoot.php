@@ -10,6 +10,8 @@ use PHPMachineEmulator\Stream\PagedMemoryStream;
 
 trait UEFIEnvironmentKernelFastBoot
 {
+    private ?array $grubBootEntry = null;
+
     public function maybeFastDecompressKernel(RuntimeInterface $runtime, int $ip, int $hitCount): bool
     {
         if (!$this->fastKernelEnabled()) {
@@ -57,6 +59,42 @@ trait UEFIEnvironmentKernelFastBoot
         }
         $kernelEnd = $kernelBase + $kernelSize;
 
+        $this->maybeCaptureBootParams($runtime, $handle, $kernel);
+
+        if (empty($kernel['fast_done'])) {
+            $bootParams = $this->resolveBootParams($runtime, $kernel);
+            if ($bootParams === null) {
+                $bootParamsHint = $kernel['boot_params_hint'] ?? null;
+                if ($bootParamsHint === null) {
+                    $bootParamsHint = $this->findBootParams($runtime, $kernel, 0);
+                    if ($bootParamsHint !== null) {
+                        $this->linuxKernelImages[$handle]['boot_params_hint'] = $bootParamsHint;
+                        $kernel['boot_params_hint'] = $bootParamsHint;
+                    }
+                }
+                if ($bootParamsHint !== null && empty($kernel['boot_params_patched'])) {
+                    if ($this->patchBootParamsFromGrub($runtime, $bootParamsHint, $kernel)) {
+                        $this->linuxKernelImages[$handle]['boot_params_patched'] = true;
+                        $kernel['boot_params_patched'] = true;
+                        $this->linuxKernelImages[$handle]['boot_params'] = $bootParamsHint;
+                        $kernel['boot_params'] = $bootParamsHint;
+                    }
+                }
+                if ($this->linuxKernelFastBootLogCount < 20) {
+                    $runtime->option()->logger()->warning(sprintf(
+                        'FAST_KERNEL_BOOT_PARAMS_MISS: ip=0x%08X base=0x%08X hint=0x%08X',
+                        $ip & 0xFFFFFFFF,
+                        $kernelBase & 0xFFFFFFFF,
+                        ($bootParamsHint ?? 0) & 0xFFFFFFFF,
+                    ));
+                    $this->linuxKernelFastBootLogCount++;
+                }
+            } else {
+                $this->linuxKernelImages[$handle]['boot_params'] = $bootParams;
+                $kernel['boot_params'] = $bootParams;
+            }
+        }
+
         if (!empty($kernel['fast_done'])) {
             if (empty($kernel['fast_jump_done'])) {
                 $fastReturn = (int) ($kernel['fast_return'] ?? 0);
@@ -70,13 +108,15 @@ trait UEFIEnvironmentKernelFastBoot
 
                     $fastProlog = $kernel['fast_prolog'] ?? null;
                     $foundFastReturn = false;
+                    $pushes = [];
+                    $locals = 0;
                     if ($fastReturn > 0 && is_array($fastProlog)) {
                         $pushes = $fastProlog['pushes'] ?? [];
                         $locals = (int) ($fastProlog['locals'] ?? 0);
                         if ($pushes !== [] || $locals > 0) {
                             $frameSize = $locals + (count($pushes) * $ptrSize);
                             $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
-                            $scanMax = $sp + 0x800;
+                            $scanMax = $sp + 0x20000;
                             for ($addr = $sp; $addr <= $scanMax; $addr += $ptrSize) {
                                 $candidate = $this->readPointer($runtime, $addr, $ptrSize);
                                 if ($candidate !== $fastReturn) {
@@ -109,6 +149,32 @@ trait UEFIEnvironmentKernelFastBoot
                                 return true;
                             }
                         }
+                    }
+
+                    if ($fastReturn > 0 && !$foundFastReturn && ($pushes !== [] || $locals > 0)) {
+                        $frameSize = $locals + (count($pushes) * $ptrSize);
+                        $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
+                        $newSp = $sp + $frameSize + $ptrSize;
+                        if ($newSp > $sp) {
+                            $ma->writeBySize(RegisterType::ESP, $newSp, $ptrSize * 8);
+                        }
+                        $bootParamsHint = $kernel['boot_params_hint'] ?? null;
+                        if ($bootParamsHint !== null) {
+                            $ma->writeBySize(RegisterType::ESI, $bootParamsHint, $ptrSize * 8);
+                        }
+                        $ma->writeBySize(RegisterType::EAX, 0, $ptrSize * 8);
+                        $runtime->memory()->setOffset($fastReturn);
+                        $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
+                        if ($this->linuxKernelFastBootLogCount < 20) {
+                            $runtime->option()->logger()->warning(sprintf(
+                                'FAST_KERNEL_FORCE_SKIP: return=0x%08X sp=0x%08X new_sp=0x%08X',
+                                $fastReturn & 0xFFFFFFFF,
+                                $sp & 0xFFFFFFFF,
+                                $newSp & 0xFFFFFFFF,
+                            ));
+                            $this->linuxKernelFastBootLogCount++;
+                        }
+                        return true;
                     }
 
                     if ($fastReturn > 0 && !$foundFastReturn && $this->linuxKernelSkipLogCount < 5) {
@@ -206,6 +272,24 @@ trait UEFIEnvironmentKernelFastBoot
                     }
                 }
             }
+            $skipFail = (int) ($kernel['fast_skip_fail'] ?? 0) + 1;
+            $this->linuxKernelImages[$handle]['fast_skip_fail'] = $skipFail;
+            if ($skipFail >= 1) {
+                $elfEntry = (int) ($kernel['elf_entry'] ?? 0);
+                $elfBits = (int) ($kernel['elf_bits'] ?? 0);
+                if ($elfEntry > 0 && $elfBits === 32) {
+                    $latest = $this->linuxKernelImages[$handle] ?? $kernel;
+                    if (
+                        $this->fastKernelJumpToEntry($runtime, $handle, $latest, [
+                        'entry' => $elfEntry,
+                        'bits' => $elfBits,
+                        ])
+                    ) {
+                        return true;
+                    }
+                }
+            }
+
             return false;
         }
 
@@ -272,10 +356,6 @@ trait UEFIEnvironmentKernelFastBoot
         }
 
         $this->loadElfSegments($runtime, $decoded, $elf);
-
-        if ($this->fastKernelJumpToEntry($runtime, $handle, $kernel, $elf)) {
-            return true;
-        }
 
         $kernelLimit = $kernelBase + $kernelSize;
 
@@ -383,6 +463,9 @@ trait UEFIEnvironmentKernelFastBoot
         }
 
         if ($framesUnwound === 0) {
+            if ($this->fastKernelJumpToEntry($runtime, $handle, $kernel, $elf)) {
+                return true;
+            }
             $this->logKernelFastBoot($runtime, 'stack unwind failed', $kernel);
             return false;
         }
@@ -395,7 +478,6 @@ trait UEFIEnvironmentKernelFastBoot
             ];
         }
         $this->linuxKernelImages[$handle]['fast_done'] = true;
-        $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
         $this->linuxKernelImages[$handle]['elf_entry'] = $elf['entry'];
         $this->linuxKernelImages[$handle]['elf_bits'] = $elf['bits'] ?? 0;
 
@@ -444,6 +526,12 @@ trait UEFIEnvironmentKernelFastBoot
 
             $this->setupFlatGdt32($runtime);
             $ma = $runtime->memoryAccessor();
+            $bootParams = $this->resolveBootParams($runtime, $info);
+            if ($bootParams === null) {
+                return false;
+            }
+            $ma->writeBySize(RegisterType::ESI, $bootParams, 32);
+            $this->linuxKernelImages[$handle]['boot_params'] = $bootParams;
             $ma->writeBySize(RegisterType::EAX, 0, 32);
             $runtime->memory()->setOffset($entry);
             $this->linuxKernelImages[$handle]['fast_recover_done'] = true;
@@ -611,8 +699,17 @@ trait UEFIEnvironmentKernelFastBoot
         string $path,
         string $imageData,
     ): void {
-        if (!$this->isLikelyLinuxKernelPath($path)) {
-            return;
+        $lowerPath = strtolower($path);
+        $looksKernelPath = $this->isLikelyLinuxKernelPath($path);
+        if (!$looksKernelPath) {
+            if (str_contains($lowerPath, 'grub')) {
+                return;
+            }
+            if (str_ends_with($lowerPath, '/bootx64.efi') || str_ends_with($lowerPath, '/bootia32.efi')) {
+                if (stripos($imageData, 'grub') !== false) {
+                    return;
+                }
+            }
         }
 
         $info = $this->parseLinuxKernelImage($imageData);
@@ -883,22 +980,25 @@ trait UEFIEnvironmentKernelFastBoot
         }
 
         $ma = $runtime->memoryAccessor();
-        $bootParams = $kernel['boot_params'] ?? null;
-        if ($bootParams === null || $bootParams <= 0) {
-            $bootParams = $ma->fetch(RegisterType::ESI)->asBytesBySize(32);
+        $bootParams = $this->resolveBootParams($runtime, $kernel);
+        if ($bootParams === null) {
+            if ($this->linuxKernelFastBootLogCount < 20) {
+                $currentEsi = $ma->fetch(RegisterType::ESI)->asBytesBySize(32);
+                $runtime->option()->logger()->warning(sprintf(
+                    'FAST_KERNEL_BOOT_PARAMS_MISS: entry=0x%08X esi=0x%08X',
+                    $entry & 0xFFFFFFFF,
+                    $currentEsi & 0xFFFFFFFF,
+                ));
+                $this->linuxKernelFastBootLogCount++;
+            }
+            return false;
         }
-        if ($bootParams === null || $bootParams <= 0) {
-            $bootParams = $this->findBootParams($runtime);
-        }
-        if ($bootParams !== null && $bootParams > 0) {
-            $this->linuxKernelImages[$handle]['boot_params'] = $bootParams;
-        }
+
+        $this->linuxKernelImages[$handle]['boot_params'] = $bootParams;
 
         $this->setupFlatGdt32($runtime);
         $ma->writeBySize(RegisterType::EAX, 0, 32);
-        if ($bootParams !== null) {
-            $ma->writeBySize(RegisterType::ESI, $bootParams, 32);
-        }
+        $ma->writeBySize(RegisterType::ESI, $bootParams, 32);
         $runtime->memory()->setOffset($entry);
 
         $this->linuxKernelImages[$handle]['fast_done'] = true;
@@ -910,7 +1010,7 @@ trait UEFIEnvironmentKernelFastBoot
             $runtime->option()->logger()->warning(sprintf(
                 'FAST_KERNEL_ENTRY: entry=0x%08X boot_params=0x%08X',
                 $entry & 0xFFFFFFFF,
-                ($bootParams ?? 0) & 0xFFFFFFFF,
+                $bootParams & 0xFFFFFFFF,
             ));
             $this->linuxKernelFastBootLogCount++;
         }
@@ -931,6 +1031,14 @@ trait UEFIEnvironmentKernelFastBoot
         $cpu->setDefaultAddressSize(32);
 
         $ma = $runtime->memoryAccessor();
+        $cr0 = $ma->readControlRegister(0);
+        $cr4 = $ma->readControlRegister(4);
+        $ma->writeControlRegister(4, $cr4 & ~(1 << 5));
+        $ma->writeControlRegister(0, ($cr0 | 0x1) & ~0x80000000);
+        $efer = $ma->readEfer();
+        $ma->writeEfer($efer & ~((1 << 8) | (1 << 10)));
+        $ma->setInterruptFlag(false);
+
         $base = $this->findFreeRange(0x1000, null, 0x1000) ?? 0x00080000;
         $ma->allocate($base, 0x1000, safe: false);
         $ma->writePhysical64($base, 0x0000000000000000);
@@ -1184,6 +1292,15 @@ trait UEFIEnvironmentKernelFastBoot
         return $value;
     }
 
+    private function readPhysicalPointer(RuntimeInterface $runtime, int $address, int $size): int
+    {
+        $ma = $runtime->memoryAccessor();
+        if ($size === 8) {
+            return $ma->readPhysical64($address);
+        }
+        return $ma->readPhysical32($address);
+    }
+
     private function readByte(RuntimeInterface $runtime, int $address): int
     {
         $memory = $runtime->memory();
@@ -1194,10 +1311,22 @@ trait UEFIEnvironmentKernelFastBoot
         return $value;
     }
 
+    private function readPhysicalByte(RuntimeInterface $runtime, int $address): int
+    {
+        return $runtime->memoryAccessor()->readPhysical8($address) & 0xFF;
+    }
+
     private function readWord(RuntimeInterface $runtime, int $address): int
     {
         $lo = $this->readByte($runtime, $address);
         $hi = $this->readByte($runtime, $address + 1);
+        return ($lo | ($hi << 8)) & 0xFFFF;
+    }
+
+    private function readPhysicalWord(RuntimeInterface $runtime, int $address): int
+    {
+        $lo = $this->readPhysicalByte($runtime, $address);
+        $hi = $this->readPhysicalByte($runtime, $address + 1);
         return ($lo | ($hi << 8)) & 0xFFFF;
     }
 
@@ -1210,33 +1339,393 @@ trait UEFIEnvironmentKernelFastBoot
         return $value;
     }
 
-    private function findBootParams(RuntimeInterface $runtime): ?int
+    private function readBytes(RuntimeInterface $runtime, int $address, int $length): string
     {
         $memory = $runtime->memory();
         $saved = $memory->offset();
+        $memory->setOffset($address);
+        $data = $memory->read($length);
+        $memory->setOffset($saved);
+        return $data;
+    }
 
-        $max = 0x2000000;
+    private function readPhysicalBytes(RuntimeInterface $runtime, int $address, int $length): string
+    {
+        $data = '';
+        $ma = $runtime->memoryAccessor();
+        for ($i = 0; $i < $length; $i++) {
+            $data .= chr($ma->readPhysical8($address + $i) & 0xFF);
+        }
+        return $data;
+    }
+
+    private function isValidBootParams(RuntimeInterface $runtime, int $address): bool
+    {
+        if ($address <= 0) {
+            return false;
+        }
+        if ($this->readPhysicalWord($runtime, $address + 0x1fe) !== 0xAA55) {
+            return false;
+        }
+        if ($this->readPhysicalBytes($runtime, $address + 0x202, 4) !== 'HdrS') {
+            return false;
+        }
+        $version = $this->readPhysicalWord($runtime, $address + 0x206);
+        return $version >= 0x0200;
+    }
+
+    private function normalizeBootParamsCandidate(RuntimeInterface $runtime, int $candidate): ?int
+    {
+        if ($candidate <= 0) {
+            return null;
+        }
+
+        $normalized = null;
+        if ($this->isValidBootParams($runtime, $candidate)) {
+            $normalized = $candidate;
+        } elseif ($this->readPhysicalBytes($runtime, $candidate, 4) === 'HdrS') {
+            $base = $candidate - 0x202;
+            if ($this->isValidBootParams($runtime, $base)) {
+                $normalized = $base;
+            }
+        } elseif ($this->readPhysicalBytes($runtime, $candidate + 0x11, 4) === 'HdrS') {
+            $base = $candidate - 0x1f1;
+            if ($this->isValidBootParams($runtime, $base)) {
+                $normalized = $base;
+            }
+        }
+
+        if ($normalized === null) {
+            return null;
+        }
+
+        if ($this->bootParamsScore($runtime, $normalized) <= 0) {
+            return null;
+        }
+
+        return $normalized;
+    }
+
+    private function isLikelyCmdline(RuntimeInterface $runtime, int $address): bool
+    {
+        if ($address <= 0) {
+            return false;
+        }
+        $data = $this->readPhysicalBytes($runtime, $address, 256);
+        $pos = strpos($data, "\0");
+        if ($pos === false) {
+            return false;
+        }
+        $line = substr($data, 0, $pos);
+        if ($line === '') {
+            return false;
+        }
+        if (preg_match('/[\0--]/', $line)) {
+            return false;
+        }
+        return true;
+    }
+
+    private function bootParamsScore(RuntimeInterface $runtime, int $address): int
+    {
+        $score = 0;
+        $cmdLinePtr = $this->readPhysicalPointer($runtime, $address + 0x228, 4);
+        if ($cmdLinePtr > 0 && $this->isLikelyCmdline($runtime, $cmdLinePtr)) {
+            $score += 3;
+        }
+        $ramdiskImage = $this->readPhysicalPointer($runtime, $address + 0x218, 4);
+        $ramdiskSize = $this->readPhysicalPointer($runtime, $address + 0x21c, 4);
+        if ($ramdiskImage > 0 && $ramdiskSize > 0) {
+            $score += 2;
+        }
+        $loader = $this->readPhysicalByte($runtime, $address + 0x210);
+        if ($loader !== 0) {
+            $score += 1;
+        }
+        return $score;
+    }
+
+    private function isAddressInKernel(int $address, array $kernel): bool
+    {
+        $base = (int) ($kernel['base'] ?? 0);
+        $size = (int) ($kernel['size'] ?? 0);
+        return $base > 0 && $size > 0 && $address >= $base && $address < ($base + $size);
+    }
+
+    private function bootParamsFromRegister(RuntimeInterface $runtime, array $kernel): ?int
+    {
+        $cpu = $runtime->context()->cpu();
+        $ptrSize = $cpu->addressSize() === 64 ? 64 : 32;
+        $reg = $ptrSize === 64 ? RegisterType::RSI : RegisterType::ESI;
+        $candidate = $runtime->memoryAccessor()->fetch($reg)->asBytesBySize($ptrSize);
+        if ($candidate <= 0) {
+            return null;
+        }
+        $normalized = $this->normalizeBootParamsCandidate($runtime, $candidate);
+        if ($normalized === null) {
+            return null;
+        }
+        if ($this->isAddressInKernel($normalized, $kernel)) {
+            return null;
+        }
+        return $normalized;
+    }
+
+    private function bootParamsFromStack(RuntimeInterface $runtime, array $kernel): ?int
+    {
+        $cpu = $runtime->context()->cpu();
+        $ptrSize = $cpu->addressSize() === 64 ? 8 : 4;
+        $sp = $runtime->memoryAccessor()->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
+        if ($sp <= 0) {
+            return null;
+        }
+        $scanMax = $sp + 0x400;
+        $allocBase = $this->allocator->base();
+        $allocEnd = $this->allocator->cursor();
+        for ($addr = $sp; $addr < $scanMax; $addr += $ptrSize) {
+            $candidate = $this->readPointer($runtime, $addr, $ptrSize);
+            if ($candidate <= 0) {
+                continue;
+            }
+            $normalized = $this->normalizeBootParamsCandidate($runtime, $candidate);
+            if ($normalized !== null && !$this->isAddressInKernel($normalized, $kernel)) {
+                return $normalized;
+            }
+            if ($candidate >= $allocBase && $candidate < $allocEnd) {
+                $scanStart = max($allocBase, $candidate - 0x2000);
+                $scanEnd = min($allocEnd, $candidate + 0x4000);
+                $near = $this->scanBootParamsRange($runtime, $kernel, $scanStart, $scanEnd);
+                if ($near !== null) {
+                    return $near;
+                }
+            }
+        }
+        return null;
+    }
+
+    private function resolveBootParams(RuntimeInterface $runtime, array $kernel): ?int
+    {
+        $bootParams = $kernel['boot_params'] ?? null;
+        if ($bootParams !== null && $bootParams > 0) {
+            $bootParams = $this->normalizeBootParamsCandidate($runtime, $bootParams);
+            if ($bootParams === null || $this->isAddressInKernel($bootParams, $kernel)) {
+                $bootParams = null;
+            }
+        }
+        if ($bootParams !== null && $bootParams > 0) {
+            return $bootParams;
+        }
+        $candidate = $this->bootParamsFromRegister($runtime, $kernel);
+        if ($candidate !== null) {
+            return $candidate;
+        }
+        $candidate = $this->bootParamsFromStack($runtime, $kernel);
+        if ($candidate !== null) {
+            return $candidate;
+        }
+        return $this->findBootParams($runtime, $kernel);
+    }
+
+    private function maybeCaptureBootParams(RuntimeInterface $runtime, int $handle, array &$kernel): void
+    {
+        $bootParams = $kernel['boot_params'] ?? null;
+        if ($bootParams !== null && $bootParams > 0) {
+            $normalized = $this->normalizeBootParamsCandidate($runtime, $bootParams);
+            if ($normalized !== null && !$this->isAddressInKernel($normalized, $kernel)) {
+                $this->linuxKernelImages[$handle]['boot_params'] = $normalized;
+                $kernel['boot_params'] = $normalized;
+                return;
+            }
+            unset($this->linuxKernelImages[$handle]['boot_params']);
+            $kernel['boot_params'] = null;
+        }
+
+        $bootParams = $this->bootParamsFromRegister($runtime, $kernel);
+        $source = 'reg';
+        if ($bootParams === null) {
+            $bootParams = $this->bootParamsFromStack($runtime, $kernel);
+            $source = 'stack';
+        }
+        if ($bootParams === null) {
+            return;
+        }
+
+        $this->linuxKernelImages[$handle]['boot_params'] = $bootParams;
+        $kernel['boot_params'] = $bootParams;
+        if ($this->linuxKernelFastBootLogCount < 20) {
+            $runtime->option()->logger()->warning(sprintf(
+                'FAST_KERNEL_BOOT_PARAMS: handle=0x%08X params=0x%08X source=%s',
+                $handle & 0xFFFFFFFF,
+                $bootParams & 0xFFFFFFFF,
+                $source,
+            ));
+            $this->linuxKernelFastBootLogCount++;
+        }
+    }
+
+    private function findBootParams(RuntimeInterface $runtime, array $kernel = [], int $minScore = 1): ?int
+    {
+        $memory = $runtime->memory();
+        $scanMemory = $memory instanceof PagedMemoryStream ? $memory->physicalStream() : $memory;
+        $saved = $scanMemory->offset();
+        $best = null;
+        $bestScore = -1;
+
+        $maxMemory = $runtime->logicBoard()->memory()->maxMemory();
+        if ($maxMemory <= 0) {
+            $scanMemory->setOffset($saved);
+            return null;
+        }
+
         $chunk = 0x10000;
-        for ($base = 0; $base < $max; $base += $chunk) {
-            $memory->setOffset($base);
-            $data = $memory->read($chunk);
+        $ranges = [];
+        $ranges[] = [0, min($maxMemory, 0x2000000)];
+
+        $allocBase = $this->allocator->base();
+        $allocEnd = min($maxMemory, $this->allocator->cursor());
+        if ($allocEnd > $allocBase) {
+            $ranges[] = [$allocBase, $allocEnd];
+        }
+
+        foreach ($this->pageAllocations as $alloc) {
+            $type = (int) ($alloc['type'] ?? 0);
+            if (
+                $type !== self::EFI_MEMORY_TYPE_BOOT_SERVICES_DATA
+                && $type !== self::EFI_MEMORY_TYPE_BOOT_SERVICES_CODE
+                && $type !== self::EFI_MEMORY_TYPE_LOADER_CODE
+                && $type !== self::EFI_MEMORY_TYPE_LOADER_DATA
+            ) {
+                continue;
+            }
+            $start = (int) ($alloc['start'] ?? 0);
+            $end = (int) ($alloc['end'] ?? 0);
+            if ($end <= $start) {
+                continue;
+            }
+            if ($start < 0) {
+                $start = 0;
+            }
+            if ($end > $maxMemory) {
+                $end = $maxMemory;
+            }
+            if ($end > $start) {
+                $ranges[] = [$start, $end];
+            }
+        }
+
+        foreach ($ranges as $range) {
+            [$rangeStart, $rangeEnd] = $range;
+            if ($rangeEnd <= $rangeStart) {
+                continue;
+            }
+            for ($base = $rangeStart; $base < $rangeEnd; $base += $chunk) {
+                $scanMemory->setOffset($base);
+                $data = $scanMemory->read($chunk);
+                $pos = strpos($data, 'HdrS');
+                while ($pos !== false) {
+                    $hdr = $base + $pos;
+                    $bootParams = $hdr - 0x202;
+                    if ($bootParams >= 0) {
+                        $bootFlag = $this->readPhysicalWord($runtime, $bootParams + 0x1fe);
+                        if ($bootFlag === 0xAA55) {
+                            if (!$this->isAddressInKernel($bootParams, $kernel)) {
+                                $score = $this->bootParamsScore($runtime, $bootParams);
+                                if ($score > $bestScore) {
+                                    $bestScore = $score;
+                                    $best = $bootParams;
+                                    if ($score >= 3) {
+                                        $scanMemory->setOffset($saved);
+                                        if ($this->linuxKernelFastBootLogCount < 20) {
+                                            $cmdLinePtr = $this->readPhysicalPointer($runtime, $bootParams + 0x228, 4);
+                                            $ramdiskImage = $this->readPhysicalPointer($runtime, $bootParams + 0x218, 4);
+                                            $ramdiskSize = $this->readPhysicalPointer($runtime, $bootParams + 0x21c, 4);
+                                            $loader = $this->readPhysicalByte($runtime, $bootParams + 0x210);
+                                            $runtime->option()->logger()->warning(sprintf(
+                                                'FAST_KERNEL_BOOT_PARAMS_SCAN: addr=0x%08X score=%d cmd=0x%08X ram=0x%08X size=0x%X loader=0x%02X',
+                                                $bootParams & 0xFFFFFFFF,
+                                                $score,
+                                                $cmdLinePtr & 0xFFFFFFFF,
+                                                $ramdiskImage & 0xFFFFFFFF,
+                                                $ramdiskSize & 0xFFFFFFFF,
+                                                $loader & 0xFF,
+                                            ));
+                                            $this->linuxKernelFastBootLogCount++;
+                                        }
+                                        return $bootParams;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    $pos = strpos($data, 'HdrS', $pos + 1);
+                }
+            }
+        }
+
+        $scanMemory->setOffset($saved);
+        if ($best !== null && $this->linuxKernelFastBootLogCount < 20) {
+            $cmdLinePtr = $this->readPhysicalPointer($runtime, $best + 0x228, 4);
+            $ramdiskImage = $this->readPhysicalPointer($runtime, $best + 0x218, 4);
+            $ramdiskSize = $this->readPhysicalPointer($runtime, $best + 0x21c, 4);
+            $loader = $this->readPhysicalByte($runtime, $best + 0x210);
+            $runtime->option()->logger()->warning(sprintf(
+                'FAST_KERNEL_BOOT_PARAMS_SCAN: addr=0x%08X score=%d cmd=0x%08X ram=0x%08X size=0x%X loader=0x%02X',
+                $best & 0xFFFFFFFF,
+                $bestScore,
+                $cmdLinePtr & 0xFFFFFFFF,
+                $ramdiskImage & 0xFFFFFFFF,
+                $ramdiskSize & 0xFFFFFFFF,
+                $loader & 0xFF,
+            ));
+            $this->linuxKernelFastBootLogCount++;
+        }
+        if ($best === null || $bestScore < $minScore) {
+            return null;
+        }
+        return $best;
+    }
+
+    private function scanBootParamsRange(RuntimeInterface $runtime, array $kernel, int $rangeStart, int $rangeEnd): ?int
+    {
+        $memory = $runtime->memory();
+        $scanMemory = $memory instanceof PagedMemoryStream ? $memory->physicalStream() : $memory;
+        $saved = $scanMemory->offset();
+        $best = null;
+        $bestScore = -1;
+        $chunk = 0x1000;
+
+        if ($rangeEnd <= $rangeStart) {
+            return null;
+        }
+
+        for ($base = $rangeStart; $base < $rangeEnd; $base += $chunk) {
+            $size = min($chunk, $rangeEnd - $base);
+            $scanMemory->setOffset($base);
+            $data = $scanMemory->read($size);
             $pos = strpos($data, 'HdrS');
             while ($pos !== false) {
                 $hdr = $base + $pos;
                 $bootParams = $hdr - 0x202;
                 if ($bootParams >= 0) {
-                    $bootFlag = $this->readWord($runtime, $bootParams + 0x1fe);
-                    if ($bootFlag === 0xAA55) {
-                        $memory->setOffset($saved);
-                        return $bootParams;
+                    $bootFlag = $this->readPhysicalWord($runtime, $bootParams + 0x1fe);
+                    if ($bootFlag === 0xAA55 && !$this->isAddressInKernel($bootParams, $kernel)) {
+                        $score = $this->bootParamsScore($runtime, $bootParams);
+                        if ($score > $bestScore) {
+                            $bestScore = $score;
+                            $best = $bootParams;
+                            if ($score >= 3) {
+                                $scanMemory->setOffset($saved);
+                                return $bootParams;
+                            }
+                        }
                     }
                 }
                 $pos = strpos($data, 'HdrS', $pos + 1);
             }
         }
 
-        $memory->setOffset($saved);
-        return null;
+        $scanMemory->setOffset($saved);
+        return $best;
     }
 
     private function u16le(string $data, int $offset): int
@@ -1265,6 +1754,175 @@ trait UEFIEnvironmentKernelFastBoot
         $lo = $this->u32le($data, $offset);
         $hi = $this->u32le($data, $offset + 4);
         return ($hi << 32) | $lo;
+    }
+
+    private function loadGrubBootEntry(): ?array
+    {
+        if ($this->grubBootEntry !== null) {
+            return $this->grubBootEntry;
+        }
+
+        $paths = [
+            '/boot/grub/grub.cfg',
+            '/grub/grub.cfg',
+            '/EFI/BOOT/grub.cfg',
+        ];
+
+        foreach ($paths as $path) {
+            $data = $this->iso->readFile($path);
+            if ($data === null) {
+                continue;
+            }
+            $entry = $this->parseGrubConfig($data);
+            if ($entry !== null) {
+                $this->grubBootEntry = $entry;
+                return $entry;
+            }
+        }
+
+        $localPath = 'boot/grub/grub.cfg';
+        if (is_file($localPath)) {
+            $data = file_get_contents($localPath);
+            if (is_string($data)) {
+                $entry = $this->parseGrubConfig($data);
+                if ($entry !== null) {
+                    $this->grubBootEntry = $entry;
+                    return $entry;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{kernel: string, initrd: string|null, cmdline: string}|null
+     */
+    private function parseGrubConfig(string $data): ?array
+    {
+        $kernel = null;
+        $initrd = null;
+        $cmdline = '';
+
+        foreach (
+            preg_split('/
+?
+/', $data) as $line
+        ) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+            if ($kernel === null && preg_match('/^linux\S*\s+(\S+)(?:\s+(.*))?$/i', $line, $match)) {
+                $kernel = $match[1] ?? null;
+                $cmdline = trim((string) ($match[2] ?? ''));
+                continue;
+            }
+            if ($initrd === null && preg_match('/^initrd\S*\s+(\S+)/i', $line, $match)) {
+                $initrd = $match[1] ?? null;
+            }
+            if ($kernel !== null && $initrd !== null) {
+                break;
+            }
+        }
+
+        if ($kernel === null) {
+            return null;
+        }
+
+        $kernel = '/' . ltrim($kernel, '/');
+        if ($initrd !== null) {
+            $initrd = '/' . ltrim($initrd, '/');
+        }
+
+        return [
+            'kernel' => $kernel,
+            'initrd' => $initrd,
+            'cmdline' => $cmdline,
+        ];
+    }
+
+    private function allocateBootData(RuntimeInterface $runtime, int $size, int $align = 0x1000): int
+    {
+        $bytes = $this->align(max(1, $size), $align);
+        $addr = $this->findFreeRange($bytes, null, $align);
+        if ($addr === null) {
+            throw new \RuntimeException('Boot data allocator out of space');
+        }
+        $this->zeroMemory($addr, $bytes);
+        $this->registerPageAllocation($addr, $bytes, self::EFI_MEMORY_TYPE_LOADER_DATA);
+        return $addr;
+    }
+
+    private function writePhysicalBulk(RuntimeInterface $runtime, int $address, string $data): void
+    {
+        if ($data === '') {
+            return;
+        }
+
+        $memory = $runtime->memory();
+        if ($memory instanceof PagedMemoryStream) {
+            $memory->physicalStream()->copyFromString($data, $address);
+            return;
+        }
+
+        $memory->copyFromString($data, $address);
+    }
+
+    private function patchBootParamsFromGrub(RuntimeInterface $runtime, int $bootParams, array &$kernel): bool
+    {
+        $entry = $this->loadGrubBootEntry();
+        if ($entry === null) {
+            return false;
+        }
+
+        $ma = $runtime->memoryAccessor();
+        $patched = false;
+
+        $cmdline = trim((string) ($entry['cmdline'] ?? ''));
+        if ($cmdline !== '') {
+            $cmdlineData = $cmdline . " ";
+            $cmdlineAddr = $this->allocateBootData($runtime, strlen($cmdlineData), 16);
+            $this->writePhysicalBulk($runtime, $cmdlineAddr, $cmdlineData);
+            $ma->writePhysical32($bootParams + 0x228, $cmdlineAddr);
+            $kernel['cmdline_addr'] = $cmdlineAddr;
+            $kernel['cmdline_size'] = strlen($cmdlineData);
+            $patched = true;
+        }
+
+        $initrdPath = $entry['initrd'] ?? null;
+        if (is_string($initrdPath) && $initrdPath !== '') {
+            $initrd = $this->iso->readFile($initrdPath);
+            if (is_string($initrd) && $initrd !== '') {
+                $initrdAddr = $this->allocateBootData($runtime, strlen($initrd), 0x1000);
+                $this->writePhysicalBulk($runtime, $initrdAddr, $initrd);
+                $ma->writePhysical32($bootParams + 0x218, $initrdAddr);
+                $ma->writePhysical32($bootParams + 0x21C, strlen($initrd));
+                $kernel['initrd_addr'] = $initrdAddr;
+                $kernel['initrd_size'] = strlen($initrd);
+                $patched = true;
+            }
+        }
+
+        if ($patched) {
+            $this->writePhysicalBulk($runtime, $bootParams + 0x210, chr(0xFF));
+        }
+
+        if ($patched && $this->linuxKernelFastBootLogCount < 20) {
+            $cmdPtr = $ma->readPhysical32($bootParams + 0x228) & 0xFFFFFFFF;
+            $ramdiskAddr = $ma->readPhysical32($bootParams + 0x218) & 0xFFFFFFFF;
+            $ramdiskSize = $ma->readPhysical32($bootParams + 0x21C) & 0xFFFFFFFF;
+            $runtime->option()->logger()->warning(sprintf(
+                'FAST_KERNEL_BOOT_PARAMS_PATCH: addr=0x%08X cmd=0x%08X ram=0x%08X size=0x%X',
+                $bootParams & 0xFFFFFFFF,
+                $cmdPtr,
+                $ramdiskAddr,
+                $ramdiskSize,
+            ));
+            $this->linuxKernelFastBootLogCount++;
+        }
+
+        return $patched;
     }
 
     private function logKernelFastBoot(RuntimeInterface $runtime, string $message, array $kernel): void

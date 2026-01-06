@@ -76,12 +76,6 @@ impl MemoryAccessor {
             return (linear as u64, (0x0E << 16) | err);
         }
 
-        // Check reserved bits
-        if (pde & 0xFFFFFF000) == 0 {
-            let err = 0x08 | (if self.instruction_fetch { 0x10 } else { 0 });
-            return (linear as u64, (0x0E << 16) | err);
-        }
-
         // Check user access
         if is_user && (pde & 0x4) == 0 {
             let err = (if is_write { 0b10 } else { 0 }) | 0b100 | 0b1;
@@ -115,12 +109,6 @@ impl MemoryAccessor {
         // Check PTE present
         if (pte & 0x1) == 0 {
             let err = (if is_write { 0b10 } else { 0 }) | (if is_user { 0b100 } else { 0 });
-            return (linear as u64, (0x0E << 16) | err);
-        }
-
-        // Check reserved bits
-        if (pte & 0xFFFFFF000) == 0 {
-            let err = 0x08 | (if self.instruction_fetch { 0x10 } else { 0 });
             return (linear as u64, (0x0E << 16) | err);
         }
 

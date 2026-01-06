@@ -48,6 +48,10 @@ final class UEFI
     {
         $this->initializeRegisters();
         $this->initializeServices();
+        $pic = $this->runtime->context()->cpu()->picState();
+        $pic->maskMaster(0xFE);
+        $pic->maskSlave(0xFF);
+        $this->option->logger()->debug('UEFI: Initialized PIC - IRQ0 enabled, others masked');
         $this->runtime->context()->cpu()->enableA20(true);
 
         $iso = $this->isoFromMedia();
@@ -238,7 +242,8 @@ final class UEFI
         $cr0 = $ma->readControlRegister(0);
         $cr4 = $ma->readControlRegister(4);
         $ma->writeControlRegister(4, $cr4 & ~(1 << 5));
-        $ma->writeControlRegister(0, ($cr0 | 0x1) & ~0x80000000);
+        $cr0 = ($cr0 | 0x33) & ~0x80000000;
+        $ma->writeControlRegister(0, $cr0);
         $efer = $ma->readEfer();
         $ma->writeEfer($efer & ~((1 << 8) | (1 << 10)));
         $ma->setInterruptFlag(false);
@@ -258,7 +263,7 @@ final class UEFI
         $ma = $this->runtime->memoryAccessor();
         $ma->writeControlRegister(3, self::PAGE_TABLE_BASE);
         $ma->writeControlRegister(4, (1 << 5) | (1 << 9) | (1 << 10));
-        $ma->writeControlRegister(0, 0x80000001);
+        $ma->writeControlRegister(0, 0x80000033);
         $ma->writeEfer((1 << 8) | (1 << 10));
         $ma->setInterruptFlag(false);
     }

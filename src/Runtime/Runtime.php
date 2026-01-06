@@ -51,6 +51,8 @@ class Runtime implements RuntimeInterface
      * Ticks are processed every TICK_INTERVAL instructions for performance.
      */
     private int $instructionCounter = 0;
+    private float $heartbeatNext = 0.0;
+    private ?float $heartbeatInterval = null;
 
     /**
      * Number of instructions between tick processing.
@@ -254,6 +256,50 @@ class Runtime implements RuntimeInterface
 
         // Flush screen if needed (batched rendering)
         $this->context->screen()->flushIfNeeded();
+
+        $this->maybeHeartbeat();
+    }
+
+    private function maybeHeartbeat(): void
+    {
+        if ($this->heartbeatInterval === null) {
+            $env = getenv('PHPME_HEARTBEAT');
+            if ($env === false || trim((string) $env) === '') {
+                $this->heartbeatInterval = 0.0;
+                return;
+            }
+            $interval = (float) $env;
+            $this->heartbeatInterval = $interval > 0 ? $interval : 0.0;
+        }
+
+        if ($this->heartbeatInterval <= 0.0) {
+            return;
+        }
+
+        $now = microtime(true);
+        if ($this->heartbeatNext <= 0.0) {
+            $this->heartbeatNext = $now + $this->heartbeatInterval;
+            return;
+        }
+        if ($now < $this->heartbeatNext) {
+            return;
+        }
+        $this->heartbeatNext = $now + $this->heartbeatInterval;
+
+        $cpu = $this->context->cpu();
+        $mode = $cpu->isLongMode()
+            ? ($cpu->isCompatibilityMode() ? 'compat' : 'long')
+            : ($cpu->isProtectedMode() ? 'protected' : 'real');
+
+        $this->option()->logger()->warning(sprintf(
+            'HEARTBEAT: ip=0x%08X mode=%s pm=%d pg=%d lm=%d if=%d',
+            $this->memory->offset() & 0xFFFFFFFF,
+            $mode,
+            $cpu->isProtectedMode() ? 1 : 0,
+            $cpu->isPagingEnabled() ? 1 : 0,
+            $cpu->isLongMode() ? 1 : 0,
+            $this->memoryAccessor->shouldInterruptFlag() ? 1 : 0,
+        ));
     }
 
     public function addressMap(): AddressMapInterface

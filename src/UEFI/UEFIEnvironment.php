@@ -34,6 +34,8 @@ class UEFIEnvironment implements UEFIEnvironmentInterface
 
     private const EFI_MEMORY_TYPE_RESERVED = 0;
     private const EFI_MEMORY_TYPE_LOADER_CODE = 1;
+    private const EFI_MEMORY_TYPE_LOADER_DATA = 2;
+    private const EFI_MEMORY_TYPE_BOOT_SERVICES_CODE = 3;
     private const EFI_MEMORY_TYPE_BOOT_SERVICES_DATA = 4;
     private const EFI_MEMORY_TYPE_CONVENTIONAL = 7;
 
@@ -126,6 +128,7 @@ class UEFIEnvironment implements UEFIEnvironmentInterface
 
     private int $loadedImageSystemTableOffset = 0;
     private int $mapKey = 1;
+    private bool $bootServicesExited = false;
 
     private int $pointerSize;
     private int $pointerAlign;
@@ -201,10 +204,10 @@ class UEFIEnvironment implements UEFIEnvironmentInterface
     {
         $value = getenv('PHPME_FAST_KERNEL');
         if ($value === false) {
-            return false;
+            return true;
         }
-        $value = trim((string) $value);
-        if ($value === '' || $value === '0') {
+        $value = strtolower(trim((string) $value));
+        if ($value === '' || $value === '0' || $value === 'false' || $value === 'off') {
             return false;
         }
         return true;
@@ -300,6 +303,26 @@ class UEFIEnvironment implements UEFIEnvironmentInterface
         }
     }
 
+    private function touchMemoryMap(): void
+    {
+        if ($this->bootServicesExited) {
+            return;
+        }
+
+        if ($this->pointerSize === 4) {
+            $this->mapKey = ($this->mapKey + 1) & 0xFFFFFFFF;
+            if ($this->mapKey === 0) {
+                $this->mapKey = 1;
+            }
+            return;
+        }
+
+        $this->mapKey++;
+        if ($this->mapKey === 0) {
+            $this->mapKey = 1;
+        }
+    }
+
     private function registerPageAllocation(int $address, int $bytes, int $type): void
     {
         $this->pageAllocations[] = [
@@ -307,6 +330,7 @@ class UEFIEnvironment implements UEFIEnvironmentInterface
             'end' => $address + $bytes,
             'type' => $type,
         ];
+        $this->touchMemoryMap();
     }
 
     private function unregisterPageAllocation(int $address, int $bytes): void
@@ -316,6 +340,7 @@ class UEFIEnvironment implements UEFIEnvironmentInterface
             if ($alloc['start'] === $address && $alloc['end'] === $end) {
                 unset($this->pageAllocations[$index]);
                 $this->pageAllocations = array_values($this->pageAllocations);
+                $this->touchMemoryMap();
                 return;
             }
         }
