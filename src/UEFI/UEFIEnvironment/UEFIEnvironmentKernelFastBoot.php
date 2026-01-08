@@ -96,169 +96,161 @@ trait UEFIEnvironmentKernelFastBoot
         }
 
         if (!empty($kernel['fast_done'])) {
-            if (empty($kernel['fast_jump_done'])) {
-                $fastReturn = (int) ($kernel['fast_return'] ?? 0);
-                $inPayload = $payloadEnd > $payloadStart
-                    && $ip >= $payloadStart
-                    && $ip < $payloadEnd;
-                if ($fastReturn > 0 || $inPayload) {
-                    $cpu = $runtime->context()->cpu();
-                    $ptrSize = $cpu->addressSize() === 64 ? 8 : 4;
-                    $ma = $runtime->memoryAccessor();
+            if (!empty($kernel['fast_jump_done'])) {
+                return false;
+            }
+            $fastReturn = (int) ($kernel['fast_return'] ?? 0);
+            $inPayload = $payloadEnd > $payloadStart
+                && $ip >= $payloadStart
+                && $ip < $payloadEnd;
+            if ($fastReturn > 0 || $inPayload) {
+                $cpu = $runtime->context()->cpu();
+                $ptrSize = $cpu->addressSize() === 64 ? 8 : 4;
+                $ma = $runtime->memoryAccessor();
 
-                    $fastProlog = $kernel['fast_prolog'] ?? null;
-                    $foundFastReturn = false;
-                    $pushes = [];
-                    $locals = 0;
-                    if ($fastReturn > 0 && is_array($fastProlog)) {
-                        $pushes = $fastProlog['pushes'] ?? [];
-                        $locals = (int) ($fastProlog['locals'] ?? 0);
-                        if ($pushes !== [] || $locals > 0) {
-                            $frameSize = $locals + (count($pushes) * $ptrSize);
-                            $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
-                            $scanMax = $sp + 0x20000;
-                            for ($addr = $sp; $addr <= $scanMax; $addr += $ptrSize) {
-                                $candidate = $this->readPointer($runtime, $addr, $ptrSize);
-                                if ($candidate !== $fastReturn) {
-                                    continue;
-                                }
-                                $foundFastReturn = true;
-                                $frameBase = $addr - $frameSize;
-                                if ($frameBase < $sp) {
-                                    continue;
-                                }
-                                $offset = 0;
-                                $base = $frameBase + $locals;
-                                for ($i = count($pushes) - 1; $i >= 0; $i--) {
-                                    $reg = $pushes[$i];
-                                    $value = $this->readPointer($runtime, $base + $offset, $ptrSize);
-                                    $ma->writeBySize($reg, $value, $ptrSize * 8);
-                                    $offset += $ptrSize;
-                                }
-                                $ma->writeBySize(RegisterType::ESP, $addr + $ptrSize, $ptrSize * 8);
-                                $ma->writeBySize(RegisterType::EAX, 0, $ptrSize * 8);
-                                $runtime->memory()->setOffset($fastReturn);
-                                $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
-                                if ($this->linuxKernelFastBootLogCount < 20) {
-                                    $runtime->option()->logger()->warning(sprintf(
-                                        'FAST_KERNEL_SKIP: return=0x%08X',
-                                        $fastReturn & 0xFFFFFFFF,
-                                    ));
-                                    $this->linuxKernelFastBootLogCount++;
-                                }
-                                return true;
-                            }
-                        }
-                    }
-
-                    if ($fastReturn > 0 && !$foundFastReturn && ($pushes !== [] || $locals > 0)) {
+                $fastProlog = $kernel['fast_prolog'] ?? null;
+                $foundFastReturn = false;
+                $pushes = [];
+                $locals = 0;
+                if ($fastReturn > 0 && is_array($fastProlog)) {
+                    $pushes = $fastProlog['pushes'] ?? [];
+                    $locals = (int) ($fastProlog['locals'] ?? 0);
+                    if ($pushes !== [] || $locals > 0) {
                         $frameSize = $locals + (count($pushes) * $ptrSize);
                         $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
-                        $newSp = $sp + $frameSize + $ptrSize;
-                        if ($newSp > $sp) {
-                            $ma->writeBySize(RegisterType::ESP, $newSp, $ptrSize * 8);
-                        }
-                        $bootParamsHint = $kernel['boot_params_hint'] ?? null;
-                        if ($bootParamsHint !== null) {
-                            $ma->writeBySize(RegisterType::ESI, $bootParamsHint, $ptrSize * 8);
-                        }
-                        $ma->writeBySize(RegisterType::EAX, 0, $ptrSize * 8);
-                        $runtime->memory()->setOffset($fastReturn);
-                        $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
-                        if ($this->linuxKernelFastBootLogCount < 20) {
-                            $runtime->option()->logger()->warning(sprintf(
-                                'FAST_KERNEL_FORCE_SKIP: return=0x%08X sp=0x%08X new_sp=0x%08X',
-                                $fastReturn & 0xFFFFFFFF,
-                                $sp & 0xFFFFFFFF,
-                                $newSp & 0xFFFFFFFF,
-                            ));
-                            $this->linuxKernelFastBootLogCount++;
-                        }
-                        return true;
-                    }
-
-                    if ($fastReturn > 0 && !$foundFastReturn && $this->linuxKernelSkipLogCount < 5) {
-                        $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
-                        $peek = [];
-                        for ($i = 0; $i < 4; $i++) {
-                            $peek[] = sprintf('0x%08X', $this->readPointer($runtime, $sp + ($i * $ptrSize), $ptrSize) & 0xFFFFFFFF);
-                        }
-                        $runtime->option()->logger()->warning(sprintf(
-                            'FAST_KERNEL_SKIP_MISS: ip=0x%08X fast=0x%08X sp=0x%08X top=%s',
-                            $ip & 0xFFFFFFFF,
-                            $fastReturn & 0xFFFFFFFF,
-                            $sp & 0xFFFFFFFF,
-                            implode(',', $peek),
-                        ));
-                        $this->linuxKernelSkipLogCount++;
-                    }
-
-                    $currentIp = $ip;
-                    $framesUnwound = 0;
-                    $maxFrames = 6;
-
-                    while ($framesUnwound < $maxFrames) {
-                        $prolog = $this->findX86Prolog($runtime, $currentIp);
-                        if ($prolog === null) {
-                            $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
-                            $returnAddr = $this->readPointer($runtime, $sp, $ptrSize);
-                            if ($returnAddr <= 0) {
-                                break;
+                        $scanMax = $sp + 0x20000;
+                        for ($addr = $sp; $addr <= $scanMax; $addr += $ptrSize) {
+                            $candidate = $this->readPointer($runtime, $addr, $ptrSize);
+                            if ($candidate !== $fastReturn) {
+                                continue;
                             }
-                            $ma->writeBySize(RegisterType::ESP, $sp + $ptrSize, $ptrSize * 8);
-                            $ma->writeBySize(RegisterType::EAX, 0, $ptrSize * 8);
-                            $runtime->memory()->setOffset($returnAddr);
-                            $currentIp = $returnAddr;
-                            $framesUnwound++;
-                        } else {
-                            $unwind = $this->unwindKernelProlog($runtime, $kernel, $prolog);
-                            if ($unwind === null) {
-                                break;
+                            $foundFastReturn = true;
+                            $frameBase = $addr - $frameSize;
+                            if ($frameBase < $sp) {
+                                continue;
                             }
-                            $returnAddr = (int) ($unwind['return_addr'] ?? 0);
-                            $returnSlot = (int) ($unwind['return_slot'] ?? 0);
-                            $frameBase = (int) ($unwind['frame_base'] ?? 0);
-                            $pushes = $prolog['pushes'] ?? [];
-                            $locals = (int) ($prolog['locals'] ?? 0);
-                            $base = $frameBase + $locals;
                             $offset = 0;
+                            $base = $frameBase + $locals;
                             for ($i = count($pushes) - 1; $i >= 0; $i--) {
                                 $reg = $pushes[$i];
                                 $value = $this->readPointer($runtime, $base + $offset, $ptrSize);
                                 $ma->writeBySize($reg, $value, $ptrSize * 8);
                                 $offset += $ptrSize;
                             }
-                            $newSp = $returnSlot + $ptrSize;
-                            $ma->writeBySize(RegisterType::ESP, $newSp, $ptrSize * 8);
+                            $ma->writeBySize(RegisterType::ESP, $addr + $ptrSize, $ptrSize * 8);
                             $ma->writeBySize(RegisterType::EAX, 0, $ptrSize * 8);
-                            if ($returnAddr > 0) {
-                                $runtime->memory()->setOffset($returnAddr);
+                            $runtime->memory()->setOffset($fastReturn);
+                            $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
+                            if ($this->linuxKernelFastBootLogCount < 20) {
+                                $runtime->option()->logger()->warning(sprintf(
+                                    'FAST_KERNEL_SKIP: return=0x%08X',
+                                    $fastReturn & 0xFFFFFFFF,
+                                ));
+                                $this->linuxKernelFastBootLogCount++;
                             }
-                            $currentIp = $returnAddr;
-                            $framesUnwound++;
-                            if ($returnAddr <= 0) {
-                                break;
-                            }
+                            return true;
                         }
+                    }
+                }
 
-                        if ($fastReturn > 0) {
-                            if ($currentIp === $fastReturn) {
-                                $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
-                                if ($this->linuxKernelFastBootLogCount < 20) {
-                                    $runtime->option()->logger()->warning(sprintf(
-                                        'FAST_KERNEL_SKIP: return=0x%08X',
-                                        $currentIp & 0xFFFFFFFF,
-                                    ));
-                                    $this->linuxKernelFastBootLogCount++;
-                                }
-                                return true;
-                            }
-                            if ($kernelBase > 0 && $kernelEnd > $kernelBase) {
-                                if ($currentIp < $kernelBase || $currentIp >= $kernelEnd) {
-                                    break;
-                                }
-                            }
-                        } else {
+                if ($fastReturn > 0 && !$foundFastReturn && ($pushes !== [] || $locals > 0)) {
+                    $frameSize = $locals + (count($pushes) * $ptrSize);
+                    $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
+                    $newSp = $sp + $frameSize + $ptrSize;
+                    if ($newSp > $sp) {
+                        $ma->writeBySize(RegisterType::ESP, $newSp, $ptrSize * 8);
+                    }
+                    $bootParamsHint = $kernel['boot_params_hint'] ?? null;
+                    if ($bootParamsHint !== null) {
+                        $currentBootParams = $ma->fetch(RegisterType::ESI)->asBytesBySize($ptrSize * 8);
+                        $overrideBootParams = $currentBootParams <= 0
+                            || !$this->isValidBootParams($runtime, $currentBootParams)
+                            || $this->isAddressInKernel($currentBootParams, $kernel);
+                        if ($overrideBootParams) {
+                            $ma->writeBySize(RegisterType::ESI, $bootParamsHint, $ptrSize * 8);
+                        }
+                    }
+                    $ma->writeBySize(RegisterType::EAX, 0, $ptrSize * 8);
+                    $runtime->memory()->setOffset($fastReturn);
+                    $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
+                    if ($this->linuxKernelFastBootLogCount < 20) {
+                        $runtime->option()->logger()->warning(sprintf(
+                            'FAST_KERNEL_FORCE_SKIP: return=0x%08X sp=0x%08X new_sp=0x%08X',
+                            $fastReturn & 0xFFFFFFFF,
+                            $sp & 0xFFFFFFFF,
+                            $newSp & 0xFFFFFFFF,
+                        ));
+                        $this->linuxKernelFastBootLogCount++;
+                    }
+                    return true;
+                }
+
+                if ($fastReturn > 0 && !$foundFastReturn && $this->linuxKernelSkipLogCount < 5) {
+                    $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
+                    $peek = [];
+                    for ($i = 0; $i < 4; $i++) {
+                        $peek[] = sprintf('0x%08X', $this->readPointer($runtime, $sp + ($i * $ptrSize), $ptrSize) & 0xFFFFFFFF);
+                    }
+                    $runtime->option()->logger()->warning(sprintf(
+                        'FAST_KERNEL_SKIP_MISS: ip=0x%08X fast=0x%08X sp=0x%08X top=%s',
+                        $ip & 0xFFFFFFFF,
+                        $fastReturn & 0xFFFFFFFF,
+                        $sp & 0xFFFFFFFF,
+                        implode(',', $peek),
+                    ));
+                    $this->linuxKernelSkipLogCount++;
+                }
+
+                $currentIp = $ip;
+                $framesUnwound = 0;
+                $maxFrames = 6;
+
+                while ($framesUnwound < $maxFrames) {
+                    $prolog = $this->findX86Prolog($runtime, $currentIp);
+                    if ($prolog === null) {
+                        $sp = $ma->fetch(RegisterType::ESP)->asBytesBySize($ptrSize * 8);
+                        $returnAddr = $this->readPointer($runtime, $sp, $ptrSize);
+                        if ($returnAddr <= 0) {
+                            break;
+                        }
+                        $ma->writeBySize(RegisterType::ESP, $sp + $ptrSize, $ptrSize * 8);
+                        $ma->writeBySize(RegisterType::EAX, 0, $ptrSize * 8);
+                        $runtime->memory()->setOffset($returnAddr);
+                        $currentIp = $returnAddr;
+                        $framesUnwound++;
+                    } else {
+                        $unwind = $this->unwindKernelProlog($runtime, $kernel, $prolog);
+                        if ($unwind === null) {
+                            break;
+                        }
+                        $returnAddr = (int) ($unwind['return_addr'] ?? 0);
+                        $returnSlot = (int) ($unwind['return_slot'] ?? 0);
+                        $frameBase = (int) ($unwind['frame_base'] ?? 0);
+                        $pushes = $prolog['pushes'] ?? [];
+                        $locals = (int) ($prolog['locals'] ?? 0);
+                        $base = $frameBase + $locals;
+                        $offset = 0;
+                        for ($i = count($pushes) - 1; $i >= 0; $i--) {
+                            $reg = $pushes[$i];
+                            $value = $this->readPointer($runtime, $base + $offset, $ptrSize);
+                            $ma->writeBySize($reg, $value, $ptrSize * 8);
+                            $offset += $ptrSize;
+                        }
+                        $newSp = $returnSlot + $ptrSize;
+                        $ma->writeBySize(RegisterType::ESP, $newSp, $ptrSize * 8);
+                        $ma->writeBySize(RegisterType::EAX, 0, $ptrSize * 8);
+                        if ($returnAddr > 0) {
+                            $runtime->memory()->setOffset($returnAddr);
+                        }
+                        $currentIp = $returnAddr;
+                        $framesUnwound++;
+                        if ($returnAddr <= 0) {
+                            break;
+                        }
+                    }
+
+                    if ($fastReturn > 0) {
+                        if ($currentIp === $fastReturn) {
                             $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
                             if ($this->linuxKernelFastBootLogCount < 20) {
                                 $runtime->option()->logger()->warning(sprintf(
@@ -269,6 +261,21 @@ trait UEFIEnvironmentKernelFastBoot
                             }
                             return true;
                         }
+                        if ($kernelBase > 0 && $kernelEnd > $kernelBase) {
+                            if ($currentIp < $kernelBase || $currentIp >= $kernelEnd) {
+                                break;
+                            }
+                        }
+                    } else {
+                        $this->linuxKernelImages[$handle]['fast_jump_done'] = true;
+                        if ($this->linuxKernelFastBootLogCount < 20) {
+                            $runtime->option()->logger()->warning(sprintf(
+                                'FAST_KERNEL_SKIP: return=0x%08X',
+                                $currentIp & 0xFFFFFFFF,
+                            ));
+                            $this->linuxKernelFastBootLogCount++;
+                        }
+                        return true;
                     }
                 }
             }

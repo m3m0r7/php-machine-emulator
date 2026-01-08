@@ -204,10 +204,10 @@ class UEFIEnvironment implements UEFIEnvironmentInterface
     {
         $value = getenv('PHPME_FAST_KERNEL');
         if ($value === false) {
-            return true;
+            return false;
         }
         $value = strtolower(trim((string) $value));
-        if ($value === '' || $value === '0' || $value === 'false' || $value === 'off') {
+        if ($value === '' || $value === '0' || $value === 'false' || $value === 'off' || $value === 'no') {
             return false;
         }
         return true;
