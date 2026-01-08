@@ -83,6 +83,17 @@ class BufferScreenWriter implements ScreenWriterInterface
         // Buffer mode: no visual output for fill
     }
 
+    public function scrollUpWindow(
+        int $topRow,
+        int $leftCol,
+        int $bottomRow,
+        int $rightCol,
+        int $lines,
+        int $attribute
+    ): void {
+        // Buffer mode: no visual output for scroll
+    }
+
     public function flushIfNeeded(): void
     {
         // Buffer mode: no batching needed

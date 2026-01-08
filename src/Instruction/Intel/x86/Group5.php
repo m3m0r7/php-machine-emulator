@@ -23,6 +23,7 @@ use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\UEFI\UEFIRuntimeRegistry;
 
 class Group5 implements InstructionInterface
 {
@@ -91,6 +92,16 @@ class Group5 implements InstructionInterface
                 ));
             }
 
+            $dispatcher = UEFIRuntimeRegistry::dispatcher($runtime);
+            if ($dispatcher !== null && $dispatcher->handlesTarget($target)) {
+                $runtime->memoryAccessor()->push(RegisterType::ESP, $returnRip, 64);
+                $dispatcher->dispatch($runtime, $target);
+                if (!$dispatcher->consumeSkipReturnPop()) {
+                    $runtime->memoryAccessor()->pop(RegisterType::ESP, 64);
+                }
+                return ExecutionStatus::SUCCESS;
+            }
+
             $runtime->memoryAccessor()->push(RegisterType::ESP, $returnRip, 64);
 
             if ($runtime->option()->shouldChangeOffset()) {
@@ -115,6 +126,16 @@ class Group5 implements InstructionInterface
                 'CALL to NULL pointer (0x00000000) at IP=0x%05X - possible uninitialized function pointer or failed module load',
                 $posLinear - 2
             ));
+        }
+
+        $dispatcher = UEFIRuntimeRegistry::dispatcher($runtime);
+        if ($dispatcher !== null && $dispatcher->handlesTarget($linearTarget)) {
+            $runtime->memoryAccessor()->push(RegisterType::ESP, $returnOffset, $size);
+            $dispatcher->dispatch($runtime, $linearTarget);
+            if (!$dispatcher->consumeSkipReturnPop()) {
+                $runtime->memoryAccessor()->pop(RegisterType::ESP, $size);
+            }
+            return ExecutionStatus::SUCCESS;
         }
 
         $runtime->memoryAccessor()->push(RegisterType::ESP, $returnOffset, $size);
@@ -156,6 +177,19 @@ class Group5 implements InstructionInterface
                 ));
             }
 
+            $dispatcher = UEFIRuntimeRegistry::dispatcher($runtime);
+            if ($dispatcher !== null && $dispatcher->handlesTarget($target)) {
+                $dispatcher->dispatch($runtime, $target);
+                if (!$dispatcher->consumeSkipReturnPop()) {
+                    $ma = $runtime->memoryAccessor();
+                    $returnRip = $ma->pop(RegisterType::ESP, 64)->asBytesBySize(64);
+                    if ($runtime->option()->shouldChangeOffset()) {
+                        $runtime->memory()->setOffset($returnRip);
+                    }
+                }
+                return ExecutionStatus::SUCCESS;
+            }
+
             if ($runtime->option()->shouldChangeOffset()) {
                 $runtime->memory()->setOffset($target);
             }
@@ -182,6 +216,21 @@ class Group5 implements InstructionInterface
                 'JMP to NULL pointer (0x00000000) at IP=0x%05X - possible uninitialized function pointer or failed module load',
                 $runtime->memory()->offset() - 2
             ));
+        }
+
+        $dispatcher = UEFIRuntimeRegistry::dispatcher($runtime);
+        if ($dispatcher !== null && $dispatcher->handlesTarget($target)) {
+            $dispatcher->dispatch($runtime, $target);
+            if (!$dispatcher->consumeSkipReturnPop()) {
+                $ma = $runtime->memoryAccessor();
+                $returnOffset = $ma->pop(RegisterType::ESP, $size)->asBytesBySize($size);
+                if ($runtime->option()->shouldChangeOffset()) {
+                    $cs = $ma->fetch(RegisterType::CS)->asByte();
+                    $linear = $this->linearCodeAddress($runtime, $cs, $returnOffset, $size);
+                    $runtime->memory()->setOffset($linear);
+                }
+            }
+            return ExecutionStatus::SUCCESS;
         }
 
         if ($runtime->option()->shouldChangeOffset()) {

@@ -17,6 +17,8 @@ class ApicState
     private int $initialCount = 0;
     private int $currentCount = 0;
     private int $divide = 0;
+    private float $lastUpdateTimeSec = 0.0;
+    private float $fractionalTicks = 0.0;
     private array $lapicRegs = [];
 
     // IOAPIC
@@ -24,6 +26,7 @@ class ApicState
     private array $ioapicRegs = [];
     private array $pending = [];
     private ?int $inService = null;
+    private const TIMER_BASE_HZ = 1000000.0;
     private const IOAPIC_ID = 0x17;
     private const IOAPIC_VERSION = 0x11; // 24 redirection entries
     private array $irr = [0, 0, 0, 0, 0, 0, 0, 0]; // 256 bits
@@ -111,7 +114,37 @@ class ApicState
         $this->currentCount = $val;
     }
 
-    public function tick(?callable $deliverInterrupt): void
+    public function advanceFromHostTime(?callable $deliverInterrupt = null): void
+    {
+        if (!$this->apicEnabled) {
+            return;
+        }
+
+        $now = microtime(true);
+        if ($this->lastUpdateTimeSec <= 0.0) {
+            $this->lastUpdateTimeSec = $now;
+            return;
+        }
+
+        $elapsed = $now - $this->lastUpdateTimeSec;
+        if ($elapsed <= 0.0) {
+            return;
+        }
+        $this->lastUpdateTimeSec = $now;
+
+        $divider = $this->apicTimerDivider();
+        $hz = self::TIMER_BASE_HZ / max(1, $divider);
+        $this->fractionalTicks += $elapsed * $hz;
+        $ticks = (int) floor($this->fractionalTicks);
+        if ($ticks <= 0) {
+            return;
+        }
+        $this->fractionalTicks -= $ticks;
+
+        $this->tick($deliverInterrupt, $ticks);
+    }
+
+    public function tick(?callable $deliverInterrupt, int $ticks = 1): void
     {
         if (!$this->apicEnabled) {
             return;
@@ -120,22 +153,57 @@ class ApicState
         if (($this->lvtTimer & 0x10000) !== 0) {
             return;
         }
-        if ($this->currentCount === 0 || $this->initialCount === 0) {
+        if ($this->initialCount === 0) {
             return;
         }
-        $this->currentCount--;
-        if ($this->currentCount === 0) {
+
+        $remaining = max(1, $ticks);
+        while ($remaining > 0) {
+            if ($this->currentCount <= 0) {
+                $this->currentCount = $this->initialCount;
+                if ($this->currentCount <= 0) {
+                    return;
+                }
+            }
+
+            if ($remaining < $this->currentCount) {
+                $this->currentCount -= $remaining;
+                return;
+            }
+
+            $remaining -= $this->currentCount;
+            $this->currentCount = 0;
+
             $vector = $this->lvtTimer & 0xFF;
             if ($deliverInterrupt) {
                 $deliverInterrupt($vector);
             } else {
                 $this->queueVector($vector);
             }
+
             // Periodic if bit 17 set
             if (($this->lvtTimer & (1 << 17)) !== 0) {
                 $this->currentCount = $this->initialCount;
+            } else {
+                return;
             }
         }
+    }
+
+    private function apicTimerDivider(): int
+    {
+        $divide = $this->divide & 0xF;
+        return match ($divide) {
+            0b0000 => 2,
+            0b0001 => 4,
+            0b0010 => 8,
+            0b0011 => 16,
+            0b1000 => 32,
+            0b1001 => 64,
+            0b1010 => 128,
+            0b1011 => 1,
+            default => 1,
+        };
     }
 
     public function pendingVector(): ?int

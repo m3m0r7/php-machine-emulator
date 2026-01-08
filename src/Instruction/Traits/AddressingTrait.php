@@ -9,6 +9,7 @@ use PHPMachineEmulator\Instruction\Stream\ModRegRMInterface;
 use PHPMachineEmulator\Instruction\Stream\ModType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Stream\MemoryStreamInterface;
+use PHPMachineEmulator\Util\UInt64;
 
 /**
  * Trait for address calculation operations.
@@ -180,6 +181,10 @@ trait AddressingTrait
         $indexVal32 = $indexVal & 0xFFFFFFFF;
         $scaledIndex = ($indexVal32 * $scale) & 0xFFFFFFFF;
 
+        if (is_float($disp)) {
+            $disp = (int) $disp;
+        }
+
         // Perform addition with 32-bit wraparound
         $offset = ($baseVal32 + $scaledIndex + $disp) & $mask;
 
@@ -197,6 +202,7 @@ trait AddressingTrait
         $mode = ModType::from($modRegRM->mode());
         $rm = $modRegRM->registerOrMemoryAddress();
         $cpu = $runtime->context()->cpu();
+        $linearMask = 0x0000FFFFFFFFFFFF;
         $rexB = $cpu->rexB();
         $rexX = $cpu->rexX();
         $disp = 0;
@@ -269,10 +275,13 @@ trait AddressingTrait
             // mod=00, rm=5 in 64-bit mode is RIP-relative addressing
             if ($mode === ModType::NO_DISPLACEMENT_OR_16BITS_DISPLACEMENT && $rm === 0b101) {
                 $disp = $memory->signedDword();
+                if (is_float($disp)) {
+                    $disp = (int) $disp;
+                }
                 // RIP-relative: address = RIP + disp32
-                $rip = $memory->offset();
-                // Masking with 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit wrap.
-                $offset = ($rip + $disp) & -1;
+                $rip = UInt64::of((int) $memory->offset());
+                $dispU = UInt64::of($disp);
+                $offset = $rip->add($dispU)->and($linearMask)->toInt();
                 return [$offset, RegisterType::DS];
             } else {
                 $baseVal = $regVal64($runtime, $rm, $rexB);
@@ -280,8 +289,25 @@ trait AddressingTrait
             }
         }
 
-        // Masking with 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit wrap.
-        $offset = ($baseVal + $indexVal * $scale + $disp) & -1;
+        if (is_float($baseVal)) {
+            $baseVal = (int) $baseVal;
+        }
+        if (is_float($indexVal)) {
+            $indexVal = (int) $indexVal;
+        }
+        if (is_float($disp)) {
+            $disp = (int) $disp;
+        }
+
+        $baseU = UInt64::of($baseVal);
+        $indexU = UInt64::of($indexVal);
+        $dispU = UInt64::of($disp);
+
+        if ($scale > 1) {
+            $indexU = $indexU->mul($scale);
+        }
+
+        $offset = $baseU->add($indexU)->add($dispU)->and($linearMask)->toInt();
 
         return [$offset, $defaultSegment];
     }

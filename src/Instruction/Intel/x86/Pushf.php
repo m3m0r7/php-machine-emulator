@@ -47,6 +47,10 @@ class Pushf implements InstructionInterface
             }
         }
 
+        if ($size >= 32 && $cpu->idFlag()) {
+            $flags |= (1 << 21);
+        }
+
         $runtime
             ->memoryAccessor()
             ->push(RegisterType::ESP, $flags, $size);

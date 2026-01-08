@@ -14,7 +14,7 @@ class ApicTicker implements TickerInterface
     public function tick(RuntimeInterface $runtime): void
     {
         $apic = $runtime->context()->cpu()->apicState();
-        $apic->tick(null);
+        $apic->advanceFromHostTime(null);
     }
 
     public function interval(): int

@@ -23,7 +23,7 @@ class Machine implements MachineInterface
     ) {
         // Use Extended variants which include PHPBIOSCall custom instruction
         $this->runtimes[ArchitectureType::Intel_x86->value] = [
-            Intel\x86Extended::class,
+            Intel\X86Extended::class,
             Intel\VideoInterrupt::class,
             Intel\MemoryAccessorObserverCollection::class,
             Intel\ServiceCollection::class,
@@ -31,7 +31,7 @@ class Machine implements MachineInterface
         ];
 
         $this->runtimes[ArchitectureType::Intel_x86_64->value] = [
-            Intel\x86_64Extended::class,
+            Intel\X8664Extended::class,
             Intel\VideoInterrupt::class,
             Intel\MemoryAccessorObserverCollection::class,
             Intel\ServiceCollection::class,

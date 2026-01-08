@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PHPMachineEmulator\Instruction\Intel\PatternedInstruction;
 
+use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\LogicBoard\Debug\PatternDebugConfig;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 
@@ -67,11 +68,16 @@ class PatternedInstructionsList
         // The GRUB/LZMA range-decoder pattern is high-impact but correctness-sensitive.
         // Keep it behind a config flag to allow quick disable if regressions appear.
         if ($this->debugConfig->enableLzmaPattern) {
+            $this->register(new LzmaLiteralDecodeMatchPattern($this->debugConfig->traceHotPatterns));
+            $this->register(new LzmaBitTreeDecodePattern($this->debugConfig->traceHotPatterns));
+            $this->register(new LzmaBitTreeDecodeBytePattern($this->debugConfig->traceHotPatterns));
             $this->register(new LzmaRangeDecodeBitPattern($this->debugConfig->traceHotPatterns));
         }
         $this->register(new UdivmoddiPattern($this->debugConfig->traceHotPatterns));
         $this->register(new MemsetDwordLoopPattern($this->debugConfig->traceHotPatterns));
+        $this->register(new MemsetBytePairLoopPattern($this->debugConfig->traceHotPatterns));
         $this->register(new MemmoveBackwardLoopPattern($this->debugConfig->traceHotPatterns));
+        $this->register(new MemmoveForwardLoopPattern($this->debugConfig->traceHotPatterns));
         $this->register(new MovsbLoopPattern($this->debugConfig->traceHotPatterns));
         $this->register(new StrcpyLoopPattern($this->debugConfig->traceHotPatterns));
         $this->register(new ShrdShlPattern());
@@ -155,8 +161,13 @@ class PatternedInstructionsList
         // Read instruction bytes
         $memory->setOffset($ip);
         $bytes = [];
-        for ($i = 0; $i < self::PATTERN_READ_BYTES && !$memory->isEOF(); $i++) {
-            $bytes[] = $memory->byte();
+        try {
+            for ($i = 0; $i < self::PATTERN_READ_BYTES && !$memory->isEOF(); $i++) {
+                $bytes[] = $memory->byte();
+            }
+        } catch (FaultException $e) {
+            $memory->setOffset($savedOffset);
+            return null;
         }
         $memory->setOffset($savedOffset);
 

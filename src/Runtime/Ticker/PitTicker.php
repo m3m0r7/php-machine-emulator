@@ -37,6 +37,11 @@ class PitTicker implements TickerInterface
 
     public function tick(RuntimeInterface $runtime): void
     {
+        $pic = $runtime->context()->cpu()->picState();
+        $this->pit->advanceFromHostTime(static function () use ($pic): void {
+            $pic->raiseIrq0();
+        });
+
         // Advance BIOS tick counter in (approximate) real time so bootloader timeouts
         // behave correctly even when the emulator executes slowly in PHP.
         $now = microtime(true);

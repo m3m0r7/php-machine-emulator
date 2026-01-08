@@ -42,6 +42,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
     private ?bool $stopOnRspZero = null;
     private ?bool $stopOnStackUnderflow = null;
     private ?int $stopOnRspBelowThreshold = null;
+    private int $stackPointerWarnCount = 0;
 
     /** @var FFI\CData Pointer to the Rust MemoryAccessor */
     private FFI\CData $handle;
@@ -390,6 +391,36 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         }
     }
 
+    private function maybeLogStackPointer(int $value): void
+    {
+        if ($this->stackPointerWarnCount >= 20) {
+            return;
+        }
+
+        $max = $this->runtime->memory()->logicalMaxMemorySize();
+        if ($value >= 0 && $value < $max) {
+            return;
+        }
+
+        $ip = $this->runtime->memory()->offset();
+        $cs = $this->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+        $executor = $this->runtime->architectureProvider()->instructionExecutor();
+        $last = $executor->lastInstruction();
+        $mnemonic = $last === null
+            ? 'n/a'
+            : (preg_replace('/^.+\\(.+?)$/', '$1', get_class($last)) ?? 'n/a');
+
+        $this->runtime->option()->logger()->warning(sprintf(
+            'STACK_PTR_OOR: esp=0x%08X max=0x%08X ip=0x%08X cs=0x%04X insn=%s',
+            $value & 0xFFFFFFFF,
+            $max & 0xFFFFFFFF,
+            $ip & 0xFFFFFFFF,
+            $cs,
+            $mnemonic,
+        ));
+        $this->stackPointerWarnCount++;
+    }
+
     private function maybeLogMsDosBootWrite(string $kind, int $address, int $width, int $value): void
     {
         if (!$this->shouldWatchMsDosBoot()) {
@@ -704,18 +735,33 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         if ($registerType instanceof RegisterType) {
             $cpu = $this->runtime->context()->cpu();
             if (
-                !$cpu->isProtectedMode()
-                && in_array($registerType, [
-                    RegisterType::ES,
-                    RegisterType::CS,
-                    RegisterType::SS,
-                    RegisterType::DS,
-                    RegisterType::FS,
-                    RegisterType::GS,
+                in_array($registerType, [
+                RegisterType::ES,
+                RegisterType::CS,
+                RegisterType::SS,
+                RegisterType::DS,
+                RegisterType::FS,
+                RegisterType::GS,
                 ], true)
             ) {
-                $selector = $value ?? 0;
-                if (!$cpu->hasExtendedSegmentLimit($registerType)) {
+                $selector = ($value ?? 0) & 0xFFFF;
+                if ($cpu->isProtectedMode()) {
+                    $descriptor = $this->segmentDescriptor($selector);
+                    if ($descriptor !== null) {
+                        $cpu->cacheSegmentDescriptor($registerType, $descriptor);
+                    } else {
+                        $cpu->cacheSegmentDescriptor($registerType, [
+                            'base' => 0,
+                            'limit' => 0,
+                            'present' => false,
+                            'type' => 0,
+                            'system' => false,
+                            'executable' => false,
+                            'dpl' => 0,
+                            'default' => 16,
+                        ]);
+                    }
+                } elseif (!$cpu->hasExtendedSegmentLimit($registerType)) {
                     $cpu->cacheSegmentDescriptor($registerType, [
                         'base' => ((($selector & 0xFFFF) << 4) & 0xFFFFF),
                         'limit' => 0xFFFF,
@@ -761,6 +807,7 @@ class RustMemoryAccessor implements MemoryAccessorInterface
         }
 
         if ($registerType instanceof RegisterType && $registerType === RegisterType::ESP) {
+            $this->maybeLogStackPointer((int) ($value ?? 0));
             if ($this->stopOnRspZero === null) {
                 $this->stopOnRspZero = $this->runtime->logicBoard()->debug()->watch()->stopOnRspZero;
             }

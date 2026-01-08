@@ -250,9 +250,8 @@ class KeyboardController
                 break;
         }
 
-        if (!$this->expectingCommandByte && !$this->expectingOutputPort && !$this->expectingOutputBuffer && !$this->expectingMouseCommand) {
-            $this->inputBufferFull = false;
-        }
+        // Clear IBF immediately to avoid busy-wait loops on controllers we don't model.
+        $this->inputBufferFull = false;
     }
 
     public function writeDataPort(int $value, RuntimeInterface $runtime): void

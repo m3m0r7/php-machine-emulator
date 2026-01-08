@@ -10,6 +10,7 @@ use PHPMachineEmulator\Instruction\InstructionInterface;
 use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
+use PHPMachineEmulator\Util\Tsc;
 
 /**
  * RDTSC (0x0F 0x31)
@@ -27,8 +28,8 @@ class Rdtsc implements InstructionInterface
     public function process(RuntimeInterface $runtime, array $opcodes): ExecutionStatus
     {
         $opcodes = $opcodes = $this->parsePrefixes($runtime, $opcodes);
-        // Use host microtime as a monotonic-ish counter.
-        $tsc = (int) (microtime(true) * 1_000_000);
+        // Use a monotonic counter so guest probes observe progress.
+        $tsc = Tsc::read();
         $low = $tsc & 0xFFFFFFFF;
         $high = ($tsc >> 32) & 0xFFFFFFFF;
 

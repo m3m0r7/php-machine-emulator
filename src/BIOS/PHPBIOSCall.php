@@ -35,7 +35,7 @@ use PHPMachineEmulator\Instruction\RegisterType;
  *   Use:        0F FF 13 CF (PHPBIOS 13h + IRET)
  *
  * This class contains all BIOS interrupt handling logic and is also called
- * by Int_ when IVT points to default BIOS handlers.
+ * by IntInstruction when IVT points to default BIOS handlers.
  */
 class PHPBIOSCall implements InstructionInterface
 {
@@ -91,7 +91,7 @@ class PHPBIOSCall implements InstructionInterface
      * Handle a BIOS interrupt directly without IVT lookup.
      * This is the core BIOS handling logic used by both:
      * - 0F FF xx instruction (direct call from trampolines)
-     * - Int_ when IVT points to default BIOS handlers
+     * - IntInstruction when IVT points to default BIOS handlers
      *
      * @return ExecutionStatus The execution status
      */

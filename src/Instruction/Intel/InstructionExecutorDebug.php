@@ -989,6 +989,39 @@ final class InstructionExecutorDebug
         ));
     }
 
+
+    private function dumpCodeOnStop(RuntimeInterface $runtime, int $ip): void
+    {
+        $length = $this->dumpCodeOnIpStopLength;
+        if ($length <= 0) {
+            return;
+        }
+
+        $before = $this->dumpCodeOnIpStopBefore;
+        $start = ($ip & 0xFFFFFFFF) - $before;
+        if ($start < 0) {
+            $start = 0;
+        }
+
+        $memory = $runtime->memory();
+        $saved = $memory->offset();
+        $memory->setOffset($start);
+        $bytes = [];
+        for ($i = 0; $i < $length && !$memory->isEOF(); $i++) {
+            $bytes[] = $memory->byte();
+        }
+        $memory->setOffset($saved);
+
+        $hex = implode(' ', array_map(static fn (int $b): string => sprintf('%02X', $b & 0xFF), $bytes));
+        $runtime->option()->logger()->warning(sprintf(
+            'IP_DUMP: ip=0x%08X start=0x%08X len=%d bytes=%s',
+            $ip & 0xFFFFFFFF,
+            $start & 0xFFFFFFFF,
+            $length,
+            $hex,
+        ));
+    }
+
     private function maybeStopAfter(RuntimeInterface $runtime): void
     {
         $logSampleReport = function () use ($runtime): void {
@@ -1026,6 +1059,7 @@ final class InstructionExecutorDebug
                     $this->stopAfterInsns,
                     $runtime->memory()->offset() & 0xFFFFFFFF,
                 ));
+                $this->dumpCodeOnStop($runtime, $runtime->memory()->offset());
                 $logSampleReport();
                 throw new HaltException('Stopped by PHPME_STOP_AFTER_INSNS');
             }
@@ -1054,6 +1088,7 @@ final class InstructionExecutorDebug
                 $this->stopAfterSecs,
                 $runtime->memory()->offset() & 0xFFFFFFFF,
             ));
+            $this->dumpCodeOnStop($runtime, $runtime->memory()->offset());
             $logSampleReport();
             throw new HaltException('Stopped by PHPME_STOP_AFTER_SECS');
         }

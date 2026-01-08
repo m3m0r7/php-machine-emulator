@@ -152,8 +152,8 @@ trait DiskCHS
         $addressSize = $runtime->context()->cpu()->addressSize();
         $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
 
-        $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize($addressSize) & $offsetMask;
         $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
+        $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize($addressSize) & $offsetMask;
 
         $cx = $runtime->memoryAccessor()->fetch(RegisterType::ECX);
         $ch = $cx->asHighBit();  // cylinder low
@@ -373,7 +373,59 @@ trait DiskCHS
             return;
         }
 
-        // Write is a no-op for read-only media, but we accept the data
+        $addressSize = $runtime->context()->cpu()->addressSize();
+        $offsetMask = $addressSize === 32 ? 0xFFFFFFFF : 0xFFFF;
+
+        $bx = $runtime->memoryAccessor()->fetch(RegisterType::EBX)->asBytesBySize($addressSize) & $offsetMask;
+        $es = $runtime->memoryAccessor()->fetch(RegisterType::ES)->asByte();
+
+        $cx = $runtime->memoryAccessor()->fetch(RegisterType::ECX);
+        $ch = $cx->asHighBit();  // cylinder low
+        $cl = $cx->asLowBit();   // sector + cylinder high bits
+
+        $dx = $runtime->memoryAccessor()->fetch(RegisterType::EDX);
+        $dh = $dx->asHighBit();  // head
+        $dl = $dx->asLowBit();   // drive
+        $mirrorB = $this->shouldMirrorFloppyDriveB($runtime, $dl);
+
+        $cylinder = (($cl >> 6) & 0x03) << 8;
+        $cylinder |= $ch;
+        $sector = $cl & 0x3F;
+        $head = $dh;
+
+        if ($sector === 0) {
+            if ($mirrorB) {
+                $sector = 1;
+            } else {
+                $this->fail($runtime, 0x01);
+                return;
+            }
+        }
+
+        [$cylinders, $headsPerCylinder, $sectorsPerTrack] = $this->getDriveGeometry($runtime, $dl);
+        if ($head >= $headsPerCylinder || $sector > $sectorsPerTrack || $cylinder >= $cylinders) {
+            if (!$mirrorB) {
+                $this->fail($runtime, 0x01);
+                return;
+            }
+        }
+
+        if ($this->isCdromDrive($runtime, $dl)) {
+            $this->fail($runtime, 0x03);
+            return;
+        }
+
+        $bytesPerSector = MediaContext::SECTOR_SIZE;
+        $lba = ($cylinder * $headsPerCylinder + $head) * $sectorsPerTrack + ($sector - 1);
+        $bytes = $sectorsToWrite * $bytesPerSector;
+        $bufferAddress = $this->segmentRegisterLinearAddress($runtime, RegisterType::ES, $bx, $addressSize);
+
+        $data = $this->readBlockFromMemory($runtime, $bufferAddress, $bytes);
+        $written = $this->writeToBootStream($runtime, $lba * $bytesPerSector, $data);
+        if (!$written) {
+            $runtime->option()->logger()->debug('INT 13h WRITE CHS: write skipped (read-only or out-of-range)');
+        }
+
         $runtime->memoryAccessor()->writeToLowBit(RegisterType::EAX, $sectorsToWrite);
         $this->setDiskStatus($runtime, 0x00);
     }

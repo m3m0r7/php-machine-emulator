@@ -162,6 +162,12 @@ class RepPrefix implements InstructionInterface
             if ($isBulkOptimizable && $lastOpcodes !== null && $this->hasLegacyPrefix($lastOpcodes)) {
                 $isBulkOptimizable = false;
             }
+            if ($isBulkOptimizable) {
+                $cpu = $runtime->context()->cpu();
+                if ($cpu->isProtectedMode() && !$cpu->isPagingEnabled()) {
+                    $isBulkOptimizable = false;
+                }
+            }
 
             // Bulk optimization - only for instructions that do not depend on ZF (MOVS/STOS/LODS/INS/OUTS).
             // CMPS/SCAS are handled in the standard per-iteration loop to preserve exact REP semantics.

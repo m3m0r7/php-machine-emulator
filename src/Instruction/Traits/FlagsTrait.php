@@ -53,6 +53,9 @@ trait FlagsTrait
         if ($runtime->context()->cpu()->nt()) {
             $flags |= (1 << 14);
         }
+        if ($runtime->context()->cpu()->idFlag()) {
+            $flags |= (1 << 21);
+        }
         return $flags & 0xFFFFFFFF;
     }
 
@@ -80,6 +83,9 @@ trait FlagsTrait
         $ma->setInterruptFlag(($flags & (1 << 9)) !== 0);
         $runtime->context()->cpu()->setIopl(($flags >> 12) & 0x3);
         $runtime->context()->cpu()->setNt(($flags & (1 << 14)) !== 0);
+        if ($size >= 32) {
+            $runtime->context()->cpu()->setIdFlag(($flags & (1 << 21)) !== 0);
+        }
     }
 
     /**

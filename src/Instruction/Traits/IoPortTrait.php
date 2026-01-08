@@ -6,6 +6,7 @@ namespace PHPMachineEmulator\Instruction\Traits;
 
 use PHPMachineEmulator\Exception\FaultException;
 use PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\Ata;
+use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Ata as AtaPort;
 use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Cmos as CmosPort;
 use PHPMachineEmulator\Instruction\Intel\x86\IoPort\Kbc as KbcPort;
@@ -34,6 +35,14 @@ trait IoPortTrait
     private ?array $ioPortPciConfigSpace = null;
     /** @var array<string, mixed>|null */
     private ?array $ioPortVgaState = null;
+    /** @var array<string, int>|null */
+    private ?array $ioPortAtaBases = null;
+    /** @var array<string, bool> */
+    private array $ioPortUnknownRead = [];
+    /** @var array<string, bool> */
+    private array $ioPortUnknownWrite = [];
+    private int $ioPortSystemPortB = 0;
+    private bool $ioPortSystemPortBToggle = false;
 
     /**
      * Assert I/O permission for the given port.
@@ -131,28 +140,38 @@ trait IoPortTrait
         if ($port === KbcPort::STATUS_COMMAND->value) {
             return $kbd->pollAndReadStatus($runtime);
         }
+        if ($port === 0xF700) {
+            return $kbd->readData($runtime);
+        }
+        if ($port === 0xF701) {
+            return $kbd->pollAndReadStatus($runtime);
+        }
 
         // ATA/IDE
-        if (AtaPort::isDataPort($port)) {
-            if ($width === 32) {
-                $lo = $ata->readDataWord($port);
-                $hi = $ata->readDataWord($port);
-                return (($hi & 0xFFFF) << 16) | ($lo & 0xFFFF);
+        $ataInfo = $this->resolveAtaPort($port);
+        if ($ataInfo !== null) {
+            $ataPort = $ataInfo['port'];
+            if ($ataInfo['kind'] === 'bus') {
+                return $ata->readBusMaster($ataPort, $ataInfo['secondary']);
             }
-            if ($width === 16) {
-                return $ata->readDataWord($port);
+            if (AtaPort::isDataPort($ataPort)) {
+                if ($width === 32) {
+                    $lo = $ata->readDataWord($ataPort);
+                    $hi = $ata->readDataWord($ataPort);
+                    return (($hi & 0xFFFF) << 16) | ($lo & 0xFFFF);
+                }
+                if ($width === 16) {
+                    return $ata->readDataWord($ataPort);
+                }
+                // Match QEMU: 8-bit reads consume a word and return the low byte.
+                return $ata->readDataWord($ataPort) & 0xFF;
             }
-            // Match QEMU: 8-bit reads consume a word and return the low byte.
-            return $ata->readDataWord($port) & 0xFF;
-        }
-        if (AtaPort::isStatusPort($port)) {
-            return $ata->readStatus($port);
-        }
-        if (AtaPort::isRegisterPort($port)) {
-            return $ata->readRegister($port);
-        }
-        if (AtaPort::isBusMasterPort($port)) {
-            return $ata->readBusMaster($port);
+            if (AtaPort::isStatusPort($ataPort)) {
+                return $ata->readStatus($ataPort);
+            }
+            if (AtaPort::isRegisterPort($ataPort)) {
+                return $ata->readRegister($ataPort);
+            }
         }
 
         // PIC
@@ -177,6 +196,16 @@ trait IoPortTrait
         // System Control (A20 gate)
         if ($port === SystemControlPort::PORT_A->value) {
             return $runtime->context()->cpu()->isA20Enabled() ? 0x02 : 0x00;
+        }
+
+        // System Control Port B (0x61) - speaker/timer latch
+        if ($port === 0x61) {
+            $value = $this->ioPortSystemPortB & 0xDF;
+            if ($this->ioPortSystemPortBToggle) {
+                $value |= 0x20;
+            }
+            $this->ioPortSystemPortBToggle = !$this->ioPortSystemPortBToggle;
+            return $value & 0xFF;
         }
 
         // PCI Configuration
@@ -235,7 +264,22 @@ trait IoPortTrait
             return 0;
         }
 
-        return 0;
+        $key = sprintf('%04X:%d', $port, $width);
+        if (!isset($this->ioPortUnknownRead[$key])) {
+            $this->ioPortUnknownRead[$key] = true;
+            $ip = $runtime->memory()->offset() & 0xFFFFFFFF;
+            $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+            $runtime->option()->logger()->warning(sprintf(
+                'UNHANDLED IN port 0x%04X (%d-bit) ip=0x%08X cs=0x%04X',
+                $port,
+                $width,
+                $ip,
+                $cs,
+            ));
+        }
+
+        $default = $width === 8 ? 0xFF : ($width === 16 ? 0xFFFF : 0xFFFFFFFF);
+        return $default;
     }
 
     /**
@@ -285,6 +329,12 @@ trait IoPortTrait
             return;
         }
 
+        // System Control Port B (0x61) - speaker/timer latch
+        if ($port === 0x61) {
+            $this->ioPortSystemPortB = $value & 0xFF;
+            return;
+        }
+
         // PCI Configuration
         if ($port === PciPort::CONFIG_ADDRESS->value) {
             $this->ioPortPciConfigAddr = $value;
@@ -300,25 +350,29 @@ trait IoPortTrait
         }
 
         // ATA/IDE
-        if (AtaPort::isDataPort($port)) {
-            if ($width === 32) {
-                $ata->writeDataWord($port, $value & 0xFFFF);
-                $ata->writeDataWord($port, ($value >> 16) & 0xFFFF);
+        $ataInfo = $this->resolveAtaPort($port);
+        if ($ataInfo !== null) {
+            $ataPort = $ataInfo['port'];
+            if ($ataInfo['kind'] === 'bus') {
+                $ata->writeBusMaster($ataPort, $value, $ataInfo['secondary']);
                 return;
             }
-            if ($width === 16) {
-                $ata->writeDataWord($port, $value);
+            if (AtaPort::isDataPort($ataPort)) {
+                if ($width === 32) {
+                    $ata->writeDataWord($ataPort, $value & 0xFFFF);
+                    $ata->writeDataWord($ataPort, ($value >> 16) & 0xFFFF);
+                    return;
+                }
+                if ($width === 16) {
+                    $ata->writeDataWord($ataPort, $value);
+                    return;
+                }
                 return;
             }
-            return;
-        }
-        if (AtaPort::isWritableRegisterPort($port)) {
-            $ata->writeRegister($port, $value);
-            return;
-        }
-        if (AtaPort::isBusMasterPort($port)) {
-            $ata->writeBusMaster($port, $value);
-            return;
+            if (AtaPort::isWritableRegisterPort($ataPort)) {
+                $ata->writeRegister($ataPort, $value);
+                return;
+            }
         }
 
         // VGA writes
@@ -405,12 +459,114 @@ trait IoPortTrait
             $kbd->writeDataPort($value, $runtime);
             return;
         }
+        if ($port === 0xF701) {
+            $kbd->writeCommand($value, $runtime);
+            return;
+        }
+        if ($port === 0xF700) {
+            $kbd->writeDataPort($value, $runtime);
+            return;
+        }
 
         // CMOS/RTC
         if ($port === CmosPort::ADDRESS->value) {
             $cmos->writeIndex($value & 0xFF);
             return;
         }
+
+        $key = sprintf('%04X:%d', $port, $width);
+        if (!isset($this->ioPortUnknownWrite[$key])) {
+            $this->ioPortUnknownWrite[$key] = true;
+            $ip = $runtime->memory()->offset() & 0xFFFFFFFF;
+            $cs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+            $runtime->option()->logger()->warning(sprintf(
+                'UNHANDLED OUT port 0x%04X value=0x%X (%d-bit) ip=0x%08X cs=0x%04X',
+                $port,
+                $value & 0xFFFFFFFF,
+                $width,
+                $ip,
+                $cs,
+            ));
+        }
+    }
+
+    private function resolveAtaPort(int $port): ?array
+    {
+        $bases = $this->ataBases();
+
+        if ($port >= $bases['primary_cmd'] && $port <= $bases['primary_cmd'] + 7) {
+            return [
+                'port' => AtaPort::PRIMARY_DATA->value + ($port - $bases['primary_cmd']),
+                'kind' => 'pio',
+                'secondary' => false,
+            ];
+        }
+        if ($port >= $bases['secondary_cmd'] && $port <= $bases['secondary_cmd'] + 7) {
+            return [
+                'port' => AtaPort::SECONDARY_DATA->value + ($port - $bases['secondary_cmd']),
+                'kind' => 'pio',
+                'secondary' => true,
+            ];
+        }
+        if ($port === $bases['primary_ctl'] + 2) {
+            return [
+                'port' => AtaPort::PRIMARY_ALT_STATUS->value,
+                'kind' => 'pio',
+                'secondary' => false,
+            ];
+        }
+        if ($port === $bases['secondary_ctl'] + 2) {
+            return [
+                'port' => AtaPort::SECONDARY_ALT_STATUS->value,
+                'kind' => 'pio',
+                'secondary' => true,
+            ];
+        }
+        if ($port >= $bases['bus_master'] && $port <= $bases['bus_master'] + 0x0F) {
+            $secondary = ($port - $bases['bus_master']) >= 0x08;
+            return [
+                'port' => $port,
+                'kind' => 'bus',
+                'secondary' => $secondary,
+            ];
+        }
+
+        return null;
+    }
+
+    private function ataBases(): array
+    {
+        if ($this->ioPortAtaBases !== null) {
+            return $this->ioPortAtaBases;
+        }
+
+        if ($this->ioPortPciConfigSpace === null) {
+            $this->ioPortPciConfigSpace = $this->defaultPciConfig();
+        }
+
+        $ide = $this->ioPortPciConfigSpace['0:31:1'] ?? $this->ioPortPciConfigSpace['0:1f:1'] ?? [];
+        $this->ioPortAtaBases = [
+            'primary_cmd' => $this->ioBaseFromBar($ide[0x10] ?? 0, AtaPort::PRIMARY_DATA->value),
+            'primary_ctl' => $this->ioBaseFromBar($ide[0x14] ?? 0, AtaPort::PRIMARY_ALT_STATUS->value - 2),
+            'secondary_cmd' => $this->ioBaseFromBar($ide[0x18] ?? 0, AtaPort::SECONDARY_DATA->value),
+            'secondary_ctl' => $this->ioBaseFromBar($ide[0x1C] ?? 0, AtaPort::SECONDARY_ALT_STATUS->value - 2),
+            'bus_master' => $this->ioBaseFromBar($ide[0x20] ?? 0, AtaPort::BUS_MASTER_BASE->value),
+        ];
+
+        return $this->ioPortAtaBases;
+    }
+
+    private function ioBaseFromBar(int $bar, int $fallback): int
+    {
+        $masked = $bar & 0xFFFFFFFF;
+        if ($masked === 0 || $masked === 0xFFFFFFFF) {
+            return $fallback;
+        }
+        $base = $masked & 0xFFFFFFFC;
+        if ($base === 0) {
+            return $fallback;
+        }
+        return $base;
     }
 
     /**
@@ -425,21 +581,21 @@ trait IoPortTrait
                 0x08 => 0x00060000, // class code host bridge
                 0x3C => 0x00000000, // interrupt line/pin
             ],
-            '0:1f:0' => [
+            '0:31:0' => [
                 0x00 => 0x70008086, // ISA bridge
                 0x04 => 0x00000000,
                 0x08 => 0x00060100,
                 0x3C => 0x00000000,
             ],
-            '0:1f:1' => [
+            '0:31:1' => [
                 0x00 => 0x70108086, // IDE
                 0x04 => 0x00000000,
                 0x08 => 0x00010180, // IDE controller, legacy mode
-                0x10 => 0x000001F0, // BAR0 legacy
-                0x14 => 0x000003F4, // BAR1
-                0x18 => 0x00000170, // BAR2
-                0x1C => 0x00000374, // BAR3
-                0x20 => 0x0000CC00, // BAR4 (bus master IDE, dummy)
+                0x10 => 0x000001F1, // BAR0 legacy
+                0x14 => 0x000003F5, // BAR1
+                0x18 => 0x00000171, // BAR2
+                0x1C => 0x00000375, // BAR3
+                0x20 => 0x0000CC01, // BAR4 (bus master IDE, dummy)
                 0x3C => 0x00000E01, // interrupt line 14, pin INTA
             ],
             '0:2:0' => [
@@ -491,6 +647,9 @@ trait IoPortTrait
             return;
         }
         $space[$key][$regAligned] = $newVal & 0xFFFFFFFF;
+        if ($key === '0:31:1' && in_array($regAligned, [0x10, 0x14, 0x18, 0x1C, 0x20], true)) {
+            $this->ioPortAtaBases = null;
+        }
     }
 
     // Abstract methods that must be implemented by using class/trait

@@ -9,7 +9,7 @@ namespace PHPMachineEmulator\Instruction\Intel\x86\BIOSInterrupt\TimeOfDay;
  *
  * Defines the function numbers (AH values) for INT 0x1A.
  */
-enum Function_: int
+enum TimeOfDayFunction: int
 {
     /** Read System Timer Counter (returns tick count since midnight) */
     case READ_SYSTEM_TIMER = 0x00;

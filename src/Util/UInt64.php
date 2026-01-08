@@ -99,7 +99,8 @@ class UInt64 implements UnsignedIntegerInterface
      */
     public function toInt(): int
     {
-        return self::ffiContext()->uint64_to_i64($this->low, $this->high);
+        $value = self::ffiContext()->uint64_to_i64($this->low, $this->high);
+        return (int) $value;
     }
 
     /**

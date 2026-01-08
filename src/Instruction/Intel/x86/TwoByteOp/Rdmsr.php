@@ -12,6 +12,7 @@ use PHPMachineEmulator\Instruction\Intel\x86\Instructable;
 use PHPMachineEmulator\Instruction\RegisterType;
 use PHPMachineEmulator\Runtime\RuntimeInterface;
 use PHPMachineEmulator\Util\UInt64;
+use PHPMachineEmulator\Util\Tsc;
 
 /**
  * RDMSR (0x0F 0x32)
@@ -39,7 +40,7 @@ class Rdmsr implements InstructionInterface
         $value = $cpu->readMsr($ecx);
 
         if ($ecx === 0x10) { // TSC MSR
-            $value = UInt64::of((int) (microtime(true) * 1_000_000));
+            $value = UInt64::of(Tsc::read());
         } elseif ($ecx === 0x1B) { // APIC_BASE
             $value = UInt64::of($runtime->context()->cpu()->apicState()->readMsrApicBase());
         } elseif ($ecx === 0xC0000080) { // EFER

@@ -36,12 +36,12 @@ use PHPMachineEmulator\Runtime\RuntimeInterface;
  * - 64-bit operand size with REX.W
  * - RIP-relative addressing
  */
-class x86_64 implements InstructionListInterface
+class X8664 implements InstructionListInterface
 {
     use RuntimeAwareTrait;
     use InstructionSupport;
 
-    protected x86 $x86;
+    protected X86 $x86;
     protected array $instructionList64 = [];
 
     /** @var array<InstructionInterface> Cache for findInstruction results in 64-bit mode */
@@ -49,7 +49,7 @@ class x86_64 implements InstructionListInterface
 
     public function __construct()
     {
-        $this->x86 = new x86();
+        $this->x86 = new X86();
     }
 
     public function register(): RegisterInterface
@@ -60,7 +60,7 @@ class x86_64 implements InstructionListInterface
     /**
      * Get the underlying x86 instruction list (for delegation).
      */
-    public function x86(): x86
+    public function x86(): X86
     {
         return $this->x86;
     }

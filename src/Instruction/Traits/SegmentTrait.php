@@ -50,7 +50,8 @@ trait SegmentTrait
      */
     protected function segmentOffsetAddress(RuntimeInterface $runtime, RegisterType $segment, int $offset): int
     {
-        $addressSize = $runtime->context()->cpu()->addressSize();
+        $cpu = $runtime->context()->cpu();
+        $addressSize = $cpu->addressSize();
         $offsetMask = match ($addressSize) {
             // 0xFFFFFFFFFFFFFFFF overflows to float in PHP 8.4; use -1 for 64-bit mask.
             64 => -1,
@@ -58,9 +59,14 @@ trait SegmentTrait
             default => 0xFFFF,
         };
         $linearMask = $this->linearMask($runtime);
+
+        if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
+            return ($offset & $offsetMask) & $linearMask;
+        }
+
         $selector = $runtime->memoryAccessor()->fetch($segment)->asByte();
 
-        if ($runtime->context()->cpu()->isProtectedMode()) {
+        if ($cpu->isProtectedMode()) {
             $descriptor = $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor !== null && $descriptor['present']) {
                 $effOffset = $offset & $offsetMask;
@@ -121,7 +127,24 @@ trait SegmentTrait
 
         if ($cpu->isLongMode() && !$cpu->isCompatibilityMode()) {
             if ($cpu->isProtectedMode()) {
-                $descriptor = $this->readSegmentDescriptor($runtime, $selector);
+                $cached = null;
+                $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+                if ((($selector & 0xFFFC) === ($currentCs & 0xFFFC))) {
+                    $cached = $cpu->getCachedSegmentDescriptor(RegisterType::CS);
+                    if ($cached === null) {
+                        $cached = [
+                            'base' => 0,
+                            'limit' => 0xFFFFFFFF,
+                            'present' => true,
+                            'type' => 0x0A,
+                            'system' => false,
+                            'executable' => true,
+                            'dpl' => $cpu->cpl(),
+                            'default' => 32,
+                        ];
+                    }
+                }
+                $descriptor = $cached ?? $this->readSegmentDescriptor($runtime, $selector);
                 if ($descriptor === null || !$descriptor['present']) {
                     throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
                 }
@@ -136,7 +159,24 @@ trait SegmentTrait
         }
 
         if ($cpu->isProtectedMode()) {
-            $descriptor = $this->readSegmentDescriptor($runtime, $selector);
+            $cached = null;
+            $currentCs = $runtime->memoryAccessor()->fetch(RegisterType::CS)->asByte() & 0xFFFF;
+            if ((($selector & 0xFFFC) === ($currentCs & 0xFFFC))) {
+                $cached = $cpu->getCachedSegmentDescriptor(RegisterType::CS);
+                if ($cached === null) {
+                    $cached = [
+                        'base' => 0,
+                        'limit' => 0xFFFFFFFF,
+                        'present' => true,
+                        'type' => 0x0A,
+                        'system' => false,
+                        'executable' => true,
+                        'dpl' => $cpu->cpl(),
+                        'default' => 32,
+                    ];
+                }
+            }
+            $descriptor = $cached ?? $this->readSegmentDescriptor($runtime, $selector);
             if ($descriptor === null || !$descriptor['present']) {
                 throw new FaultException(0x0B, $selector, sprintf('Code segment not present for selector 0x%04X', $selector));
             }
